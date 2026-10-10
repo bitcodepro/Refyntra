@@ -32,6 +32,7 @@ const result = await build({
     '@refyntra/application': src('application'),
     '@refyntra/infrastructure': src('infrastructure'),
     '@refyntra/adapter-vscode-providers': src('adapter-vscode-providers'),
+    '@refyntra/adapter-lsp': src('adapter-lsp'),
   },
 });
 fs.writeFileSync(path.join(root, 'dist', 'extension.meta.json'), JSON.stringify(result.metafile));

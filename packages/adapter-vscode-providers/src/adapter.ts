@@ -52,9 +52,6 @@ export {
   TS_JS_ROUTE_ID,
 } from './languages';
 
-/** Recovery for a missing provider: the Extensions view with a search query (never an automatic install). */
-export const SEARCH_EXTENSIONS_COMMAND = 'workbench.extensions.search';
-
 export interface DelegatedProviderAdapterOptions {
   /** The language family (default: TypeScript/JavaScript). */
   language?: DelegatedLanguage;
@@ -68,11 +65,7 @@ export interface DelegatedProviderAdapterOptions {
   /** The application's document tracker: its revision is the observation clock of this route. */
   tracker: DocumentTracker;
   logger: Logger;
-  /** Delays of the provider probe after a document of this language opens (languages with `missingProvider`). */
-  probeDelaysMs?: readonly number[];
 }
-
-type ProviderPresence = 'unknown' | 'present' | 'absent';
 
 interface Observation {
   epoch: string;
@@ -105,10 +98,6 @@ export class DelegatedProviderAdapter implements LanguageAdapter {
   readonly descriptor: AdapterDescriptor;
   readonly language: DelegatedLanguage;
   private readonly o: DelegatedProviderAdapterOptions;
-  private provider: ProviderPresence = 'unknown';
-  private probing = false;
-  private disposed = false;
-  private readonly probeTimers = new Set<ReturnType<typeof setTimeout>>();
   private epoch: string | undefined;
   private epochCounter = 0;
   private observationCounter = 0;
@@ -134,26 +123,14 @@ export class DelegatedProviderAdapter implements LanguageAdapter {
     return descriptorHandles(this.descriptor, uri, languageId);
   }
 
-  /** Help for a missing provider when the probe found none (only languages that declare `missingProvider`). */
-  private missing() {
-    return this.state === 'Ready' && this.provider === 'absent' ? this.language.missingProvider : undefined;
-  }
-
-  private installRecovery() {
-    const m = this.language.missingProvider;
-    return m ? [{ command: SEARCH_EXTENSIONS_COMMAND, title: m.recoveryTitle, args: [m.extensionQuery] }] : [];
-  }
-
   health(): AdapterHealth {
-    const missing = this.missing();
     return {
       adapterId: this.descriptor.adapterId,
       providerRouteId: this.descriptor.providerRouteId,
       displayName: this.descriptor.displayName,
       state: this.state,
-      ...(this.state === 'Ready' ? { message: missing ? missing.message : this.language.readyMessage } : {}),
-      ...(missing ? { reasonCode: 'ProviderMissing' } : {}),
-      recoveryActions: missing ? this.installRecovery() : [],
+      ...(this.state === 'Ready' ? { message: this.language.readyMessage } : {}),
+      recoveryActions: [],
       ...(this.epoch ? { sessionEpoch: this.epoch } : {}),
       projects: [],
       diagnostics: [],
@@ -172,7 +149,6 @@ export class DelegatedProviderAdapter implements LanguageAdapter {
 
   async restart(_reason: string): Promise<void> {
     this.restartCount += 1;
-    this.provider = 'unknown';
     this.newEpoch();
   }
 
@@ -184,56 +160,12 @@ export class DelegatedProviderAdapter implements LanguageAdapter {
     this.healthEmitter.fire(this.health());
   }
 
-  /**
-   * VS Code's providers read the editor state themselves; the tracker revision is our observation clock. For languages
-   * that need an installed extension, opening a document probes (document symbols) whether any provider answers.
-   */
-  documentEvent(e: DocumentEvent): void {
-    if (!this.language.missingProvider || e.kind !== 'open' || this.provider === 'present' || this.probing || this.disposed) return;
-    if (!this.handles(e.uri, e.languageId)) return;
-    this.probing = true;
-    const delays = this.o.probeDelaysMs ?? [1000, 5000, 15000];
-    const step = (i: number) => {
-      const t = setTimeout(() => {
-        this.probeTimers.delete(t);
-        void this.probe(e.uri).then((answered) => {
-          if (this.disposed) return;
-          if (answered || i + 1 >= delays.length) {
-            // An extension may still be activating: only the last unanswered probe reports the provider missing.
-            this.notePresence(answered);
-            this.probing = false;
-          } else step(i + 1);
-        });
-      }, delays[i]);
-      (t as { unref?: () => void }).unref?.();
-      this.probeTimers.add(t);
-    };
-    step(0);
-  }
-
-  private async probe(uri: string): Promise<boolean> {
-    try {
-      const r = await this.o.commands.executeCommand<unknown>(PROVIDER_COMMANDS.documentSymbols, this.o.values.uri(uri));
-      return r !== undefined && r !== null;
-    } catch {
-      return false;
-    }
-  }
-
-  private notePresence(answered: boolean): void {
-    if (!this.language.missingProvider) return;
-    const next: ProviderPresence = answered ? 'present' : 'absent';
-    if (next === this.provider) return;
-    this.provider = next;
-    if (!this.disposed) this.healthEmitter.fire(this.health());
-  }
+  /** VS Code's providers read the editor state themselves; the tracker revision is our observation clock. */
+  documentEvent(_e: DocumentEvent): void {}
 
   discard(_planId: string): void {}
 
   async dispose(): Promise<void> {
-    this.disposed = true;
-    for (const t of this.probeTimers) clearTimeout(t);
-    this.probeTimers.clear();
     this.epoch = undefined;
     this.state = 'NotStarted';
     this.healthEmitter.dispose();
@@ -287,7 +219,6 @@ export class DelegatedProviderAdapter implements LanguageAdapter {
 
   private async documentSymbols(uri: string, token?: CancellationToken): Promise<ProviderSymbol[] | undefined> {
     const r = await this.exec(PROVIDER_COMMANDS.documentSymbols, [this.o.values.uri(uri)], token);
-    if (r.ok) this.notePresence(r.value !== undefined && r.value !== null);
     return r.ok ? readDocumentSymbols(r.value, uri) : undefined;
   }
 
@@ -318,10 +249,7 @@ export class DelegatedProviderAdapter implements LanguageAdapter {
         seen.add(key);
         items.push({ symbol: this.symbolRef(s, b.observationId), score: matchScore(s.name, req.query.trim()) });
       }
-      if (items.length > 0) this.notePresence(true);
     }
-    const missing = this.missing();
-    if (missing && items.length === 0) throw new RouteUnavailableError('ProviderMissing', missing.message, this.installRecovery());
     items.sort((x, y) => y.score - x.score || (x.symbol!.name < y.symbol!.name ? -1 : x.symbol!.name > y.symbol!.name ? 1 : 0));
     const truncated = items.length > req.limit;
     items = items.slice(0, req.limit);
@@ -412,9 +340,7 @@ export class DelegatedProviderAdapter implements LanguageAdapter {
     });
     const L = this.language;
     const id = (verb: string) => `${L.capabilityPrefix}.${verb}`;
-    const missing = this.missing();
-    const down = missing ? { reasonCode: 'ProviderMissing', message: missing.message, recoveryActions: [...this.installRecovery(), RECOVERY_SHOW_HEALTH] } : undefined;
-    const usable = (capabilityId: string, state: Availability['state'], limitations: string[]) => (down ? item(capabilityId, 'unavailable', limitations, down) : item(capabilityId, state, limitations));
+    const usable = (capabilityId: string, state: Availability['state'], limitations: string[]) => item(capabilityId, state, limitations);
     const items = [
       usable(id('find'), 'available', [L.findLimitation, 'Not a complete index of all languages and projects.']),
       usable(id('related'), 'available', [L.findLimitation, 'Declarations and references only.']),

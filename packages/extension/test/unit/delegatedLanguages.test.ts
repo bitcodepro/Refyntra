@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AdapterHealth, HealthSummary } from '@refyntra/domain';
-import { buildHealthPage, resolveMessage } from '../../src/healthPageModel';
+import { RUSTUP_URL, buildHealthPage, resolveMessage } from '../../src/healthPageModel';
 import { capabilityTitleOf, commandForCapability } from '../../src/capabilityUi';
 import { delegatedProviderName, identifierPattern } from '../../src/renameSummary';
 import { describeReason } from '../../src/terminology';
@@ -9,7 +9,7 @@ import { describeReason } from '../../src/terminology';
 
 const route = (adapterId: string, displayName: string, over: Partial<AdapterHealth> = {}): AdapterHealth => ({
   adapterId,
-  providerRouteId: `${adapterId}.vscode-providers`,
+  providerRouteId: `${adapterId}.lsp`,
   displayName,
   state: 'Ready',
   recoveryActions: [],
@@ -21,29 +21,35 @@ const route = (adapterId: string, displayName: string, over: Partial<AdapterHeal
 const h = (a: AdapterHealth[]): HealthSummary => ({ adapters: a, workspaceTrusted: true });
 
 describe('Health page: delegated Python and Rust', () => {
-  it('ready: says which installed extension answers and that Refyntra bundles none', () => {
+  it('ready: names the bundled server; no other extension is mentioned or needed', () => {
     const m = buildHealthPage({ health: h([route('python', 'Python'), route('rust', 'Rust')]) });
     expect(m.sections.map((s) => [s.icon, s.headline])).toEqual([
-      ['ok', 'Python: ready (uses the installed Python language extension)'],
-      ['ok', 'Rust: ready (uses the installed rust-analyzer)'],
+      ['ok', 'Python: ready (Pyright, bundled with Refyntra)'],
+      ['ok', 'Rust: ready (rust-analyzer, bundled with Refyntra)'],
     ]);
-    expect(m.sections[0]!.meaning).toMatch(/Pyright, basedpyright or Jedi/);
+    expect(m.sections[0]!.meaning).toMatch(/no other extension is needed/);
     expect(m.sections.every((s) => !s.primary)).toBe(true);
+    expect(JSON.stringify(m)).not.toMatch(/extensions\.search|Install a Python language extension/);
   });
 
-  it('missing provider: a warning with one recovery that only opens the Extensions view search', () => {
-    const missing = route('rust', 'Rust', {
-      reasonCode: 'ProviderMissing',
-      message: 'No Rust language provider answered. Install the rust-analyzer extension.',
-      recoveryActions: [{ command: 'workbench.extensions.search', title: 'Install rust-analyzer', args: ['rust-analyzer'] }],
-    });
-    const m = buildHealthPage({ health: h([missing]) });
+  it('cargo missing: Rust works partially, the only fix opens rustup.rs (never installs)', () => {
+    const m = buildHealthPage({ health: h([route('rust', 'Rust', { state: 'Partial', reasonCode: 'CargoNotFound', message: 'cargo (the Rust toolchain) was not found.' })]) });
     const s = m.sections[0]!;
     expect(s.icon).toBe('warning');
-    expect(s.headline).toBe('Rust: no language provider installed');
-    expect(s.meaning).toMatch(/rust-analyzer/);
-    expect(s.primary).toMatchObject({ id: 'searchExtensions', label: 'Install rust-analyzer', arg: 'rust-analyzer' });
-    expect(resolveMessage(m, { type: 'action', key: s.primary!.key })?.id).toBe('searchExtensions');
+    expect(s.headline).toMatch(/cargo/);
+    expect(s.primary).toMatchObject({ id: 'installRust', arg: RUSTUP_URL });
+    expect(resolveMessage(m, { type: 'action', key: s.primary!.key })?.id).toBe('installRust');
+  });
+
+  it('Restricted Mode, not started, server missing for the platform', () => {
+    const m = buildHealthPage({
+      health: h([route('python', 'Python', { state: 'TrustRequired', reasonCode: 'TrustRequired' }), route('rust', 'Rust', { state: 'Failed', reasonCode: 'ServerNotFound', message: 'rust-analyzer is not bundled for this platform' })]),
+    });
+    expect(m.sections[0]).toMatchObject({ icon: 'locked', primary: { id: 'trustWorkspace' } });
+    expect(m.sections[0]!.meaning).toMatch(/Pyright/);
+    expect(m.sections[1]).toMatchObject({ icon: 'error', headline: 'Rust is not available' });
+    const n = buildHealthPage({ health: h([route('python', 'Python', { state: 'NotStarted', message: 'starts later' })]) });
+    expect(n.sections[0]!.headline).toBe('Python: starts when you open a Python file');
   });
 
   it('TS/JS keeps its own headline', () => {
@@ -72,9 +78,10 @@ describe('Actions titles and rename input', () => {
   });
 
   it('delegated rename texts name the route language', () => {
-    expect(delegatedProviderName('python.vscode-providers')).toBe('Python');
-    expect(delegatedProviderName('rust.vscode-providers')).toBe('Rust');
+    expect(delegatedProviderName('python.pyright')).toBe('Python');
+    expect(delegatedProviderName('rust.rust-analyzer')).toBe('Rust');
     expect(delegatedProviderName('typescript.vscode-providers')).toBe('TypeScript/JavaScript');
-    expect(describeReason('ProviderMissing')).toMatch(/no language provider installed/);
+    expect(describeReason('CargoNotFound')).toMatch(/cargo/);
+    expect(describeReason('ServerNotFound')).toMatch(/bundled language server/);
   });
 });

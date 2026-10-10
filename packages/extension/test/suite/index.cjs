@@ -1051,62 +1051,194 @@ scenarios['ts-absent'] = [
   ],
 ];
 
-// ---------------------------------------------------------------- delegated Python and Rust routes (no provider installed)
-const DELEGATED_ABSENT = [
-  { name: 'Python', route: 'python.vscode-providers', prefix: 'python', file: 'app/use.py', needle: 'get_order(1)', install: 'Install a Python language extension', query: 'python language server', hint: /Python language extension/ },
-  { name: 'Rust', route: 'rust.vscode-providers', prefix: 'rust', file: 'src/usage.rs', needle: 'get_order(1)', install: 'Install rust-analyzer', query: 'rust-analyzer', hint: /rust-analyzer/ },
-];
+// ---------------------------------------------------------------- Python and Rust: Refyntra's own language servers
+// The test profile has NO extension besides Refyntra (--disable-extensions also disables VS Code's built-in language
+// extensions): everything below runs on the bundled Pyright and rust-analyzer only.
+const PY_ROUTE = 'python.pyright';
+const RS_ROUTE = 'rust.rust-analyzer';
+const routeOf = (h, id) => h.adapters.find((x) => x.providerRouteId === id);
 
-scenarios['pyrust-absent'] = [
+async function waitForRelated(a, at, what) {
+  return waitFor(async () => {
+    const r = await a.engine.related(at);
+    return r.kind === 'related' && r.groups.some((g) => g.group === 'references') ? r : undefined;
+  }, what, 120000);
+}
+
+const pyRustCommon = [
   [
-    'the Python and Rust routes are registered as delegated routes next to C# and TS/JS',
+    'no other extension is installed or active: only Refyntra (no Python extension, no rust-analyzer extension)',
+    async () => {
+      await api();
+      const others = vscode.extensions.all.filter((e) => e.id !== 'refyntra.refyntra' && e.isActive && !e.packageJSON.isBuiltin);
+      assert.deepEqual(others.map((e) => e.id), []);
+      assert.ok(!vscode.extensions.getExtension('ms-python.python'), 'no Python extension');
+      assert.ok(!vscode.extensions.getExtension('rust-lang.rust-analyzer'), 'no rust-analyzer extension');
+    },
+  ],
+  [
+    'the Python and Rust routes are Refyntra-owned language-server routes next to C# and TS/JS',
     async () => {
       const a = await api();
       const h = a.health();
-      for (const d of DELEGATED_ABSENT) {
-        const r = h.adapters.find((x) => x.providerRouteId === d.route);
-        assert.ok(r, d.route);
-        assert.equal(r.displayName, d.name);
-        for (const v of ['find', 'related', 'rename', 'frameworkRelations']) assert.notEqual(a.capabilityUi(`${d.prefix}.${v}`).title, `${d.prefix}.${v}`);
+      for (const [id, name, prefix] of [[PY_ROUTE, 'Python', 'python'], [RS_ROUTE, 'Rust', 'rust']]) {
+        const r = routeOf(h, id);
+        assert.ok(r, id);
+        assert.equal(r.displayName, name);
+        assert.match(r.hostDescription, /bundled with Refyntra/);
+        for (const v of ['find', 'related', 'rename', 'frameworkRelations']) assert.notEqual(a.capabilityUi(`${prefix}.${v}`).title, `${prefix}.${v}`);
       }
-      assert.ok(csharp(h), 'the C# route is still registered');
-      assert.ok(tsRoute(h), 'the TS/JS route is still registered');
+      assert.ok(csharp(h));
+      assert.ok(tsRoute(h));
     },
   ],
-  ...DELEGATED_ABSENT.map((d) => [
-    `no ${d.name} provider installed: Related, Rename, Find and Actions name the missing extension; Health offers the Extensions search`,
+];
+
+scenarios['pyrust-restricted'] = [
+  ...pyRustCommon,
+  [
+    'Restricted Mode: opening Python and Rust files starts no language server; features explain TrustRequired',
     async () => {
       const a = await api();
-      const { doc, at } = await tsPosition(d.file, d.needle, 2);
-      await vscode.window.showTextDocument(doc);
-      assert.ok(a.engine.handlesDocument(doc.uri.toString(), doc.languageId), `${d.file} is routed to ${d.name}`);
-      const rel = await a.engine.related(at);
-      assert.equal(rel.kind, 'unavailable', JSON.stringify(rel));
-      assert.equal(rel.reasonCode, 'ProviderUnavailable');
-      assert.match(rel.message, d.hint);
-      const ren = await a.engine.prepareRename(at, 'fetch_order');
-      assert.equal(ren.kind, 'unavailable', JSON.stringify(ren));
-      assert.equal(ren.reasonCode, 'ProviderUnavailable');
-      const route = await waitFor(() => a.health().adapters.find((x) => x.providerRouteId === d.route && x.reasonCode === 'ProviderMissing'), `${d.name} ProviderMissing in Health`);
-      assert.equal(route.state, 'Ready');
-      assert.deepEqual(route.recoveryActions, [{ command: 'workbench.extensions.search', title: d.install, args: [d.query] }]);
-      const find = await a.engine.find('get_order');
-      assert.equal(find.items.filter((i) => i.providerRouteId === d.route).length, 0);
-      assert.ok(find.notes.some((n) => n.startsWith(`${d.name}: `) && /never installs extensions/.test(n)), JSON.stringify(find.notes));
-      const actions = await a.engine.actions(at);
-      const rename = actions.items.find((i) => i.capabilityId === `${d.prefix}.rename`);
-      assert.equal(rename.state, 'unavailable');
-      assert.equal(rename.reasonCode, 'ProviderMissing');
-      assert.equal(actions.items.find((i) => i.capabilityId === `${d.prefix}.frameworkRelations`).reasonCode, 'NoFrameworkModule');
-      const section = await waitFor(() => a.healthPage.model().sections.find((s) => s.adapterId === d.prefix && s.primary), `${d.name} Health section`);
-      assert.match(section.headline, new RegExp(`^${d.name}: no language provider installed`));
-      assert.equal(section.icon, 'warning');
-      assert.equal(section.primary.id, 'searchExtensions');
-      assert.equal(section.primary.label, d.install);
-      assert.equal(section.primary.arg, d.query);
-      assert.match(await healthDocText(), new RegExp(d.name));
+      assert.equal(a.isTrusted(), false);
+      for (const [file, route] of [['app/use.py', PY_ROUTE], ['src/usage.rs', RS_ROUTE]]) {
+        const { doc, at } = await tsPosition(file, 'get_order(1)', 2);
+        await vscode.window.showTextDocument(doc);
+        const rel = await a.engine.related(at);
+        assert.equal(rel.kind, 'unavailable', JSON.stringify(rel));
+        assert.equal(rel.reasonCode, 'TrustRequired');
+        const r = await waitFor(() => routeOf(a.health(), route)?.state === 'TrustRequired' && routeOf(a.health(), route), `${route} TrustRequired`);
+        assert.equal(r.recoveryActions[0].command, 'workbench.trust.manage');
+        const ren = await a.engine.prepareRename(at, 'fetch_order');
+        assert.equal(ren.kind, 'unavailable');
+      }
+      await new Promise((r) => setTimeout(r, 1000));
+      assert.deepEqual(a.lspLaunches(), [], 'no language server process was spawned');
+      const section = a.healthPage.model().sections.find((s) => s.adapterId === 'python');
+      assert.equal(section.icon, 'locked');
+      assert.equal(section.primary.id, 'trustWorkspace');
     },
-  ]),
+  ],
+];
+
+scenarios['pyrust-lsp'] = [
+  ...pyRustCommon,
+  [
+    'Python: the bundled Pyright starts lazily on the Node runtime of VS Code (no system Node); Find returns its symbols',
+    async () => {
+      const a = await api();
+      assert.equal(routeOf(a.health(), PY_ROUTE).state, 'NotStarted');
+      const { doc } = await tsPosition('app/orders.py', 'get_order');
+      await vscode.window.showTextDocument(doc);
+      await waitFor(() => ['Ready', 'Partial'].includes(routeOf(a.health(), PY_ROUTE).state), 'Pyright ready', 120000);
+      const launch = a.lspLaunches().find((l) => l.args.some((x) => /langserver\.index\.js$/.test(x)));
+      assert.ok(launch, JSON.stringify(a.lspLaunches()));
+      assert.equal(launch.command, process.execPath, 'runs on the Node runtime VS Code runs extensions on');
+      assert.ok(launch.args.includes('--stdio'));
+      const r = await waitFor(async () => {
+        const x = await a.engine.find('get_order');
+        return x.items.some((i) => i.providerRouteId === PY_ROUTE && i.label === 'get_order') ? x : undefined;
+      }, 'get_order from Pyright in Find', 60000);
+      const item = r.items.find((i) => i.providerRouteId === PY_ROUTE);
+      assert.match(item.location.uri, /orders\.py$/);
+      assert.equal(item.provenances[0].kind, 'delegated');
+      assert.equal(r.routeLabels[PY_ROUTE], 'Python (delegated)');
+      const section = a.healthPage.model().sections.find((s) => s.adapterId === 'python');
+      assert.equal(section.headline, 'Python: ready (Pyright, bundled with Refyntra)');
+    },
+  ],
+  [
+    'Python Related: declaration + references across files (a closed file included)',
+    async () => {
+      const a = await api();
+      const { at } = await tsPosition('app/use.py', 'get_order(1)', 2);
+      const r = await waitForRelated(a, at, 'Pyright references');
+      assert.equal(r.subject.name, 'get_order');
+      assert.match(r.groups[0].relations[0].target.location.uri, /orders\.py$/);
+      const files = new Set(r.groups.find((g) => g.group === 'references').relations.map((x) => x.target.location.uri.split('/').pop()));
+      for (const f of ['use.py', 'closed.py', 'orders.py']) assert.ok(files.has(f), `reference in ${f}: ${[...files]}`);
+      const actions = await a.engine.actions(at);
+      assert.equal(actions.items.find((i) => i.capabilityId === 'python.rename').state, 'limited');
+      assert.equal(actions.items.find((i) => i.capabilityId === 'python.frameworkRelations').reasonCode, 'NoFrameworkModule');
+    },
+  ],
+  [
+    'Python Rename: preview records the server versions; an edit after the preview -> stale; apply + Undo',
+    async () => {
+      const a = await api();
+      const closedPath = tsFile('app/closed.py').fsPath;
+      const closedBefore = fs.readFileSync(closedPath, 'utf8');
+      const { at } = await tsPosition('app/orders.py', 'get_order', 3);
+      let r = await a.engine.prepareRename(at, 'fetch_order');
+      assert.equal(r.kind, 'preview', JSON.stringify(r));
+      assert.equal(r.plan.kind, 'delegated');
+      assert.equal(r.plan.serverSession.server, 'Pyright');
+      assert.equal(r.plan.serverSession.processOwner, 'refyntra');
+      assert.ok(r.plan.serverSession.documentVersions.some((v) => v.uri.endsWith('/orders.py')));
+      assert.deepEqual(r.plan.writeSet.map((c) => c.uri.split('/').pop()).sort(), ['closed.py', 'orders.py', 'use.py']);
+      // An edit after the preview: stale, nothing applied.
+      const use = await vscode.workspace.openTextDocument(tsFile('app/use.py'));
+      const ed = await vscode.window.showTextDocument(use);
+      await ed.edit((b) => b.insert(new vscode.Position(use.lineCount - 1, 0), '# edited\n'));
+      const stale = await a.engine.applyRename(r.planId, undefined, { acceptLimited: true });
+      assert.equal(stale.status, 'stale', JSON.stringify(stale));
+      await vscode.commands.executeCommand('workbench.action.files.revert');
+      // Apply on the current versions.
+      r = await waitFor(async () => {
+        const x = await a.engine.prepareRename(at, 'fetch_order');
+        return x.kind === 'preview' ? x : undefined;
+      }, 'fresh Python rename preview', 30000);
+      const first = await a.engine.applyRename(r.planId);
+      assert.equal(first.status, 'limited');
+      const out = await a.engine.applyRename(r.planId, undefined, { acceptLimited: true });
+      assert.equal(out.status, 'applied', JSON.stringify(out));
+      assert.equal(r.plan.validation.providerReprepared, true);
+      assert.equal(r.plan.validation.returnedEditsMatchedPreview, true);
+      const orders = vscode.workspace.textDocuments.find((d) => d.uri.toString() === tsFile('app/orders.py').toString());
+      assert.match(orders.getText(), /def fetch_order/);
+      const closed = vscode.workspace.textDocuments.find((d) => d.uri.fsPath === closedPath);
+      assert.ok(closed && closed.isDirty && closed.getText().includes('fetch_order(2)'), 'closed target loaded and edited, not saved');
+      assert.equal(fs.readFileSync(closedPath, 'utf8'), closedBefore, 'disk unchanged');
+      // Undo through the editor.
+      for (const d of vscode.workspace.textDocuments.filter((x) => x.uri.scheme === 'file' && x.getText().includes('fetch_order'))) {
+        await vscode.window.showTextDocument(d);
+        await vscode.commands.executeCommand('undo');
+      }
+      await waitFor(() => !vscode.workspace.textDocuments.some((d) => d.uri.scheme === 'file' && d.getText().includes('fetch_order')), 'undo restored every file', 20000);
+      assert.match(orders.getText(), /def get_order/);
+    },
+  ],
+  [
+    'Rust: the bundled rust-analyzer (never one from PATH) answers Related and Rename; Health explains a missing cargo',
+    async () => {
+      const a = await api();
+      const { doc, at } = await tsPosition('src/usage.rs', 'get_order(1)', 2);
+      await vscode.window.showTextDocument(doc);
+      await waitFor(() => ['Ready', 'Partial', 'Failed'].includes(routeOf(a.health(), RS_ROUTE).state), 'rust-analyzer started', 180000);
+      const route = routeOf(a.health(), RS_ROUTE);
+      assert.notEqual(route.state, 'Failed', JSON.stringify(route));
+      const launch = a.lspLaunches().find((l) => /rust-analyzer(\.exe)?$/.test(l.command));
+      assert.ok(launch, JSON.stringify(a.lspLaunches()));
+      assert.ok(/[\\/](servers[\\/]rust-analyzer|\.cache[\\/]rust-analyzer)[\\/]/.test(launch.command), `bundled binary: ${launch.command}`);
+      if (process.env.REFYNTRA_TEST_EXPECT_NO_CARGO === '1') {
+        assert.equal(route.state, 'Partial');
+        assert.equal(route.reasonCode, 'CargoNotFound');
+        const section = a.healthPage.model().sections.find((s) => s.adapterId === 'rust');
+        assert.equal(section.primary.id, 'installRust');
+        assert.equal(section.primary.arg, 'https://rustup.rs/');
+      }
+      const r = await waitForRelated(a, at, 'rust-analyzer references');
+      assert.equal(r.subject.name, 'get_order');
+      assert.match(r.groups[0].relations[0].target.location.uri, /lib\.rs$/);
+      const ren = await a.engine.prepareRename(at, 'fetch_order');
+      assert.equal(ren.kind, 'preview', JSON.stringify(ren));
+      assert.equal(ren.plan.serverSession.server, 'rust-analyzer');
+      assert.deepEqual(ren.plan.writeSet.map((c) => c.uri.split('/').pop()).sort(), ['lib.rs', 'usage.rs']);
+      const kw = await a.engine.prepareRename(at, 'match');
+      assert.equal(kw.kind, 'unavailable');
+      assert.equal(kw.reasonCode, 'InvalidName');
+    },
+  ],
 ];
 
 scenarios['ts-delegated'] = [

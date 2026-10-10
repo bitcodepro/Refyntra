@@ -125,6 +125,44 @@ const scenarios = {
   ],
 };
 
+const route = (id) => api.health().adapters.find((a) => a.providerRouteId === id);
+scenarios.pyrust = [
+  [
+    'Python: the installed package runs its bundled Pyright (servers/pyright) on the editor Node runtime',
+    async () => {
+      const { doc, at: pos } = await at('app/use.py', 'get_order(1)', 2);
+      await vscode.window.showTextDocument(doc);
+      const r = await waitFor(async () => {
+        const x = await api.engine.related(pos);
+        return x.kind === 'related' && x.groups.some((g) => g.group === 'declarations') ? x : undefined;
+      }, 'Pyright Related', 120000);
+      assert.match(r.groups[0].relations[0].target.location.uri, /orders\.py$/);
+      const l = api.lspLaunches().find((x) => x.args.some((a) => a.endsWith('langserver.index.js')));
+      assert.ok(l, JSON.stringify(api.lspLaunches()));
+      assert.equal(lc(l.args[0]), lc(path.join(ext.extensionPath, 'servers', 'pyright', 'langserver.index.js')));
+      assert.equal(l.command, process.execPath);
+    },
+  ],
+  [
+    'Rust: the installed package runs its own rust-analyzer binary (servers/rust-analyzer), never one from PATH',
+    async () => {
+      const { doc, at: pos } = await at('src/usage.rs', 'get_order(1)', 2);
+      await vscode.window.showTextDocument(doc);
+      await waitFor(() => ['Ready', 'Partial', 'Failed'].includes(route('rust.rust-analyzer').state), 'rust-analyzer started', 180000);
+      assert.notEqual(route('rust.rust-analyzer').state, 'Failed', JSON.stringify(route('rust.rust-analyzer')));
+      const r = await waitFor(async () => {
+        const x = await api.engine.related(pos);
+        return x.kind === 'related' && x.groups.some((g) => g.group === 'declarations') ? x : undefined;
+      }, 'rust-analyzer Related', 120000);
+      assert.match(r.groups[0].relations[0].target.location.uri, /lib\.rs$/);
+      const l = api.lspLaunches().find((x) => /rust-analyzer(\.exe)?$/.test(x.command));
+      assert.ok(l, JSON.stringify(api.lspLaunches()));
+      assert.equal(lc(path.dirname(l.command)), lc(path.join(ext.extensionPath, 'servers', 'rust-analyzer')));
+      report.lspLaunches = api.lspLaunches();
+    },
+  ],
+];
+
 exports.run = async function run() {
   if (!scenarios[scenario]) throw new Error(`Unknown scenario ${scenario}`);
   const failures = [];

@@ -3,3 +3,4 @@ export { JsonRpcConnection, type JsonRpcConnectionOptions, type RequestHandler, 
 export * from './process';
 export * from './hostTransport';
 export * from './clockAndLog';
+export * from './lspClient';

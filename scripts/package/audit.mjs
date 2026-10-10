@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { repo, extPkg, ensureVsix, extractVsix, walk, rel } from './lib.mjs';
+import { PYRIGHT_FILES, RA, TYPESHED_FILES } from './servers.mjs';
 
 const vsix = ensureVsix();
 const tmp = extractVsix(vsix);
@@ -79,6 +80,31 @@ try {
   const jsFiles = files.filter((f) => /\.(js|cjs|mjs)$/.test(f.rel));
   for (const f of jsFiles) if (/\/\/# sourceMappingURL=/.test(fs.readFileSync(f.abs, 'utf8'))) fail(`${f.rel}: references a source map`);
 
+  // ---- bundled language servers: exactly these files, nothing else under extension/servers/ ----
+  const manifest = fs.readFileSync(path.join(tmp, 'extension.vsixmanifest'), 'utf8');
+  const target = /TargetPlatform="([^"]+)"/.exec(manifest)?.[1];
+  const pyrightAllowed = new Set([...PYRIGHT_FILES, ...TYPESHED_FILES].map((f) => `extension/servers/pyright/${f}`));
+  const typeshedStdlib = /^extension\/servers\/pyright\/dist\/typeshed-fallback\/stdlib\/(?:[\w.-]+\/)*(?:[\w.-]+\.pyi|VERSIONS)$/;
+  const raBinary = target ? RA.targets[target]?.binary : undefined;
+  if (target && !raBinary) fail(`VSIX target ${target} has no pinned rust-analyzer`);
+  const raAllowed = new Set(raBinary ? [raBinary, 'LICENSE-MIT.txt', 'LICENSE-APACHE.txt', 'VERSION.txt'].map((f) => `extension/servers/rust-analyzer/${f}`) : []);
+  for (const f of files.filter((x) => x.rel.startsWith('extension/servers/'))) {
+    if (f.rel.startsWith('extension/servers/pyright/')) {
+      if (!pyrightAllowed.has(f.rel) && !typeshedStdlib.test(f.rel)) fail(`${f.rel}: not one of the Pyright language-server files Refyntra bundles`);
+    } else if (!raAllowed.has(f.rel)) fail(`${f.rel}: not allowed under servers/ (${target ? `the ${target} package carries only its own rust-analyzer` : 'the universal package carries no rust-analyzer'})`);
+  }
+  for (const need of [...pyrightAllowed, ...raAllowed]) if (!files.some((f) => f.rel === need)) fail(`${need}: bundled language-server file is missing`);
+  if (raBinary) {
+    const bin = path.join(tmp, 'extension', 'servers', 'rust-analyzer', raBinary);
+    const head = fs.readFileSync(bin).subarray(0, 4);
+    const kind = head[0] === 0x4d && head[1] === 0x5a ? 'win32' : head.toString('latin1', 1, 4) === 'ELF' ? 'linux' : [0xcf, 0xce].includes(head[0]) && head[1] === 0xfa ? 'darwin' : 'unknown';
+    const wanted = target.startsWith('alpine') ? 'linux' : target.split('-')[0];
+    if (kind !== wanted) fail(`servers/rust-analyzer/${raBinary} is a ${kind} binary, but the VSIX targets ${target}`);
+    const verified = fs.readFileSync(path.join(tmp, 'extension', 'servers', 'rust-analyzer', 'VERSION.txt'), 'utf8');
+    if (!verified.includes(RA.targets[target].sha256) || !verified.includes(RA.version)) fail('servers/rust-analyzer/VERSION.txt does not name the pinned release and its SHA-256');
+  }
+  console.log(`Language servers: Pyright (${files.filter((f) => f.rel.startsWith('extension/servers/pyright/')).length} files), rust-analyzer ${raBinary ? `${RA.version} for ${target}` : 'not included (universal package)'}`);
+
   // ---- required content ----
   for (const need of ['extension/dist/extension.js', 'extension/host/Refyntra.Host.dll', 'extension/host/Refyntra.Host.deps.json', 'extension/LICENSE.txt', 'extension/THIRD_PARTY_NOTICES.md', 'extension/package.json']) {
     if (!files.some((f) => f.rel === need)) fail(`${need}: required file is missing`);
@@ -104,7 +130,7 @@ try {
   const add = (k, s) => { const b = buckets.get(k) ?? { n: 0, size: 0 }; b.n++; b.size += s; buckets.set(k, b); };
   for (const f of files) {
     const segs = f.rel.split('/');
-    add(segs.length <= 2 ? `${segs[0]}/(root files)` : segs.slice(0, segs[1] === 'host' && segs.length > 3 ? 3 : 2).join('/'), f.size);
+    add(segs.length <= 2 ? `${segs[0]}/(root files)` : segs.slice(0, (segs[1] === 'host' || segs[1] === 'servers') && segs.length > 3 ? 3 : 2).join('/'), f.size);
   }
   const total = files.reduce((s, f) => s + f.size, 0);
   console.log(`VSIX: ${path.relative(repo, vsix)} (${(fs.statSync(vsix).size / 1024).toFixed(1)} KiB compressed, ${(total / 1024).toFixed(1)} KiB unpacked, ${files.length} files)\n`);

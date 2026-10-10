@@ -28,7 +28,6 @@ export interface DelegatedWorkspaceOptions {
   language?: DelegatedLanguage;
   syntax?: FakeSyntax;
   /** Provider probe delays after a document opens (languages that report a missing provider). */
-  probeDelaysMs?: readonly number[];
 }
 
 export interface DelegatedWorkspace {
@@ -83,7 +82,6 @@ export function createDelegatedWorkspace(o: DelegatedWorkspaceOptions = {}): Del
 
   const adapter = new DelegatedProviderAdapter({
     ...(o.language ? { language: o.language } : {}),
-    ...(o.probeDelaysMs ? { probeDelaysMs: o.probeDelaysMs } : {}),
     workspaceId,
     commands: o.wrapCommands ? o.wrapCommands(world.commands) : world.commands,
     values: world.values,

@@ -2,7 +2,7 @@ import type { Position, TextEditDto } from '@refyntra/contracts';
 import type { AdapterDescriptor } from '@refyntra/application';
 import { offsetAt } from './text';
 
-// Language families served by the one delegated adapter. Everything that differs between TypeScript/JavaScript,
+// Language families and their text rules. Everything that differs between TypeScript/JavaScript,
 // Python and Rust lives in a DelegatedLanguage: ids, names, identifier rules and the conservative text heuristics
 // that refuse renames whose effect the public VS Code API cannot show (file operations, macro definitions).
 
@@ -10,15 +10,6 @@ import { offsetAt } from './text';
 export interface RenameRefusal {
   reasonCode: string;
   message: string;
-}
-
-export interface MissingProviderHelp {
-  /** Health message when no provider answered for a document of this language. */
-  message: string;
-  /** Recovery button title, e.g. "Install rust-analyzer". */
-  recoveryTitle: string;
-  /** Search text for the Extensions view (opened with a query; Refyntra never installs anything itself). */
-  extensionQuery: string;
 }
 
 export interface DelegatedLanguage {
@@ -42,8 +33,6 @@ export interface DelegatedLanguage {
   positionRefusal(text: string, position: Position): RenameRefusal | undefined;
   /** After the provider answered: refuses edits of one document (sorted) that touch unsafe text. */
   editRefusal?(text: string, edits: readonly TextEditDto[], oldName: string): RenameRefusal | undefined;
-  /** When set, the route probes for a provider and reports a missing one in Health with this recovery. */
-  missingProvider?: MissingProviderHelp;
 }
 
 const capabilityIds = (prefix: string) => [`${prefix}.find`, `${prefix}.related`, `${prefix}.references`, `${prefix}.rename`, `${prefix}.frameworkRelations`];
@@ -201,8 +190,8 @@ export const PYTHON_LANGUAGE: DelegatedLanguage = {
   name: 'Python',
   capabilityPrefix: 'python',
   noProviderHint:
-    'Python needs an installed Python language extension with a language server (for example the open-source Python extension with Pyright, basedpyright or Jedi); it may also be disabled or still starting.',
-  readyMessage: 'Delegated to the installed Python language extension through public VS Code provider commands. Results are not owned by Refyntra; completeness unknown.',
+    'No Python language provider answered for this document.',
+  readyMessage: 'Python language provider. Results are not owned by Refyntra; completeness unknown.',
   findLimitation: 'Results come from the installed Python language provider; completeness unknown.',
   frameworkRelationsUnavailable: 'Framework relations (handlers, endpoints, registrations) are not available for Python: Refyntra has no Python framework module.',
   renameLimitations: [
@@ -223,12 +212,6 @@ export const PYTHON_LANGUAGE: DelegatedLanguage = {
       if (line !== undefined && inSpans(pythonModuleSpans(line), e.range.start.character)) return PY_MODULE_REFUSAL;
     }
     return undefined;
-  },
-  missingProvider: {
-    message:
-      'No Python language provider answered. Install a Python language extension with a language server (for example the open-source Python extension with Pyright, basedpyright or Jedi), then reopen the file. Refyntra never installs extensions itself.',
-    recoveryTitle: 'Install a Python language extension',
-    extensionQuery: 'python language server',
   },
 };
 
@@ -358,8 +341,8 @@ export const RUST_LANGUAGE: DelegatedLanguage = {
   descriptor: RUST_DESCRIPTOR,
   name: 'Rust',
   capabilityPrefix: 'rust',
-  noProviderHint: 'Rust needs the rust-analyzer extension; it may also be disabled, still starting, or without a Cargo project (Cargo.toml) for this file.',
-  readyMessage: 'Delegated to the installed Rust language extension (rust-analyzer) through public VS Code provider commands. Results are not owned by Refyntra; completeness unknown.',
+  noProviderHint: 'No Rust language provider answered for this document (a Cargo project with Cargo.toml may be missing).',
+  readyMessage: 'Rust language provider. Results are not owned by Refyntra; completeness unknown.',
   findLimitation: 'Results come from the installed Rust language provider; completeness unknown.',
   frameworkRelationsUnavailable: 'Framework relations (handlers, endpoints, registrations) are not available for Rust: Refyntra has no Rust framework module.',
   renameLimitations: [
@@ -389,11 +372,9 @@ export const RUST_LANGUAGE: DelegatedLanguage = {
     }
     return undefined;
   },
-  missingProvider: {
-    message: 'No Rust language provider answered. Install the rust-analyzer extension (and a Rust toolchain with a Cargo.toml project), then reopen the file. Refyntra never installs extensions itself.',
-    recoveryTitle: 'Install rust-analyzer',
-    extensionQuery: 'rust-analyzer',
-  },
 };
 
-export const DELEGATED_LANGUAGES: readonly DelegatedLanguage[] = [TS_JS_LANGUAGE, PYTHON_LANGUAGE, RUST_LANGUAGE];
+// Python and Rust are served by Refyntra's own language-server routes (@refyntra/adapter-lsp: bundled Pyright and
+// rust-analyzer). Their identifier rules and refusal heuristics above are shared with those routes; the objects can
+// still drive the delegated adapter in unit tests of the heuristics.
+export const DELEGATED_LANGUAGES: readonly DelegatedLanguage[] = [TS_JS_LANGUAGE];

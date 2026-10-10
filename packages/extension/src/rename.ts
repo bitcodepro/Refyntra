@@ -4,7 +4,7 @@ import { type ApplyOutcome, CancelledError, type EngineClient, type RenamePrevie
 import type { Position } from '@refyntra/contracts';
 import { runRecovery } from './actions';
 import { shortPath, toPosition } from './convert';
-import { delegatedProviderName, fileRenameItems, identifierPattern, previewTitle, renamePreviewSummary } from './renameSummary';
+import { delegatedSource, fileRenameItems, identifierPattern, previewTitle, renamePreviewSummary } from './renameSummary';
 import { type PreviewFileModel, decodeUtf8, previewFile } from './textEdits';
 
 export const PREVIEW_SCHEME = 'refyntra-preview';
@@ -224,7 +224,7 @@ export async function runRename(engine: EngineClient, previews: PreviewContentPr
       if (limited) {
         const ok = await vscode.window.showWarningMessage(
           delegated
-            ? `${outcome.plan.title}: provider-managed semantic coverage — the edits come from the installed ${delegatedProviderName(outcome.plan.providerRouteId)} provider and are not validated semantically by Refyntra.`
+            ? `${outcome.plan.title}: provider-managed semantic coverage — the edits come from ${delegatedSource(outcome.plan)} and are not validated semantically by Refyntra.`
             : `${outcome.plan.title}: Refyntra could only partly validate this rename.`,
           { modal: true, detail: `Not checked:\n${outcome.plan.limitations.map((l) => `• ${l}`).join('\n')}\n\nApply anyway? Files are not saved; Undo works in the editor.` },
           'Apply anyway',

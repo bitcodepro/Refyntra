@@ -7,7 +7,8 @@ import path from 'node:path';
 
 export const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const extPkg = JSON.parse(fs.readFileSync(path.join(repo, 'packages', 'extension', 'package.json'), 'utf8'));
-export const defaultVsix = path.join(repo, 'dist', `${extPkg.name}-${extPkg.version}.vsix`);
+/** The platform VSIX of this machine (pnpm package:vsix builds it by default); --vsix <path> selects another one. */
+export const defaultVsix = path.join(repo, 'dist', `${extPkg.name}-${extPkg.version}-${process.platform}-${process.arch}.vsix`);
 
 export function argValue(name) {
   const i = process.argv.indexOf(name);

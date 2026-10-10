@@ -1,6 +1,7 @@
 // Installation smoke, Windows and Linux. Run: pnpm test:install
 //
-// 1. Takes the packaged dist/refyntra-<version>.vsix (run `pnpm package:vsix` first).
+// 1. Takes the packaged platform VSIX dist/refyntra-<version>-<platform>-<arch>.vsix (run `pnpm package:vsix` first),
+//    or --vsix <path>.
 // 2. Installs it with the VS Code CLI into a fresh extensions dir whose path has spaces and non-ASCII characters,
 //    with its own user-data dir (a clean profile).
 // 3. Starts that VS Code on temp copies of tests/fixtures/Shop and DiRules (restored). The only extension under test
@@ -27,7 +28,9 @@ const { downloadAndUnzipVSCode, resolveCliPathFromVSCodeExecutablePath } = requi
 
 const pkg = JSON.parse(fs.readFileSync(path.join(extPkgDir, 'package.json'), 'utf8'));
 const extensionId = `${pkg.publisher}.${pkg.name}`;
-const vsix = path.join(repo, 'dist', `${pkg.name}-${pkg.version}.vsix`);
+const vsixArg = process.argv.indexOf('--vsix');
+// The platform VSIX of this machine (it carries this platform's rust-analyzer).
+const vsix = vsixArg >= 0 ? path.resolve(process.argv[vsixArg + 1]) : path.join(repo, 'dist', `${pkg.name}-${pkg.version}-${process.platform}-${process.arch}.vsix`);
 const version = process.env.REFYNTRA_TEST_VSCODE_VERSION || '1.90.2';
 const cachePath = path.join(repo, '.vscode-test');
 
@@ -86,15 +89,47 @@ async function assertProcessListingWorks() {
   }
 }
 
-function copyFixture(fixture, sln) {
+function copyFixture(fixture, sln, name = fixture) {
   const fixtures = path.join(repo, 'tests', 'fixtures');
-  const dest = path.join(root, `ws ${fixture}`);
+  const dest = path.join(root, `ws ${name}`);
   fs.mkdirSync(dest, { recursive: true });
   for (const f of fs.readdirSync(fixtures)) if (f.startsWith('Directory.')) fs.copyFileSync(path.join(fixtures, f), path.join(dest, f));
   fs.cpSync(path.join(fixtures, fixture), path.join(dest, fixture), { recursive: true, filter: (src) => !/[\\/](bin|obj)$/.test(src) });
   const r = spawnSync('dotnet', ['restore', path.join(dest, fixture, sln), '--nologo'], { stdio: 'inherit' });
   if (r.status !== 0) throw new Error(`dotnet restore of the ${fixture} copy failed`);
   return path.join(dest, fixture);
+}
+
+/** Adds a generic Python package and a Cargo crate to a workspace folder. */
+function addPyRust(dir) {
+  fs.mkdirSync(path.join(dir, 'app'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'app', '__init__.py'), '');
+  fs.writeFileSync(path.join(dir, 'app', 'orders.py'), `def get_order(order_id):
+    return order_id
+`);
+  fs.writeFileSync(path.join(dir, 'app', 'use.py'), `from app.orders import get_order
+
+first = get_order(1)
+`);
+  fs.writeFileSync(path.join(dir, 'Cargo.toml'), `[package]
+name = "orders"
+version = "0.1.0"
+edition = "2021"
+`);
+  fs.writeFileSync(path.join(dir, 'src', 'lib.rs'), `mod usage;
+
+pub fn get_order(id: u32) -> u32 {
+    id
+}
+`);
+  fs.writeFileSync(path.join(dir, 'src', 'usage.rs'), `use crate::get_order;
+
+pub fn first() -> u32 {
+    get_order(1)
+}
+`);
+  return dir;
 }
 
 /**
@@ -124,6 +159,7 @@ function runVsCodeTests(exe, { extensionDevelopmentPath, extensionTestsPath, lau
 
 let exitCode = 0;
 let hostNeedle;
+let serversNeedle;
 try {
   await assertProcessListingWorks();
   // ---------------------------------------------------------------- install with the VS Code CLI
@@ -148,6 +184,10 @@ try {
   const installedHost = path.join(installedPath, 'host', 'Refyntra.Host.dll');
   if (!fs.existsSync(installedHost)) throw new Error(`installed payload has no host: ${installedHost}`);
   hostNeedle = path.join(installedPath, 'host');
+  serversNeedle = path.join(installedPath, 'servers');
+  const ra = path.join(serversNeedle, 'rust-analyzer', process.platform === 'win32' ? 'rust-analyzer.exe' : 'rust-analyzer');
+  if (!fs.existsSync(path.join(serversNeedle, 'pyright', 'langserver.index.js'))) throw new Error('installed payload has no bundled Pyright');
+  if (!fs.existsSync(ra)) throw new Error(`installed payload has no rust-analyzer for this platform: ${ra}`);
   console.log(`Installed: ${installedPath}`);
 
   // ---------------------------------------------------------------- stub runner (no extension code of ours)
@@ -173,6 +213,8 @@ try {
   const scenarios = [
     { name: 'shop', workspace: copyFixture('Shop', 'Shop.sln') },
     { name: 'di-rules', workspace: copyFixture('DiRules', 'DiRules.sln') },
+    // Python + Rust next to the C# solution: the bundled Pyright and rust-analyzer of the INSTALLED package.
+    { name: 'pyrust', workspace: addPyRust(copyFixture('Shop', 'Shop.sln', 'PyRust')) },
   ];
   for (const s of scenarios) {
     console.log(`\n=== Installed-VSIX scenario: ${s.name} (VS Code ${version}) ===`);
@@ -199,11 +241,12 @@ try {
     console.log(`  extensionPath: ${r.extensionPath}`);
     console.log(`  host launch:   ${r.hostLaunch}`);
     console.log(`  host pids:     ${r.hostPids.join(', ')}`);
+    if (r.lspLaunches) console.log(`  servers:       ${r.lspLaunches.map((l) => path.basename(l.args.find((x) => x.endsWith('.js')) ?? l.command)).join(', ')}`);
     // ------------------------------------------------------------ process-tree shutdown after VS Code exited
     let left = [];
     const deadline = Date.now() + 20000;
     do {
-      left = processesMentioning(hostNeedle);
+      left = [...processesMentioning(hostNeedle), ...processesMentioning(serversNeedle)];
       if (left.length === 0) break;
       await new Promise((res) => setTimeout(res, 500));
     } while (Date.now() < deadline);
@@ -211,7 +254,7 @@ try {
       fail(`processes from the installed payload outlived VS Code:\n  ${left.join('\n  ')}`);
       exitCode = 1;
     } else {
-      console.log('  shutdown:      no Refyntra.Host / BuildHost process from the install remains');
+      console.log('  shutdown:      no Refyntra.Host / BuildHost / language server process from the install remains');
     }
     for (const pid of r.hostPids) {
       try {

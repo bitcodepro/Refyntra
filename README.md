@@ -4,7 +4,7 @@
 
 Refyntra is a free (MIT) code companion for VS Code that makes writing, analysing and navigating code easier: find anything, see how code is connected (callers, implementations, tests, request handlers, endpoints, DI registrations), get focused diagnostics, and rename safely with a preview.
 
-C# is analysed by a local .NET host built on Roslyn, so answers such as "which handler serves this request?" or "where is this service registered?" come from the semantic identity of symbols, not from text search. TypeScript and JavaScript use the language features already installed in VS Code.
+C# is analysed by a local .NET host built on Roslyn, so answers such as "which handler serves this request?" or "where is this service registered?" come from the semantic identity of symbols, not from text search. TypeScript and JavaScript use the language features built into VS Code. Python and Rust use language servers that ship inside Refyntra (Pyright and rust-analyzer), run as Refyntra's own processes: **no other extension is needed**.
 
 ## What the alpha does
 
@@ -94,7 +94,10 @@ The page updates by itself after a restore, a restart or a solution switch.
 
 ## Requirements
 
-- Windows x64 (the only planned alpha target), VS Code 1.90 or newer
+- Windows x64 (the only planned alpha target for C#; the platform packages for Linux and macOS carry the Python and Rust
+  servers too), VS Code 1.90 or newer
+- No other VS Code extension: Python (bundled Pyright) and Rust (bundled rust-analyzer) work on their own; Rust needs
+  the Rust toolchain (`cargo`) for full results
 - A .NET SDK 10.0.x installed (Refyntra does not download or bundle it)
 - A **trusted** workspace (see below)
 - SDK-style C# projects
@@ -103,7 +106,7 @@ See the [support matrix](docs/support/matrix.md); nothing is listed as verified 
 
 ## Privacy and local processing
 
-All analysis runs locally in a child process. Refyntra has no telemetry, no account and makes no network requests for navigation. Your source code is not sent anywhere. Logs contain no source text.
+All analysis runs locally in child processes (the C# host, and the bundled Pyright and rust-analyzer). They are packaged with the extension; nothing is downloaded at run time. Refyntra has no telemetry, no account and makes no network requests for navigation. Your source code is not sent anywhere. Logs contain no source text.
 
 ## Workspace Trust
 
@@ -263,33 +266,50 @@ rename provider of its own.
 - When no TypeScript/JavaScript provider answers (the built-in extension is disabled, still starting, or the file is
   not in a TS/JS language mode) features say so instead of showing an empty result.
 
-## Python and Rust (delegated)
+## Python and Rust (bundled language servers)
 
-Python (`.py`, `.pyi`) and Rust (`.rs`) files use the same delegated route as TypeScript/JavaScript: Find, Related,
-Actions and Rename call only VS Code's public provider commands and are answered by the language extension **you**
-install. Refyntra bundles none and never installs one.
+Python (`.py`, `.pyi`) and Rust (`.rs`) work with **nothing but Refyntra installed**: no Python extension, no
+rust-analyzer extension, no system Node.js. Refyntra ships the language servers and runs them as its own processes,
+like its C# host. It never registers editor providers for them and never uses another extension's providers.
 
-- **Python** needs a Python language extension with a language server, for example the open-source Python extension
-  with Pyright, basedpyright or Jedi. No particular (or proprietary) language server is required.
-- **Rust** needs the rust-analyzer extension (and a Cargo project for the file).
-- When no provider answers for a Python or Rust file, the Health page says *Python: no language provider installed*
-  (or *Rust: …*) with one button, **Install a Python language extension** / **Install rust-analyzer**, which only
-  opens the Extensions view with a search. Find, Related, Actions and Rename give the same reason instead of an empty
-  result.
+| | Python | Rust |
+|---|---|---|
+| Server | Pyright 1.1.414 (MIT), bundled in every package | rust-analyzer 2026-09-21 (MIT OR Apache-2.0), the official release binary for your platform, bundled in the platform package |
+| Runs on | the Node.js runtime of VS Code itself (`ELECTRON_RUN_AS_NODE`) | the bundled binary from the extension folder (never one from `PATH`) |
+| Also needs | nothing; for imports of installed packages: a Python environment (see below) | the Rust toolchain (`cargo`, from [rustup.rs](https://rustup.rs)) to load the Cargo project, like C# needs the .NET SDK |
+| Starts | lazily, on the first Python file in a **trusted** workspace | lazily, on the first Rust file in a **trusted** workspace |
+
+- **Restricted Mode**: no language server is started (rust-analyzer runs `cargo`, build scripts and proc-macros of the
+  project; Pyright reads project configuration). Find, Related, Actions and Rename say *trust the workspace*.
 - **Find** items are labelled `Python (delegated)` / `Rust (delegated)`; never a complete index. **Related** shows
-  declarations and references; there are no framework relations for Python or Rust.
-- **Rename** follows the TS/JS rules: provider-managed semantic coverage, always *limited*, the provider is asked again
-  before the apply and must return the identical edit on unchanged files, resource and other non-text edits are
-  refused, and the editor's own Rename is offered as *not validated by Refyntra* when safety cannot be confirmed. The
-  new name is checked first: Python identifiers (Unicode letters allowed, hard keywords refused); Rust identifiers and
-  raw identifiers (`r#match`; a keyword needs `r#`), and a lifetime (`'a`) only for a lifetime.
+  declarations, implementations (where the server offers them) and references; there are no framework relations for
+  Python or Rust.
+- **Rename**: the plan records the document versions the server computed it on (Refyntra owns the text the server
+  sees for open files: it sends every open, change and close itself). Before the apply the same server session is
+  asked again on the same versions and must return the identical edit on unchanged files. Validation is always
+  *limited* (the semantics are the server's, no compilation check), so applying asks for an extra confirmation. A
+  rename whose edit would create, rename or delete a file is refused in this version. The new name is checked first:
+  Python identifiers (Unicode letters allowed, hard keywords refused); Rust identifiers and raw identifiers
+  (`r#match`; a keyword needs `r#`), and a lifetime (`'a`) only for a lifetime.
+- **Python environment**: Pyright analyses your code without any interpreter. For imports of installed packages it
+  uses `python.defaultInterpreterPath` (if that file exists) or a `.venv`/`venv` folder with `pyvenv.cfg` in the
+  workspace; without one, Pyright may look for `python` on `PATH` (trusted workspaces only). Third-party typeshed stubs
+  are not bundled (standard-library stubs are), so packages without their own type information resolve only through
+  the environment.
+- **Rust without cargo**: Health says *Rust works partially: cargo (the Rust toolchain) was not found* with an
+  **Install Rust** button (opens rustup.rs; Refyntra installs nothing). rust-analyzer still lists the symbols of open
+  files and resolves code inside the crate as far as it can without the Cargo project model; the standard library,
+  dependencies, build-script output and proc-macros are missing, so results across crates are incomplete.
+- **Platforms**: rust-analyzer ships in the packages for Windows x64/arm64, Linux x64/arm64, Alpine x64 and macOS
+  x64/arm64. On any other platform Health says *Rust is not available* (Python still works).
 - **Python limits**: dynamic attribute access (`getattr`/`setattr`/`__getattr__`), names inside strings (such as
   `__all__` entries) and other runtime lookups are not covered; a rename that touches a module path in an `import`
-  is refused, because the provider may rename or move the module file and the public API cannot show that.
+  is refused (the module file may need to move).
 - **Rust limits**: edits inside a `macro_rules!` definition are refused (Refyntra cannot check what the macro expands
   to); names used inside macro invocations are renamed only as far as rust-analyzer resolves the expansion; code
-  disabled by `cfg` or Cargo features the provider does not analyse may keep the old name; a rename that touches a
+  disabled by `cfg` or Cargo features rust-analyzer does not analyse may keep the old name; a rename that touches a
   `mod name;` declaration is refused (the module file would be renamed).
+- **Logs**: server log lines go to the Refyntra output channel at `debug` level with file paths replaced by `<path>`.
 
 ## Frontend ↔ backend (heuristic)
 
@@ -415,7 +435,9 @@ enclosing method, not the lambda itself.
 - **SDK not found**: the Health page says *C# is not running* and offers **Install .NET SDK** (and **Open global.json** when a global.json pins the version). Install it and click **Restart backend**. Refyntra does not download SDKs itself.
 - **Status is Partial** (some projects not loaded): open `Refyntra: Show Health` to see which projects did not load and why, grouped by cause. Results for those projects are incomplete and say so.
 - **Missing references or empty results after cloning** (or packages deleted from the NuGet folder): the Health page shows *Needs packages* with **Restore packages**. Click it: after a successful restore the backend reloads the solution by itself. Or run `dotnet restore` yourself, then restart the backend. Refyntra never restores without your click.
-- **Trust required**: trust the workspace through VS Code if you accept evaluating its projects.
+- **Trust required**: trust the workspace through VS Code if you accept evaluating its projects (and, for Rust, running cargo, build scripts and proc-macros).
+- **Rust works partially**: install the Rust toolchain from rustup.rs (`cargo` on `PATH` or in `~/.cargo/bin`), then **Restart backend**.
+- **Rust is not available on this platform**: install the platform package of Refyntra for your OS and CPU.
 - **Host crashed / stopped restarting**: see Show Health and the output channel, then `Refyntra: Restart Backend`.
 - **Reporting a problem**: `Refyntra: Export Debug Bundle` shows a preview and saves a local file without source text, environment values or your paths.
 

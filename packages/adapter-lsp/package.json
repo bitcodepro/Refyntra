@@ -1,0 +1,17 @@
+{
+  "name": "@refyntra/adapter-lsp",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "out/index.js",
+  "types": "out/index.d.ts",
+  "scripts": { "build": "tsc -b" },
+  "dependencies": {
+    "@refyntra/contracts": "workspace:*",
+    "@refyntra/domain": "workspace:*",
+    "@refyntra/application": "workspace:*",
+    "@refyntra/adapter-vscode-providers": "workspace:*"
+  },
+  "devDependencies": { "@types/node": "22.18.6", "vitest": "3.2.4" }
+}

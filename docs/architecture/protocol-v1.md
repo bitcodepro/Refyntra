@@ -21,6 +21,26 @@ C# DTOs: `src/dotnet/Refyntra.Host/Protocol/*.cs` must serialize to exactly thes
   races with the completion of the request is ignored.
 - Every request params object carries `traceId: string`. Requests that need a workspace carry `workspaceId`.
 
+### Not this protocol: the Python and Rust language servers
+
+Protocol v1 is the extension ↔ .NET host protocol only. Python and Rust are served by language servers Refyntra bundles
+and runs itself (Pyright, rust-analyzer; ADR-002 amendment). They speak standard LSP over the same stdio framing
+(`Content-Length`, JSON-RPC 2.0, `$/cancelRequest`), driven by Refyntra's own client
+(`packages/infrastructure/src/lspClient.ts`):
+
+- Client → server: `initialize` (workspace folders, read-only client capabilities: no `applyEdit`, `positionEncodings`
+  `utf-16`, `experimental.serverStatusNotification`), `initialized`, `textDocument/didOpen|didChange|didClose` (full
+  text; versions are the application's monotonic document sequence), `workspace/didChangeWatchedFiles` (closed files
+  changed on disk), `workspace/symbol`, `textDocument/documentSymbol|definition|references|implementation|prepareRename|rename`,
+  `shutdown`, `exit`.
+- Server → client requests answered: `workspace/configuration` (per section; diagnostics off), `workspace/workspaceFolders`,
+  `client/(un)registerCapability`, `window/workDoneProgress/create`, refresh requests (all `null`);
+  `workspace/applyEdit` is always refused (`applied: false`): edits reach files only through Refyntra's preview and
+  EditApplier. Anything else: `-32601`.
+- LSP errors `-32800` RequestCancelled, `-32801` ContentModified and `-32802` ServerCancelled make a result stale (asked
+  again); a malformed frame closes the session (the route restarts the server with backoff).
+- Server URIs are normalised to VS Code's `Uri.toString()` form before comparison.
+
 ## Positions and text
 
 - Positions zero-based, `character` in UTF-16 code units (same as VS Code and Roslyn).

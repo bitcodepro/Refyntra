@@ -4,7 +4,7 @@ import { formatAdapterHealth, formatStatusBar, worstState } from '@refyntra/doma
 import { randomBytes } from 'node:crypto';
 import * as path from 'node:path';
 import { renderHealth } from './healthText';
-import { type HealthAction, type HealthPageModel, type RestoreRun, buildHealthPage, resolveMessage } from './healthPageModel';
+import { type HealthAction, type HealthPageModel, type RestoreRun, buildHealthPage, resolveMessage, RUSTUP_URL } from './healthPageModel';
 import { healthAnnouncement, renderHealthBody, renderHealthHtml } from './healthPageHtml';
 import { statusBarLabel } from './terminology';
 import { RESTORE_TASK_TYPE, runRestore } from './restore';
@@ -166,9 +166,9 @@ export class HealthPage implements vscode.Disposable {
         await vscode.env.clipboard.writeText(renderHealth(this.engine.health(), { solution: this.solution() }));
         void vscode.window.showInformationMessage('Refyntra: the health report was copied to the clipboard.');
         return;
-      case 'searchExtensions':
-        // Opens the Extensions view with the query from the adapter's own recovery (never installs anything).
-        if (a.arg && /^[\w @:".-]{1,80}$/.test(a.arg)) await vscode.commands.executeCommand('workbench.extensions.search', a.arg);
+      case 'installRust':
+        // Only the fixed rustup page (the model's own constant); Refyntra never installs anything itself.
+        if (a.arg === RUSTUP_URL) await vscode.env.openExternal(vscode.Uri.parse(RUSTUP_URL));
         return;
       case 'showText':
         await vscode.commands.executeCommand(HEALTH_TEXT_COMMAND);

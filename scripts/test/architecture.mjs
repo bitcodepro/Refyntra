@@ -6,6 +6,10 @@
 //   extension       no adapter-testing (fake adapters never reach presentation)
 //   adapter-testing no extension
 //   adapter-vscode-providers  contracts + domain + application (+ type-only vscode); no infrastructure/extension/adapter-testing
+//   adapter-lsp     contracts + domain + application + adapter-vscode-providers (shared text rules); no vscode, no node
+//                   builtins, no infrastructure: the LSP client (process, framing, JSON-RPC) lives in infrastructure and
+//                   reaches the adapter only through the application's LspConnection port
+//   The LSP client (lspClient.ts) lives in infrastructure; application and domain never import it.
 //   Only the extension composition root (packages/extension/src/extension.ts) and the test-support package
 //   adapter-testing may import @refyntra/adapter-vscode-providers (application/domain never do).
 // Also checks that package.json dependencies do not declare forbidden packages.
@@ -25,12 +29,13 @@ const RULES = {
   extension: { forbid: ['@refyntra/adapter-testing'] },
   'adapter-testing': { forbid: ['@refyntra/extension', 'refyntra', 'vscode'] },
   'adapter-vscode-providers': { allow: ['@refyntra/contracts', '@refyntra/domain', '@refyntra/application', 'vscode'], forbidVscodeValue: true },
+  'adapter-lsp': { allow: ['@refyntra/contracts', '@refyntra/domain', '@refyntra/application', '@refyntra/adapter-vscode-providers'], forbidVscode: true, forbidBuiltins: true },
 };
 
 const PROVIDERS_PKG = '@refyntra/adapter-vscode-providers';
 /** Files allowed to import the delegated provider adapter (composition root + test support). */
 function mayImportProviders(rel) {
-  return rel === 'packages/extension/src/extension.ts' || rel.startsWith('packages/adapter-testing/') || rel.startsWith('packages/adapter-vscode-providers/');
+  return rel === 'packages/extension/src/extension.ts' || rel.startsWith('packages/adapter-testing/') || rel.startsWith('packages/adapter-vscode-providers/') || rel.startsWith('packages/adapter-lsp/');
 }
 /** A value (non-type) import of vscode: the provider adapter receives the vscode API from the composition root. */
 const VSCODE_VALUE_RE = /(?:^|[\s;])import\s+(?!type\b)[^;'"]*from\s+['"]vscode['"]|(?:^|[\s;])import\s+['"]vscode['"]|require\s*\(\s*['"]vscode['"]\s*\)/m;
@@ -87,7 +92,7 @@ function checkManifest(pkg) {
   if (rule.allow) for (const d of internal) if (!rule.allow.includes(d)) out.push(`${file}: ${pkg} must not depend on ${d}`);
   if (rule.forbid) for (const d of deps) if (rule.forbid.includes(d)) out.push(`${file}: ${pkg} must not depend on ${d}`);
   if (rule.forbidVscode && deps.some((d) => d === 'vscode' || d === '@types/vscode')) out.push(`${file}: ${pkg} must not depend on vscode`);
-  if (pkg !== 'extension' && pkg !== 'adapter-testing' && pkg !== 'adapter-vscode-providers' && deps.includes(PROVIDERS_PKG)) out.push(`${file}: ${pkg} must not depend on ${PROVIDERS_PKG}`);
+  if (pkg !== 'extension' && pkg !== 'adapter-testing' && pkg !== 'adapter-vscode-providers' && pkg !== 'adapter-lsp' && deps.includes(PROVIDERS_PKG)) out.push(`${file}: ${pkg} must not depend on ${PROVIDERS_PKG}`);
   return out;
 }
 
@@ -109,6 +114,10 @@ function selfTest() {
     ['adapter-vscode-providers', "import type * as vscode from 'vscode';", 0],
     ['adapter-vscode-providers', "import { x } from '@refyntra/infrastructure';", 1],
     ['adapter-vscode-providers', "import { createHash } from 'node:crypto';", 0],
+    ['adapter-lsp', "import { x } from '@refyntra/infrastructure';", 1],
+    ['adapter-lsp', "import { spawn } from 'node:child_process';", 1],
+    ['adapter-lsp', "import type * as vscode from 'vscode';", 1],
+    ['application', "import { createLspConnectionFactory } from '@refyntra/infrastructure';", 1],
   ];
   for (const [pkg, src, expected] of cases) {
     const got = checkSource(pkg, f, src).length;
@@ -132,6 +141,17 @@ for (const pkg of Object.keys(RULES)) {
     if (/\bapplyEdit\s*\(/.test(stripComments(fs.readFileSync(file, 'utf8'))) && path.relative(repo, file).replace(/\\/g, '/') !== 'packages/extension/src/editApplier.ts') {
       violations.push(`${path.relative(repo, file)}: only packages/extension/src/editApplier.ts may call workspace.applyEdit`);
     }
+  }
+}
+// Refyntra never registers language providers of its own (it only calls public provider commands or talks LSP to its
+// own server processes), never uses vscode-languageclient, and only infrastructure starts processes.
+for (const pkg of Object.keys(RULES)) {
+  for (const file of walk(path.join(repo, 'packages', pkg, 'src'))) {
+    const text = stripComments(fs.readFileSync(file, 'utf8'));
+    const r = path.relative(repo, file);
+    if (/\blanguages\.register(Definition|Rename|Reference|Implementation|DocumentSymbol|WorkspaceSymbol|TypeDefinition|Declaration)Provider\s*\(/.test(text)) violations.push(`${r}: Refyntra must not register VS Code navigation/rename providers`);
+    if (/['"]vscode-languageclient(\/[^'"]*)?['"]/.test(text)) violations.push(`${r}: vscode-languageclient must not be used (own LSP client in infrastructure)`);
+    if (pkg !== 'infrastructure' && pkg !== 'extension' && /['"](node:)?child_process['"]/.test(text)) violations.push(`${r}: only infrastructure (and the composition root's tasks) may start processes`);
   }
 }
 if (violations.length) {

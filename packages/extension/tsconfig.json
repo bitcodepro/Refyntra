@@ -2,5 +2,5 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": { "rootDir": "src", "outDir": "out", "types": ["node", "vscode"], "noEmit": false },
   "include": ["src"],
-  "references": [{ "path": "../contracts" }, { "path": "../domain" }, { "path": "../application" }, { "path": "../infrastructure" }, { "path": "../adapter-vscode-providers" }]
+  "references": [{ "path": "../contracts" }, { "path": "../domain" }, { "path": "../application" }, { "path": "../infrastructure" }, { "path": "../adapter-vscode-providers" }, { "path": "../adapter-lsp" }]
 }

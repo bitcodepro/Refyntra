@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { type DelegatedWorkspace, PYTHON_SYNTAX, RUST_SYNTAX, createDelegatedWorkspace, fakeEdit, fakeUri } from '@refyntra/adapter-testing';
-import { flushAsync } from '@refyntra/adapter-testing';
 import {
   type DelegatedLanguage,
   PROVIDER_COMMANDS,
@@ -9,8 +8,6 @@ import {
   PYTHON_ROUTE_ID,
   RUST_LANGUAGE,
   RUST_ROUTE_ID,
-  SEARCH_EXTENSIONS_COMMAND,
-  TS_JS_LANGUAGE,
   identifierAt,
   macroRulesBodies,
   pythonModuleSpans,
@@ -18,7 +15,8 @@ import {
   validateRustName,
 } from '../src';
 
-// Python and Rust share the one delegated adapter with TS/JS; only the DelegatedLanguage differs. The fake provider
+// The Python and Rust text rules (shared with the own language-server routes in @refyntra/adapter-lsp) driven through
+// the delegated adapter. The fake provider
 // answers like VS Code's public provider commands for a tiny Python-like / Rust-like language.
 
 const PY_ORDERS = 'file:///ws/app/orders.py';
@@ -46,7 +44,7 @@ afterEach(async () => {
 
 async function make(language: DelegatedLanguage, o: Parameters<typeof createDelegatedWorkspace>[0] = {}): Promise<DelegatedWorkspace> {
   const python = language === PYTHON_LANGUAGE;
-  w = createDelegatedWorkspace({ files: python ? PY_FILES : RS_FILES, syntax: python ? PYTHON_SYNTAX : RUST_SYNTAX, language, probeDelaysMs: [0], ...o });
+  w = createDelegatedWorkspace({ files: python ? PY_FILES : RS_FILES, syntax: python ? PYTHON_SYNTAX : RUST_SYNTAX, language, ...o });
   await w.engine.start();
   for (const uri of python ? [PY_ORDERS, PY_USE] : [RS_LIB, RS_USE]) w.open(uri);
   return w;
@@ -62,7 +60,6 @@ describe('descriptors', () => {
     expect(PYTHON_DESCRIPTOR).toMatchObject({ adapterId: 'python', providerRouteId: PYTHON_ROUTE_ID, displayName: 'Python', languageIds: ['python'], fileExtensions: ['.py', '.pyi'], ownership: 'delegated' });
     expect(RUST_LANGUAGE.descriptor).toMatchObject({ adapterId: 'rust', providerRouteId: RUST_ROUTE_ID, displayName: 'Rust', languageIds: ['rust'], fileExtensions: ['.rs'] });
     expect(PYTHON_DESCRIPTOR.capabilityIds).toEqual(['python.find', 'python.related', 'python.references', 'python.rename', 'python.frameworkRelations']);
-    expect(TS_JS_LANGUAGE.missingProvider).toBeUndefined();
     const ws = await make(PYTHON_LANGUAGE);
     expect(ws.registry.routeFor(PY_STUB)?.descriptor.providerRouteId).toBe(PYTHON_ROUTE_ID);
     expect(ws.registry.routeFor('file:///ws/a.txt', 'python')?.descriptor.providerRouteId).toBe(PYTHON_ROUTE_ID);
@@ -184,41 +181,6 @@ describe.each([
     const line = text.split('\n').findIndex((l) => l.includes('"get_order"'));
     const r = await ws.engine.prepareRename({ uri: useUri, position: { line, character: text.split('\n')[line]!.indexOf('"get_order"') + 3 } }, 'fetch_order');
     expect(r.kind === 'unavailable' && r.reasonCode).toBe('InsideString');
-  });
-
-  it('provider absent: every feature names the missing provider; Health offers the extension search (never an install)', async () => {
-    const ws = await make(language);
-    ws.world.absent = true;
-    const rel = await ws.engine.related(call);
-    expect(rel.kind === 'unavailable' && rel.reasonCode).toBe('ProviderUnavailable');
-    if (rel.kind === 'unavailable') expect(rel.message).toContain(name === 'Python' ? 'Python language extension' : 'rust-analyzer');
-    const h = ws.adapter.health();
-    expect(h.state).toBe('Ready');
-    expect(h.reasonCode).toBe('ProviderMissing');
-    expect(h.recoveryActions).toEqual([{ command: SEARCH_EXTENSIONS_COMMAND, title: language.missingProvider!.recoveryTitle, args: [language.missingProvider!.extensionQuery] }]);
-    expect(h.message).toMatch(/never installs/);
-    const ren = await ws.engine.prepareRename(decl, 'fetch_order');
-    expect(ren.kind === 'unavailable' && ren.reasonCode).toBe('ProviderUnavailable');
-    const find = await ws.engine.find('order');
-    expect(find.items).toEqual([]);
-    expect(find.notes.some((n) => n.startsWith(`${name}:`) && n.includes(language.missingProvider!.message))).toBe(true);
-    const byId = Object.fromEntries((await ws.engine.actions(call)).items.map((i) => [i.capabilityId, i]));
-    expect(byId[`${language.capabilityPrefix}.rename`]!.state).toBe('unavailable');
-    expect(byId[`${language.capabilityPrefix}.rename`]!.reasonCode).toBe('ProviderMissing');
-    // Installed later: the next answer flips the route back.
-    ws.world.absent = false;
-    expect((await ws.engine.related(call)).kind).toBe('related');
-    expect(ws.adapter.health().reasonCode).toBeUndefined();
-  });
-
-  it('opening a document probes for a provider; a missing one is reported only after the last probe', async () => {
-    const ws = await make(language, { probeDelaysMs: [0, 0] });
-    ws.world.absent = true;
-    ws.open(language === PYTHON_LANGUAGE ? PY_STUB : RS_USE);
-    await flushAsync();
-    await new Promise((r) => setTimeout(r, 20));
-    await flushAsync();
-    expect(ws.adapter.health().reasonCode).toBe('ProviderMissing');
   });
 });
 

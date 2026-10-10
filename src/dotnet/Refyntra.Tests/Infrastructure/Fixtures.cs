@@ -75,6 +75,12 @@ public static class Fixtures
         }
     }
 
+    /// <summary>
+    /// Runs a tool and returns its exit code and output. Bounded: a timeout kills the process tree and throws
+    /// TimeoutException; once the process has exited, the output is read for at most a few seconds more, because a
+    /// grandchild that inherited the pipes (MSBuild worker nodes, build servers) can keep them open for a long time.
+    /// MSBuild node reuse and the MSBuild server are disabled for these tool runs for the same reason.
+    /// </summary>
     public static async Task<(int code, string output)> RunAsync(string exe, string[] args, string cwd, TimeSpan timeout)
     {
         var psi = new ProcessStartInfo(exe)
@@ -85,12 +91,33 @@ public static class Fixtures
             UseShellExecute = false,
         };
         foreach (var a in args) psi.ArgumentList.Add(a);
-        using var p = Process.Start(psi)!;
-        var stdout = p.StandardOutput.ReadToEndAsync();
-        var stderr = p.StandardError.ReadToEndAsync();
+        psi.Environment["MSBUILDDISABLENODEREUSE"] = "1";
+        psi.Environment["DOTNET_CLI_USE_MSBUILD_SERVER"] = "0";
+        using var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
+        // Process exit itself, not end-of-output: WaitForExitAsync would also wait for the pipes to close.
+        var exited = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        p.Exited += (_, _) => exited.TrySetResult();
+        p.Start();
+        var stdout = new System.Text.StringBuilder();
+        var stderr = new System.Text.StringBuilder();
+        p.OutputDataReceived += (_, e) => { if (e.Data != null) lock (stdout) stdout.AppendLine(e.Data); };
+        p.ErrorDataReceived += (_, e) => { if (e.Data != null) lock (stderr) stderr.AppendLine(e.Data); };
+        p.BeginOutputReadLine();
+        p.BeginErrorReadLine();
         using var cts = new CancellationTokenSource(timeout);
-        await p.WaitForExitAsync(cts.Token);
-        return (p.ExitCode, await stdout + await stderr);
+        try
+        {
+            await exited.Task.WaitAsync(cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            try { p.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
+            throw new TimeoutException($"{Path.GetFileName(exe)} {string.Join(' ', args)} did not finish within {timeout}");
+        }
+        // The process has exited; give the asynchronous readers a short, bounded time to drain what it wrote.
+        await Task.Delay(200);
+        string Text(System.Text.StringBuilder sb) { lock (sb) return sb.ToString(); }
+        return (p.ExitCode, Text(stdout) + Text(stderr));
     }
 
     public static string HostDll()

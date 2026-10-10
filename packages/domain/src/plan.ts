@@ -39,6 +39,13 @@ export interface DelegatedRefactorPlan {
     returnedEditsMatchedPreview: boolean;
   };
   title: string;
+  /**
+   * Present when the edits come from a language server process Refyntra started itself (Python: bundled Pyright;
+   * Rust: bundled rust-analyzer). Refyntra owned the server's view of the open documents: these are the document
+   * versions the server computed the rename on. The semantic engine is still third-party, so the plan stays
+   * `delegated` (ADR-002 amendment); the versions make the re-ask before apply stricter.
+   */
+  serverSession?: { server: string; serverVersion?: string; processOwner: 'refyntra'; documentVersions: { uri: string; version: number }[] };
 }
 
 export type AnyRefactorPlan = RefactorPlanDto | DelegatedRefactorPlan;

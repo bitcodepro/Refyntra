@@ -29,6 +29,34 @@ Not tested on Linux: VS Code versions other than 1.90.2 and 1.141.0, a desktop s
 
 Also learned: the unit test `processTree.test.ts` had never run on a POSIX system (a newline escaping bug made its child process fail to start); it is fixed. Inside a container use `docker run --init`, otherwise orphans stay zombies and process-existence checks report them alive.
 
+## Python and Rust: bundled language servers per package
+
+No other VS Code extension is needed for Python or Rust. Every package ships Pyright 1.1.414; the platform packages also
+ship the official rust-analyzer 2026-09-21 binary of their target (downloaded at packaging time only, SHA-256 from
+`scripts/package/rust-analyzer.json`). Sizes measured 2026-10-10 (`pnpm package:vsix -- --all-targets --universal`):
+
+| Package (`vsce --target`) | rust-analyzer | VSIX size |
+|---|---|---|
+| win32-x64 | x86_64-pc-windows-msvc | 24.58 MiB |
+| win32-arm64 | aarch64-pc-windows-msvc | 23.95 MiB |
+| linux-x64 | x86_64-unknown-linux-gnu | 25.08 MiB |
+| linux-arm64 | aarch64-unknown-linux-gnu | 24.78 MiB |
+| alpine-x64 | x86_64-unknown-linux-musl | 25.20 MiB |
+| darwin-x64 | x86_64-apple-darwin | 24.82 MiB |
+| darwin-arm64 | aarch64-apple-darwin | 24.33 MiB |
+| universal (no target) | none: Health says Rust is not available on this platform | 10.60 MiB |
+
+Before the bundled servers the (single) VSIX was 9.10 MiB. Pyright adds about 1.5 MiB compressed (6.5 MiB unpacked:
+language server JavaScript and the typeshed standard-library stubs; third-party stubs are not bundled), rust-analyzer
+13–15 MiB compressed (34–42 MiB unpacked).
+
+Verified on Windows 11 x64 (2026-10-10): Python Find, Related, Rename apply + Undo on the bundled Pyright and Rust
+Related/Rename preview on the bundled rust-analyzer in an Extension Host with **no other extension** (integration
+scenario `pyrust-lsp`), and from the installed win32-x64 VSIX (`test:install`, scenario `pyrust`). This machine has no
+Rust toolchain, so the Rust runs covered the *cargo not found* path (route Partial, Health **Install Rust**);
+rust-analyzer still resolved definitions, references and the rename inside the crate. The other packages were built
+and audited but not run on their platforms.
+
 ## Not supported and untested
 
 macOS, Windows ARM64, remote/WSL/Dev Containers, virtual workspaces, non-SDK-style projects, older SDKs, VS Code versions other than the two above.

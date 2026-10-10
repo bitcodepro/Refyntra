@@ -1,0 +1,15 @@
+{
+  "comment": "rust-analyzer bundled in the platform VSIX packages. Downloaded ONLY at packaging time (scripts/package/servers.mjs) from the official rust-lang/rust-analyzer GitHub release and verified against these SHA-256 values (the archive digests GitHub publishes for the release assets). Never downloaded at run time. License: MIT OR Apache-2.0 (texts in scripts/package/licenses/).",
+  "version": "2026-09-21",
+  "license": "MIT OR Apache-2.0",
+  "source": "https://github.com/rust-lang/rust-analyzer/releases/tag/2026-09-21",
+  "targets": {
+    "win32-x64": { "url": "https://github.com/rust-lang/rust-analyzer/releases/download/2026-09-21/rust-analyzer-x86_64-pc-windows-msvc.zip", "sha256": "f62a18aad35568fd9205006a62f97613eac8c4f2ec5fe43c830dde09684e5e6f", "binary": "rust-analyzer.exe" },
+    "win32-arm64": { "url": "https://github.com/rust-lang/rust-analyzer/releases/download/2026-09-21/rust-analyzer-aarch64-pc-windows-msvc.zip", "sha256": "2cfbd8fc8eb8f8232cc81eb338462abaf78081b4fda7a9fed91a6bf5b2f1ace0", "binary": "rust-analyzer.exe" },
+    "linux-x64": { "url": "https://github.com/rust-lang/rust-analyzer/releases/download/2026-09-21/rust-analyzer-x86_64-unknown-linux-gnu.gz", "sha256": "b2d24ce2bda2ea05b1ad7c2917d205f8111775f703ccd908e6061803ae8257d0", "binary": "rust-analyzer" },
+    "linux-arm64": { "url": "https://github.com/rust-lang/rust-analyzer/releases/download/2026-09-21/rust-analyzer-aarch64-unknown-linux-gnu.gz", "sha256": "32a75657041a7a2ebf635c1e3968753e2639778b68dd4fb13c4b2584255f2ba8", "binary": "rust-analyzer" },
+    "alpine-x64": { "url": "https://github.com/rust-lang/rust-analyzer/releases/download/2026-09-21/rust-analyzer-x86_64-unknown-linux-musl.gz", "sha256": "ece8f431b4d3359755a8633308fcdc135d33e7922c4f6de14a3767507ef3c546", "binary": "rust-analyzer" },
+    "darwin-x64": { "url": "https://github.com/rust-lang/rust-analyzer/releases/download/2026-09-21/rust-analyzer-x86_64-apple-darwin.gz", "sha256": "1e2f706ee97d9f931ea36ed4e83f839efd0ac09870e18ec8350877d7b98ad8a0", "binary": "rust-analyzer" },
+    "darwin-arm64": { "url": "https://github.com/rust-lang/rust-analyzer/releases/download/2026-09-21/rust-analyzer-aarch64-apple-darwin.gz", "sha256": "eb474adfd12b6e66a6d0a7c25ed51210a64a0237f326f898e32e25164c9b11ad", "binary": "rust-analyzer" }
+  }
+}

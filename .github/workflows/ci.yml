@@ -52,18 +52,17 @@ jobs:
       - name: Test host
         run: dotnet test src/dotnet/Refyntra.sln -c Release --no-build
 
-      - name: Package VSIX
+      - name: Integration tests (Python/Rust on the bundled servers, no other extension)
+        run: pnpm test:integration
+
+      - name: Package VSIX (win32-x64; rust-analyzer downloaded at packaging time, SHA-256 verified)
         run: pnpm package:vsix
+
+      - name: Audit VSIX
+        run: pnpm audit:vsix
 
       - name: Install smoke (installed VSIX, clean profile, non-ASCII path)
         run: pnpm test:install
-
-      - name: Upload VSIX
-        uses: actions/upload-artifact@v4
-        with:
-          name: refyntra-vsix
-          path: "**/*.vsix"
-          if-no-files-found: error
 
   ubuntu:
     name: Ubuntu (compile and unit only)
@@ -102,3 +101,53 @@ jobs:
 
       - name: Test host
         run: dotnet test src/dotnet/Refyntra.sln -c Release --no-build
+
+  # One platform VSIX per target: identical except servers/rust-analyzer (the pinned, SHA-256-verified release binary
+  # of that target, downloaded at packaging time only). The universal package carries no rust-analyzer.
+  package:
+    name: Package ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [win32-x64, win32-arm64, linux-x64, linux-arm64, alpine-x64, darwin-x64, darwin-arm64, universal]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@12.10.1 --activate
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build host
+        run: dotnet build src/dotnet/Refyntra.sln -c Release
+
+      - name: Package
+        shell: bash
+        run: |
+          if [ "${{ matrix.target }}" = universal ]; then
+            pnpm package:vsix -- --target linux-x64 --universal
+            pnpm audit:vsix -- --vsix dist/refyntra-0.1.0.vsix
+          else
+            pnpm package:vsix -- --target ${{ matrix.target }}
+            pnpm audit:vsix -- --vsix dist/refyntra-0.1.0-${{ matrix.target }}.vsix
+          fi
+
+      - name: Upload VSIX
+        uses: actions/upload-artifact@v4
+        with:
+          name: refyntra-vsix-${{ matrix.target }}
+          path: dist/*.vsix
+          if-no-files-found: error

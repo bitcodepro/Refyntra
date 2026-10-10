@@ -7,6 +7,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { repo, extPkg, ensureVsix, extractVsix, walk, rel } from './lib.mjs';
+import { LICENSES_DIR, RA } from './servers.mjs';
 
 const manual = []; // things needing manual legal review
 const flag = (msg) => { manual.push(msg); console.warn(`MANUAL REVIEW: ${msg}`); };
@@ -118,12 +119,39 @@ try {
     noticeFiles.set(h, { rel: `legal/${rp}`, owners: n.owners });
   }
 
+  // ---------- bundled language servers (extension/servers) ----------
+  const serverLicenses = []; // {rel, what}
+  const copyLicense = (from, name, what) => {
+    fs.mkdirSync(legalDir, { recursive: true });
+    fs.copyFileSync(from, path.join(legalDir, name));
+    serverLicenses.push({ rel: `legal/${name}`, what });
+  };
+  const pyDir = path.join(ext, 'servers', 'pyright');
+  if (fs.existsSync(path.join(pyDir, 'package.json'))) {
+    const pj = JSON.parse(fs.readFileSync(path.join(pyDir, 'package.json'), 'utf8'));
+    const pyFiles = walk(pyDir).map((f) => `servers/pyright/${rel(pyDir, f)}`);
+    components.push({ ecosystem: 'npm', name: 'pyright', version: pj.version, license: pj.license, copyright: 'Copyright (c) Microsoft Corporation', files: pyFiles.filter((f) => !f.includes('/typeshed-fallback/')) });
+    copyLicense(path.join(pyDir, 'LICENSE.txt'), 'pyright-LICENSE.txt', `Pyright ${pj.version} (MIT)`);
+    const commit = fs.readFileSync(path.join(pyDir, 'dist', 'typeshed-fallback', 'commit.txt'), 'utf8').trim();
+    components.push({ ecosystem: 'generic', name: 'typeshed (stdlib stubs, bundled with Pyright)', version: commit.slice(0, 12), license: 'Apache-2.0 AND MIT', copyright: 'typeshed contributors', files: pyFiles.filter((f) => f.includes('/typeshed-fallback/')) });
+    copyLicense(path.join(pyDir, 'dist', 'typeshed-fallback', 'LICENSE'), 'typeshed-LICENSE.txt', 'typeshed (Apache-2.0; parts MIT, as stated in the file)');
+  }
+  const raDir = path.join(ext, 'servers', 'rust-analyzer');
+  if (fs.existsSync(raDir)) {
+    // Target-independent wording: every platform package ships the same notices file.
+    const raFiles = ['servers/rust-analyzer/rust-analyzer(.exe) (the binary of the package platform)', 'servers/rust-analyzer/LICENSE-MIT.txt', 'servers/rust-analyzer/LICENSE-APACHE.txt', 'servers/rust-analyzer/VERSION.txt'];
+    components.push({ ecosystem: 'generic', name: 'rust-analyzer', version: RA.version, license: 'MIT OR Apache-2.0', copyright: 'The rust-analyzer developers', files: raFiles, review: undefined });
+    copyLicense(path.join(LICENSES_DIR, 'rust-analyzer-LICENSE-MIT.txt'), 'rust-analyzer-LICENSE-MIT.txt', `rust-analyzer ${RA.version} (MIT)`);
+    copyLicense(path.join(LICENSES_DIR, 'rust-analyzer-LICENSE-APACHE.txt'), 'rust-analyzer-LICENSE-APACHE.txt', `rust-analyzer ${RA.version} (Apache-2.0)`);
+  }
+
   // ---------- reporting ----------
   components.sort((a, b) => (a.ecosystem + a.name).localeCompare(b.ecosystem + b.name));
   const mitCopyrights = [...new Set(components.filter((c) => /^MIT$/i.test(c.license) && c.copyright).map((c) => c.copyright.replace(/\s*All rights reserved\.?$/i, '')))].sort();
   const counts = {};
   for (const c of components) counts[c.license] = (counts[c.license] ?? 0) + 1;
-  if (components.some((c) => /Apache-2\.0/.test(c.license))) flag('an Apache-2.0 component is bundled: its LICENSE and NOTICE text must be added to legal/');
+  // Apache-2.0 components need their license text in legal/ (the bundled servers ship theirs; anything else is flagged).
+  if (components.some((c) => /Apache-2\.0/.test(c.license) && c.ecosystem !== 'generic')) flag('an Apache-2.0 component is bundled: its LICENSE and NOTICE text must be added to legal/');
 
   const MIT_TEXT = `Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
@@ -132,13 +160,20 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
 
   const npmCount = components.filter((c) => c.ecosystem === 'npm').length;
-  const nugetCount = components.length - npmCount;
+  const nugetCount = components.filter((c) => c.ecosystem === 'nuget').length;
+  const serverCount = components.filter((c) => c.ecosystem === 'generic').length;
   const md = [];
   md.push('# Third-party notices', '',
     `Generated by \`scripts/package/notices.mjs\` from the contents of \`${extPkg.name}-${extPkg.version}.vsix\`. Do not edit by hand; run \`pnpm notices\`. This file is not a legal opinion. A machine-readable CycloneDX 1.5 SBOM is produced next to the VSIX (\`dist/${extPkg.name}-${extPkg.version}.sbom.json\`).`, '',
     '## What is shipped', '',
-    `- The extension bundle \`extension/dist/extension.js\` (esbuild): ${npmCount ? 'it includes the npm packages listed below' : '**no third-party npm package is bundled**; it contains only Refyntra code (the `vscode` API is provided by the editor at run time)'}.`,
+    `- The extension bundle \`extension/dist/extension.js\` (esbuild): ${components.some((c) => c.files.includes('dist/extension.js (bundled)')) ? 'it includes the npm packages listed below' : '**no third-party npm package is bundled**; it contains only Refyntra code (the `vscode` API is provided by the editor at run time)'}.`,
     `- The .NET host \`extension/host\`: Refyntra assemblies plus the ${nugetCount} NuGet packages listed below.`, '',
+    '## Bundled language servers', '',
+    'Python and Rust work without any other VS Code extension: Refyntra runs these servers as its own processes.', '',
+    '- **Pyright** (npm `pyright`, MIT, Microsoft Corporation) in `extension/servers/pyright`: only the files its language server needs (no source maps). `dist/vendor.js` contains npm libraries bundled by the Pyright project, distributed by Microsoft under the Pyright license.',
+    '- **typeshed** standard-library stubs (Apache-2.0; parts MIT) bundled inside Pyright (`extension/servers/pyright/dist/typeshed-fallback`). Third-party stubs (`stubs/`) are not bundled. The license text ships as `legal/typeshed-LICENSE.txt` and next to the stubs.',
+    `- **rust-analyzer** ${RA.version} (MIT OR Apache-2.0, the rust-analyzer developers) in \`extension/servers/rust-analyzer\` of the platform packages: the official release binary for that platform, downloaded at packaging time from ${RA.source} and verified against the SHA-256 in \`scripts/package/rust-analyzer.json\`. Both license texts ship (\`legal/rust-analyzer-LICENSE-MIT.txt\`, \`legal/rust-analyzer-LICENSE-APACHE.txt\`). The binary statically links Rust crates published under permissive licenses (MIT, Apache-2.0 and compatible); their attributions are those of the rust-analyzer release.`,
+    ...serverLicenses.map((l) => `  - \`${l.rel}\`: ${l.what}`), '',
     '## Not bundled', '',
     '- **MSBuild and the .NET SDK**: taken from the SDK installed by the user at run time; not redistributed. `Microsoft.Build.Framework` is referenced with `ExcludeAssets="runtime"` and is not shipped.',
     '- **xunit 2.9.3** (Apache-2.0; xunit.core, xunit.assert, xunit.analyzers and xunit.extensibility.* declare Apache-2.0; xunit.abstractions 2.0.3 has only a licenseUrl): test-only, used by the `tests/fixtures/DiRules/DiRules.Tests` fixture and the host test project. Not redistributed, not part of the VSIX.',
@@ -160,7 +195,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
   // ---------- CycloneDX 1.5 SBOM ----------
   const ref = (c) => `${c.ecosystem}:${c.name}@${c.version}`;
-  const purl = (c) => (c.ecosystem === 'npm' ? `pkg:npm/${c.name.replace('@', '%40')}@${c.version}` : `pkg:nuget/${c.name}@${c.version}`);
+  const purl = (c) => (c.ecosystem === 'npm' ? `pkg:npm/${c.name.replace('@', '%40')}@${c.version}` : c.ecosystem === 'generic' ? (c.name === 'rust-analyzer' ? `pkg:github/rust-lang/rust-analyzer@${c.version}` : `pkg:github/python/typeshed@${c.version}`) : `pkg:nuget/${c.name}@${c.version}`);
   const nugetByName = new Map(components.filter((c) => c.ecosystem === 'nuget').map((c) => [c.name.toLowerCase(), c]));
   const mainRef = `${extPkg.name}@${extPkg.version}`;
   const bom = {
@@ -190,7 +225,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
   const sbomPath = path.join(repo, 'dist', `${extPkg.name}-${extPkg.version}.sbom.json`);
   fs.writeFileSync(sbomPath, JSON.stringify(bom, null, 2) + '\n');
 
-  console.log(`\nComponents: ${components.length} (npm ${npmCount}, NuGet ${nugetCount}); first-party assemblies ${firstParty.length}`);
+  console.log(`\nComponents: ${components.length} (npm ${npmCount}, NuGet ${nugetCount}, other ${serverCount}); first-party assemblies ${firstParty.length}`);
   for (const [l, n] of Object.entries(counts).sort()) console.log(`  ${l}: ${n}`);
   console.log(`Wrote THIRD_PARTY_NOTICES.md, packages/extension/legal/ (${noticeFiles.size} files), ${path.relative(repo, sbomPath)}`);
   console.log(manual.length ? `${manual.length} item(s) need manual review` : 'No items need manual review');

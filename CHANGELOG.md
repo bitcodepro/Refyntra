@@ -4,6 +4,38 @@ All notable changes are listed here. The project is alpha; nothing has been rele
 
 ## Unreleased
 
+### Fixed (tests)
+
+- Host test helper `Fixtures.RunAsync` waited without a bound for the output pipes of `dotnet sln add`/`dotnet restore`; an MSBuild worker node that inherited them kept a whole `dotnet test` run hanging at 0 % CPU (seen in `ReviewFindingsTests.S2_AProjectOutsideTheClosureThatStartsReferencingTheOwnerMakesThePlanStale`). It now waits for process exit (not end of output), kills the process tree on timeout, and disables MSBuild node reuse/server for these tool runs; covered by `FixturesRunTests`.
+
+### Changed (Python and Rust: no other extension needed)
+
+- Python and Rust no longer use the providers of separately installed extensions. Refyntra ships the language servers
+  and runs them as its own processes: **Pyright 1.1.414** (npm `pyright`, MIT; run on VS Code's own Node runtime, no
+  system Node) and **rust-analyzer 2026-09-21** (official release binary, MIT OR Apache-2.0). TypeScript/JavaScript is
+  unchanged (VS Code's built-in features through public provider commands).
+- Own LSP client in `infrastructure` (Content-Length framing + JSON-RPC peer, supervised process, process-tree kill);
+  no `vscode-languageclient`, no registered providers. New package `@refyntra/adapter-lsp` (vscode-free) implements
+  the routes `python.pyright` and `rust.rust-analyzer` over the application's new `LspConnection` port.
+- Lifecycle: lazy start on the first Python/Rust document in a trusted workspace; never in Restricted Mode;
+  `initialize` with the workspace folders; Refyntra sends didOpen/didChange/didClose itself (versions = document
+  sequence); restart with backoff after a crash, `Failed`/`ServerCrashed` after repeated crashes; shutdown/exit on
+  deactivate. Server logs at debug level with paths redacted.
+- Find (`workspace/symbol`), Related (definition, implementation, references) and Rename (`prepareRename` + `rename`)
+  over LSP. Rename plans record the server and the document versions the edit was computed on (`serverSession`); the
+  same session is asked again before apply and must return identical edits on identical versions and fingerprints.
+  File operations in a rename are refused. Routes stay `delegated` (ADR-002 amendment).
+- Rust needs the Rust toolchain (`cargo`) for the Cargo project model; without it the route is Partial
+  (`CargoNotFound`) and Health offers **Install Rust** (opens rustup.rs). Python imports of installed packages use
+  `python.defaultInterpreterPath` or a `.venv`/`venv` in the workspace.
+- Removed: the "install a Python language extension / rust-analyzer" recovery, the provider probe and the
+  `ProviderMissing` reason.
+- Packaging: platform-specific VSIX packages (`vsce --target`: win32-x64/arm64, linux-x64/arm64, alpine-x64,
+  darwin-x64/arm64) each with only its own rust-analyzer, plus an optional universal package without it.
+  rust-analyzer is downloaded at packaging time only and verified against `scripts/package/rust-analyzer.json`.
+  `audit:vsix` allows exactly the bundled server files; notices/SBOM include Pyright, typeshed and rust-analyzer with
+  their license texts. VSIX size 9.10 MiB → 24.0–25.2 MiB per platform (universal 10.6 MiB).
+
 - EF Core: ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly()) and GetType().Assembly are resolved to the context's own assembly (configurations are linked, likely) instead of being reported as an unknown assembly.
 
 ### Added (navigation)

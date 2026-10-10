@@ -9,6 +9,7 @@ import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import path from 'node:path';
+import { currentTarget, ensureRustAnalyzer } from '../../../scripts/package/servers.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const extensionDevelopmentPath = path.resolve(here, '..');
@@ -70,8 +71,9 @@ function tsProject(name) {
 }
 
 /**
- * A temp Python + Rust mini-project for the delegated Python and Rust routes (generic code; nothing in the repository
- * is modified). No Python or Rust language extension is installed in the test profile.
+ * A temp Python + Rust mini-project for the Python and Rust language-server routes (generic code; nothing in the
+ * repository is modified). No extension besides Refyntra runs in the test profile: Python uses the bundled Pyright,
+ * Rust the bundled rust-analyzer. `app/closed.py` is never opened by the tests.
  */
 function pyRustProject(name) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `refyntra-${name}-`));
@@ -89,6 +91,10 @@ class OrderService:
   fs.writeFileSync(path.join(root, 'app', 'use.py'), `from app.orders import get_order
 
 first = get_order(1)
+`);
+  fs.writeFileSync(path.join(root, 'app', 'closed.py'), `from app.orders import get_order
+
+second = get_order(2)
 `);
   fs.writeFileSync(path.join(root, 'Cargo.toml'), `[package]
 name = "orders"
@@ -262,12 +268,26 @@ const scenarios = e2e
       // TS/JS provider absent for a document: a .ts file (routed to the TS/JS route by its extension) whose language
       // mode is Plain Text, so no TypeScript provider answers for it.
       { name: 'ts-absent', tsProject: true, trusted: true, env: { REFYNTRA_HOST_PATH: '' } },
-      // Python and Rust with no language extension installed (empty extensions dir, --disable-extensions): every
-      // feature names the missing provider and Health offers the Extensions view search (never an install).
-      { name: 'pyrust-absent', pyRustProject: true, trusted: true, env: { REFYNTRA_HOST_PATH: '' } },
+      // Python and Rust on Refyntra's own language servers (bundled Pyright and rust-analyzer) with NO other extension
+      // (empty extensions dir, --disable-extensions also disables VS Code's built-in extensions): Find, Related,
+      // Rename apply + Undo. REFYNTRA_TEST_EXPECT_NO_CARGO: this machine has no cargo → Health must say so.
+      { name: 'pyrust-lsp', pyRustProject: true, trusted: true, settings: { 'refyntra.rename.apply': true, 'files.autoSave': 'off' }, env: { REFYNTRA_HOST_PATH: '', REFYNTRA_TEST_EXPECT_NO_CARGO: hasCargo() ? '0' : '1' } },
+      // Restricted Mode with Python and Rust files: no language server process may be spawned.
+      { name: 'pyrust-restricted', pyRustProject: true, trusted: false, env: { REFYNTRA_HOST_PATH: '', REFYNTRA_TEST_FORCE_RESTRICTED: '1' } },
       // Accessibility: the same flows under the built-in high contrast theme.
       { name: 'high-contrast', workspace: path.join(here, 'workspaces', 'tiny'), trusted: true, settings: { 'workbench.colorTheme': 'Default High Contrast' }, env: { REFYNTRA_HOST_PATH: '' } },
     ];
+
+/** cargo on PATH or in ~/.cargo/bin (looked up, never run). */
+function hasCargo() {
+  const exe = process.platform === 'win32' ? 'cargo.exe' : 'cargo';
+  const dirs = (process.env.PATH ?? '').split(path.delimiter).filter(Boolean);
+  dirs.push(path.join(os.homedir(), '.cargo', 'bin'));
+  return dirs.some((d) => fs.existsSync(path.join(d, exe)));
+}
+
+// The bundled rust-analyzer for this platform (pinned + SHA-256 verified; the same file the platform VSIX ships).
+if (!e2e) await ensureRustAnalyzer(currentTarget());
 
 if (e2e && !process.env.REFYNTRA_HOST_PATH) {
   console.error('test:e2e needs REFYNTRA_HOST_PATH=<path to Refyntra.Host.dll>');

@@ -18,9 +18,9 @@ export type HealthActionId =
   | 'getStarted'
   | 'copyText'
   | 'showText'
-  | 'searchExtensions';
+  | 'installRust';
 
-export const HEALTH_ACTION_IDS: readonly HealthActionId[] = ['restore', 'showRestoreOutput', 'installSdk', 'openGlobalJson', 'trustWorkspace', 'selectSolution', 'restartBackend', 'exportDebugBundle', 'getStarted', 'copyText', 'showText', 'searchExtensions'];
+export const HEALTH_ACTION_IDS: readonly HealthActionId[] = ['restore', 'showRestoreOutput', 'installSdk', 'openGlobalJson', 'trustWorkspace', 'selectSolution', 'restartBackend', 'exportDebugBundle', 'getStarted', 'copyText', 'showText', 'installRust'];
 
 export interface HealthAction {
   /** Unique within one model; the webview sends this key back and the extension looks the action up in its own model. */
@@ -269,35 +269,46 @@ function csharpSection(a: AdapterHealth, trusted: boolean, key: (id: HealthActio
   return s('error', `${a.displayName} is not running`, `The Refyntra ${a.displayName} backend could not start${reason}, so Find, Related, Actions and Rename are unavailable for ${a.displayName}. Restart it; if that does not help, export a debug bundle and report the problem.`, restart, [], groups);
 }
 
-/** Delegated routes that need an installed language extension: Health headline and meaning while ready. */
-const DELEGATED_READY: Record<string, { headline: string; meaning: string }> = {
+/** Python and Rust run on language servers bundled with Refyntra (own processes; no other extension needed). */
+const LSP_SECTIONS: Record<string, { server: string; ready: string; meaning: string; trust: string }> = {
   python: {
-    headline: 'Python: ready (uses the installed Python language extension)',
-    meaning: 'Related, Find and Rename for Python files are delegated to the Python language extension you installed (for example one with Pyright, basedpyright or Jedi). Refyntra bundles none; if none answers, this line says so.',
+    server: 'Pyright',
+    ready: 'Python: ready (Pyright, bundled with Refyntra)',
+    meaning: 'Related, Find and Rename for Python files use the Pyright language server that ships with Refyntra; no other extension is needed. Imports of installed packages resolve when a Python environment is found (python.defaultInterpreterPath or a .venv/venv folder in the workspace).',
+    trust: 'This workspace is not trusted, so Refyntra does not start Pyright for Python files. Find, Related, Actions and Rename are unavailable for Python until you trust the workspace.',
   },
   rust: {
-    headline: 'Rust: ready (uses the installed rust-analyzer)',
-    meaning: 'Related, Find and Rename for Rust files are delegated to the rust-analyzer extension you installed. Refyntra bundles none; if none answers, this line says so.',
+    server: 'rust-analyzer',
+    ready: 'Rust: ready (rust-analyzer, bundled with Refyntra)',
+    meaning: 'Related, Find and Rename for Rust files use the rust-analyzer language server that ships with Refyntra; no other extension is needed. It uses your Rust toolchain (cargo) to load the Cargo project.',
+    trust: 'This workspace is not trusted, so Refyntra does not start rust-analyzer (it would run cargo, build scripts and proc-macros of the project). Find, Related, Actions and Rename are unavailable for Rust until you trust the workspace.',
   },
 };
 
+export const RUSTUP_URL = 'https://rustup.rs/';
+
 function otherSection(a: AdapterHealth, key: (id: HealthActionId) => string): LanguageSection {
   const name = a.adapterId === 'typescript' ? 'TypeScript / JavaScript' : a.displayName;
-  if (a.state === 'Ready' && a.reasonCode === 'ProviderMissing') {
-    // No provider answered for a document of this language: name the missing extension and open the Extensions
-    // view with a search (never an automatic install).
-    const install = a.recoveryActions.find((r) => r.command === 'workbench.extensions.search');
-    const query = typeof install?.args?.[0] === 'string' ? install.args[0] : undefined;
-    const primary: HealthAction | undefined = install && query ? { key: key('searchExtensions'), id: 'searchExtensions', label: install.title, hint: `Opens the Extensions view searching for "${query}". Refyntra does not install anything itself.`, arg: query } : undefined;
-    return { adapterId: a.adapterId, icon: 'warning', headline: `${name}: no language provider installed`, meaning: a.message ?? '', ...(primary ? { primary } : {}), more: [], groups: [] };
+  const section = (icon: StatusIcon, headline: string, meaning: string, primary?: HealthAction, more: HealthAction[] = []): LanguageSection => ({ adapterId: a.adapterId, icon, headline, meaning, ...(primary ? { primary } : {}), more, groups: [] });
+  const lsp = LSP_SECTIONS[a.adapterId];
+  if (lsp) {
+    const restart: HealthAction = { key: key('restartBackend'), id: 'restartBackend', label: 'Restart backend', hint: `Restart the Refyntra backends, ${lsp.server} included.` };
+    if (a.state === 'TrustRequired') return section('locked', 'Restricted Mode', lsp.trust, { key: key('trustWorkspace'), id: 'trustWorkspace', label: 'Trust workspace', hint: 'Open Manage Workspace Trust.' });
+    if (a.state === 'Ready') return section('ok', lsp.ready, lsp.meaning);
+    if (a.state === 'Partial' && a.reasonCode === 'CargoNotFound') {
+      return section('warning', 'Rust works partially: cargo (the Rust toolchain) was not found', a.message ?? '', { key: key('installRust'), id: 'installRust', label: 'Install Rust', hint: `Opens ${RUSTUP_URL} in your browser. Refyntra does not install anything itself.`, arg: RUSTUP_URL }, [restart]);
+    }
+    if (a.state === 'Partial') return section('warning', `${name} works partially`, a.message ?? '', undefined, [restart]);
+    if (a.state === 'NotStarted') return section('info', `${name}: starts when you open a ${name} file`, a.message ?? '');
+    if (a.state === 'Loading' || a.state === 'Restarting') return section('loading', `${name}: ${a.state === 'Restarting' ? 'restarting' : 'loading'}…`, a.message ?? `${lsp.server} is starting.`);
+    if (a.reasonCode === 'ServerNotFound') return section('error', `${name} is not available`, a.message ?? `${lsp.server} is not bundled for this platform.`);
+    return section('error', `${name} is not running`, `${lsp.server} could not start or stopped${a.message ? ` (${a.message})` : ''}. Restart it; if that does not help, export a debug bundle and report the problem.`, restart);
   }
-  const delegated = DELEGATED_READY[a.adapterId];
-  if (a.state === 'Ready' && delegated) return { adapterId: a.adapterId, icon: 'ok', headline: delegated.headline, meaning: delegated.meaning, more: [], groups: [] };
   if (a.state === 'Ready') {
-    return { adapterId: a.adapterId, icon: 'ok', headline: TS_HEADLINE[a.state] && a.adapterId === 'typescript' ? TS_HEADLINE[a.state]! : `${name}: ready`, meaning: a.adapterId === 'typescript' ? 'Related, Find and Rename for TypeScript and JavaScript files use the language support built into VS Code; nothing to set up.' : '', more: [], groups: [] };
+    return section('ok', TS_HEADLINE[a.state] && a.adapterId === 'typescript' ? TS_HEADLINE[a.state]! : `${name}: ready`, a.adapterId === 'typescript' ? 'Related, Find and Rename for TypeScript and JavaScript files use the language support built into VS Code; nothing to set up.' : '');
   }
   const icon: StatusIcon = a.state === 'Loading' || a.state === 'Restarting' || a.state === 'NotStarted' ? 'loading' : a.state === 'TrustRequired' ? 'locked' : 'warning';
-  return { adapterId: a.adapterId, icon, headline: `${name}: ${a.state === 'NotStarted' ? 'starts when you open a file' : a.state.toLowerCase()}`, meaning: a.message ?? '', more: [], groups: [] };
+  return section(icon, `${name}: ${a.state === 'NotStarted' ? 'starts when you open a file' : a.state.toLowerCase()}`, a.message ?? '');
 }
 
 export function buildHealthPage(input: HealthPageInput): HealthPageModel {

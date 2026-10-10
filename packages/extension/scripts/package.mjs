@@ -1,12 +1,19 @@
-// Packages the VSIX: production bundle + .NET host payload.
-//   pnpm package:vsix                        fails when the host build output is missing
+// Packages the platform VSIX: production bundle + .NET host payload + bundled language servers.
+//   pnpm package:vsix                           the current platform (e.g. dist/refyntra-0.1.0-win32-x64.vsix)
+//   pnpm package:vsix -- --target linux-arm64   another target
+//   pnpm package:vsix -- --all-targets          every target pinned in scripts/package/rust-analyzer.json
+//   pnpm package:vsix -- --universal            additionally a universal VSIX WITHOUT rust-analyzer (for platforms
+//                                               without a pinned binary; Health then says Rust is not available there)
 //   pnpm package:vsix -- --allow-missing-host   packages without host/ (the extension then reports HostNotFound)
 // Host payload source: src/dotnet/Refyntra.Host/bin/Release/net10.0/** → packages/extension/host/
+// Language servers (scripts/package/servers.mjs): servers/pyright (identical in every VSIX) and servers/rust-analyzer
+// (only the binary of the VSIX's own target; downloaded at packaging time only and SHA-256 verified).
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import path from 'node:path';
+import { RA_TARGETS, currentTarget, stagePyright, stageRustAnalyzer } from '../../../scripts/package/servers.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
@@ -14,14 +21,22 @@ const repo = path.resolve(root, '..', '..');
 const allowMissingHost = process.argv.includes('--allow-missing-host');
 const hostSource = process.env.REFYNTRA_HOST_BUILD_DIR || path.join(repo, 'src', 'dotnet', 'Refyntra.Host', 'bin', 'Release', 'net10.0');
 const hostTarget = path.join(root, 'host');
+const serversDir = path.join(root, 'servers');
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const outDir = path.join(repo, 'dist');
-const outFile = path.join(outDir, `${pkg.name}-${pkg.version}.vsix`);
+const outFileFor = (target) => path.join(outDir, target ? `${pkg.name}-${pkg.version}-${target}.vsix` : `${pkg.name}-${pkg.version}.vsix`);
 
 function fail(message) {
   console.error(`\npackage:vsix failed: ${message}`);
   process.exit(1);
 }
+
+const argAfter = (name) => {
+  const i = process.argv.indexOf(name);
+  return i >= 0 ? process.argv[i + 1] : undefined;
+};
+const targets = process.argv.includes('--all-targets') ? RA_TARGETS : [argAfter('--target') ?? currentTarget()];
+for (const t of targets) if (!RA_TARGETS.includes(t)) fail(`no rust-analyzer is pinned for target ${t} (known: ${RA_TARGETS.join(', ')}); use --universal for a package without it.`);
 
 // 1. Host payload.
 fs.rmSync(hostTarget, { recursive: true, force: true });
@@ -52,12 +67,25 @@ if (copiedLicense) fs.copyFileSync(path.join(repo, 'LICENSE'), license);
 const notices = path.join(root, 'THIRD_PARTY_NOTICES.md');
 fs.copyFileSync(path.join(repo, 'THIRD_PARTY_NOTICES.md'), notices);
 
+// 4. Pyright: the same files in every package.
+const pyrightVersion = stagePyright(path.join(serversDir, 'pyright'));
+console.log(`Pyright ${pyrightVersion}: staged into servers/pyright`);
+
+const require = createRequire(import.meta.url);
+const vsce = path.join(path.dirname(require.resolve('@vscode/vsce/package.json')), 'vsce');
+const built = [];
 try {
   fs.mkdirSync(outDir, { recursive: true });
-  const require = createRequire(import.meta.url);
-  const vsce = path.join(path.dirname(require.resolve('@vscode/vsce/package.json')), 'vsce');
-  execFileSync(process.execPath, [vsce, 'package', '--no-dependencies', '--allow-missing-repository', '--out', outFile], { cwd: root, stdio: 'inherit' });
-  execFileSync(process.execPath, [vsce, 'ls', '--no-dependencies'], { cwd: root, stdio: 'inherit' });
+  const variants = [...targets, ...(process.argv.includes('--universal') ? [undefined] : [])];
+  for (const target of variants) {
+    // 5. rust-analyzer of this target only (none in the universal package).
+    const raDir = path.join(serversDir, 'rust-analyzer');
+    fs.rmSync(raDir, { recursive: true, force: true });
+    if (target) await stageRustAnalyzer(target, raDir);
+    const outFile = outFileFor(target);
+    execFileSync(process.execPath, [vsce, 'package', '--no-dependencies', '--allow-missing-repository', ...(target ? ['--target', target] : []), '--out', outFile], { cwd: root, stdio: 'inherit' });
+    built.push(outFile);
+  }
 } catch (e) {
   fail(e instanceof Error ? e.message : String(e));
 } finally {
@@ -65,5 +93,5 @@ try {
   fs.rmSync(notices, { force: true });
 }
 
-const size = fs.statSync(outFile).size;
-console.log(`\nVSIX: ${outFile} (${(size / 1024).toFixed(1)} KiB)${fs.existsSync(hostDll) ? '' : ' — WITHOUT host payload'}`);
+console.log('');
+for (const f of built) console.log(`VSIX: ${f} (${(fs.statSync(f).size / 1048576).toFixed(2)} MiB)${fs.existsSync(hostDll) ? '' : ' — WITHOUT host payload'}`);

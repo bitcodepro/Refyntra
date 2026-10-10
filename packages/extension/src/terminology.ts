@@ -48,7 +48,10 @@ export const REASON_PHRASE: Readonly<Record<string, string>> = {
   ScopeTooLarge: 'the scope has too many files',
   NoFixes: 'no supported fix selected',
   // Delegated routes (TS/JS, Python, Rust).
-  ProviderMissing: 'no language provider installed for this language',
+  ServerNotFound: 'the bundled language server is not available for this platform',
+  CargoNotFound: 'cargo (the Rust toolchain) was not found; Rust results are limited to open files',
+  ServerCrashed: 'the language server stopped repeatedly',
+  ServerViewMismatch: 'the language server saw a different file content than Refyntra',
   ProviderUnavailable: 'no language provider answered for this file',
   InvalidName: 'the new name is not valid for this language',
   InsideString: 'the cursor is inside a string',

@@ -114,3 +114,35 @@ export interface ApplicationSettings {
   /** refyntra.rename.apply */
   applyRenameEnabled(): boolean;
 }
+
+/**
+ * One session with a language server process that Refyntra itself started (Python: the bundled Pyright; Rust: the
+ * bundled rust-analyzer). Plain LSP messages: the application never sees streams, processes or `vscode`.
+ */
+export interface LspConnection {
+  /** `InitializeResult.capabilities` of this session. */
+  readonly serverCapabilities: Record<string, unknown>;
+  /** `InitializeResult.serverInfo` (name and version), when the server sent it. */
+  readonly serverInfo?: { name: string; version?: string };
+  request(method: string, params: unknown, token?: CancellationToken): Promise<unknown>;
+  notify(method: string, params: unknown): void;
+  /** Fires once when the session is gone (process exit, stream end, malformed frame). */
+  onClose(listener: (error?: Error) => void): Disposable;
+  /** Fires for server notifications (e.g. `$/progress`, `window/logMessage`, `experimental/serverStatus`). */
+  onNotification(listener: (method: string, params: unknown) => void): Disposable;
+  /** Graceful `shutdown` + `exit`, then the process tree is killed if it is still running. */
+  shutdown(): Promise<void>;
+}
+
+export interface LspStartContext {
+  providerRouteId: string;
+  attempt: number;
+  /** Workspace folders (file: URIs) the server is initialized with. */
+  workspaceFolders: readonly { uri: string; name: string }[];
+}
+
+/**
+ * Starts and initializes one language server session; rejects with StartupError for known startup problems (for
+ * example ServerNotFound when the bundled binary is missing for this platform).
+ */
+export type LspConnectionFactory = (ctx: LspStartContext) => Promise<LspConnection>;

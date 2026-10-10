@@ -12,6 +12,7 @@ export default defineConfig({
       '@refyntra/infrastructure': src('infrastructure'),
       '@refyntra/adapter-testing': src('adapter-testing'),
       '@refyntra/adapter-vscode-providers': src('adapter-vscode-providers'),
+      '@refyntra/adapter-lsp': src('adapter-lsp'),
     },
   },
   test: {

@@ -9,10 +9,12 @@ import {
   ProtocolLanguageAdapter,
   RefyntraEngine,
 } from '@refyntra/application';
-import { DelegatedProviderAdapter, PYTHON_LANGUAGE, RUST_LANGUAGE, TS_JS_ROUTE_ID, createVsCodeProviderBridge } from '@refyntra/adapter-vscode-providers';
+import { DelegatedProviderAdapter, TS_JS_ROUTE_ID, createVsCodeProviderBridge } from '@refyntra/adapter-vscode-providers';
+import { type LspLanguage, LspLanguageAdapter, PYTHON_LSP_LANGUAGE, RUST_LSP_LANGUAGE } from '@refyntra/adapter-lsp';
 import type { Location } from '@refyntra/contracts';
 import type { HealthSummary } from '@refyntra/domain';
-import { type ProcessLaunch, SinkLogger, createHostTransportFactory, systemClock } from '@refyntra/infrastructure';
+import { type ProcessLaunch, SinkLogger, createHostTransportFactory, createLspConnectionFactory, systemClock } from '@refyntra/infrastructure';
+import { CARGO_NOT_FOUND, LspServerLocator, RUST_ANALYZER_SETTINGS, findCargo, pyrightConfiguration } from './lspServers';
 import { runActions } from './actions';
 import { BUNDLE_SCHEME, BundlePreviewProvider, DebugBundleExporter } from './debugBundle';
 import { LogRing } from './debugBundleModel';
@@ -56,6 +58,8 @@ export interface RefyntraTestApi {
   statusBarText(): string;
   /** Effective trust as Refyntra sees it. */
   isTrusted(): boolean;
+  /** Language servers (Pyright, rust-analyzer) started in this session: command and arguments. */
+  lspLaunches(): { command: string; args: string[] }[];
   /** Number of host processes spawned in this extension host session. */
   hostSpawnCount(): number;
   /** Inject the host path (e2e against the real host); takes effect on the next (re)start. */
@@ -143,8 +147,50 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
   registry.registerLanguage(csharp);
   // TS/JS: delegated route over VS Code's public provider commands; no own process or provider.
   registry.registerLanguage(new DelegatedProviderAdapter({ workspaceId, tracker, logger, ...createVsCodeProviderBridge(vscode) }));
-  // Python and Rust: the same delegated route over whatever language extension is installed (none is required or bundled).
-  for (const language of [PYTHON_LANGUAGE, RUST_LANGUAGE]) registry.registerLanguage(new DelegatedProviderAdapter({ language, workspaceId, tracker, logger, ...createVsCodeProviderBridge(vscode) }));
+  // Python and Rust: Refyntra's own language-server processes (bundled Pyright and rust-analyzer). No other extension
+  // is needed or used; the servers start lazily on the first document in a trusted workspace (never in Restricted Mode).
+  const servers = new LspServerLocator(context.extensionPath, context.extensionMode !== vscode.ExtensionMode.Production);
+  const lspLaunches: ProcessLaunch[] = [];
+  const bridge = createVsCodeProviderBridge(vscode);
+  const folders = () => (vscode.workspace.workspaceFolders ?? []).filter((f) => f.uri.scheme === 'file');
+  const fileChanges = new vscode.EventEmitter<{ uri: string; type: 1 | 2 | 3 }[]>();
+  const watcher = vscode.workspace.createFileSystemWatcher('**/{*.py,*.pyi,*.rs,Cargo.toml,Cargo.lock,pyproject.toml,pyrightconfig.json}');
+  context.subscriptions.push(
+    fileChanges,
+    watcher,
+    watcher.onDidCreate((u) => fileChanges.fire([{ uri: u.toString(), type: 1 }])),
+    watcher.onDidChange((u) => fileChanges.fire([{ uri: u.toString(), type: 2 }])),
+    watcher.onDidDelete((u) => fileChanges.fire([{ uri: u.toString(), type: 3 }])),
+  );
+  const addLsp = (language: LspLanguage, name: string, resolve: () => Promise<ProcessLaunch>, configuration: (section: string | undefined) => unknown, initializationOptions?: unknown, environment?: () => Promise<import('@refyntra/adapter-lsp').EnvironmentNote | undefined>) => {
+    const adapter = new LspLanguageAdapter({
+      language,
+      workspaceId,
+      connect: createLspConnectionFactory({
+        name,
+        resolveLaunch: resolve,
+        logger,
+        configuration,
+        ...(initializationOptions ? { initializationOptions: () => initializationOptions } : {}),
+        onSpawn: (launch) => lspLaunches.push(launch),
+        clientName: 'refyntra-vscode',
+        clientVersion: version,
+      }),
+      tracker,
+      trust: { isTrusted },
+      clock: systemClock,
+      logger,
+      documents: bridge.documents,
+      hash: bridge.hash,
+      workspaceFolders: () => folders().map((f) => ({ uri: f.uri.toString(), name: f.name })),
+      onDidChangeFiles: (listener) => fileChanges.event(listener),
+      normalizeUri: (u) => vscode.Uri.parse(u, true).toString(),
+      ...(environment ? { environment } : {}),
+    });
+    registry.registerLanguage(adapter);
+  };
+  addLsp(PYTHON_LSP_LANGUAGE, 'pyright', () => servers.pyright(), (section) => pyrightConfiguration(section, folders()));
+  addLsp(RUST_LSP_LANGUAGE, 'rust-analyzer', () => servers.rustAnalyzer(), (section) => (section === 'rust-analyzer' ? RUST_ANALYZER_SETTINGS : null), RUST_ANALYZER_SETTINGS, async () => (findCargo() ? undefined : CARGO_NOT_FOUND));
 
   // Frontend ↔ backend HTTP links (heuristic): TS/JS client calls matched to the C# route's ASP.NET endpoints.
   const clientFiles = new VsCodeClientFiles();
@@ -275,6 +321,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     statusBarText: () => statusBar.text(),
     isTrusted,
     hostSpawnCount: () => launches.length,
+    lspLaunches: () => lspLaunches.map((l) => ({ command: l.command, args: [...l.args] })),
     setHostPath: (p) => hostLocator.setOverride(p),
     hostLaunches: () => [...launches],
     editApplier,

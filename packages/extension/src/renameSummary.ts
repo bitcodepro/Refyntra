@@ -58,7 +58,14 @@ export function identifierPattern(languageId: string): RegExp {
 
 /** The language named in delegated rename texts, by the plan's route id. */
 export function delegatedProviderName(providerRouteId: string): string {
-  return ({ 'python.vscode-providers': 'Python', 'rust.vscode-providers': 'Rust' } as Record<string, string>)[providerRouteId] ?? 'TypeScript/JavaScript';
+  return ({ 'python.pyright': 'Python', 'rust.rust-analyzer': 'Rust', 'python.vscode-providers': 'Python', 'rust.vscode-providers': 'Rust' } as Record<string, string>)[providerRouteId] ?? 'TypeScript/JavaScript';
+}
+
+/** Where the edits of a delegated plan come from, in words. */
+export function delegatedSource(plan: { providerRouteId: string; serverSession?: { server: string } }): string {
+  return plan.serverSession
+    ? `the ${plan.serverSession.server} language server bundled with Refyntra (its own process; Refyntra recorded the document versions it used)`
+    : `the installed ${delegatedProviderName(plan.providerRouteId)} rename provider (public VS Code commands)`;
 }
 
 export function renamePreviewSummary(preview: SummaryInput, files: readonly PreviewFileModel[], invalid: boolean, fileLabel: (uri: string) => string = shortPath): string {
@@ -80,7 +87,7 @@ export function renamePreviewSummary(preview: SummaryInput, files: readonly Prev
     lines.push(
       '## Provider-managed semantic coverage',
       '',
-      `The edits come from the installed ${delegatedProviderName(plan.providerRouteId)} rename provider (public VS Code commands). They are **not validated semantically by Refyntra**: Refyntra only checks that the files and the provider edit are unchanged between this preview and the apply.`,
+      `The edits come from ${delegatedSource(plan)}. They are **not validated semantically by Refyntra**: Refyntra only checks that the files and the provider edit are unchanged between this preview and the apply.`,
       '',
     );
   }
@@ -98,7 +105,10 @@ export function renamePreviewSummary(preview: SummaryInput, files: readonly Prev
   const renames = plannedFileRenames(plan);
   lines.push(`- Files: ${files.length}, edits: ${files.reduce((n, f) => n + f.editCount, 0)}${renames.length ? `, file renames: ${renames.length}` : ''}`);
   if (plan.kind === 'delegated') {
-    lines.push('- Project contexts, compiler snapshot and read set of the provider: unknown', `- Validation: ${plan.validation.status}; compilation delta: ${plan.validation.compilationDelta}`);
+    lines.push(
+      plan.serverSession
+        ? `- Language server: ${plan.serverSession.server}${plan.serverSession.serverVersion ? ` ${plan.serverSession.serverVersion}` : ''}; open documents at versions ${plan.serverSession.documentVersions.map((v) => `${fileLabel(v.uri)}@${v.version}`).join(', ') || '(none open)'}; project context and read set: unknown`
+        : '- Project contexts, compiler snapshot and read set of the provider: unknown', `- Validation: ${plan.validation.status}; compilation delta: ${plan.validation.compilationDelta}`);
   } else {
     lines.push(
       `- Project contexts checked: ${plan.validation.checkedContexts.length}${plan.validation.uncheckedContexts.length ? `, not checked: ${plan.validation.uncheckedContexts.length}` : ''}`,
