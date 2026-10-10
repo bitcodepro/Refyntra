@@ -1,0 +1,517 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
+// Wire DTOs for protocol v1. They must serialize exactly like packages/contracts/src/protocol.ts:
+// camelCase names, string literal "enums", optional fields omitted when null. Fields typed `T | null`
+// in the contract (not optional) carry [JsonIgnore(Condition = Never)] so that null is written explicitly.
+namespace Refyntra.Host.Protocol;
+
+public static class Json
+{
+    public static readonly JsonSerializerOptions Options = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        PropertyNameCaseInsensitive = false,
+        WriteIndented = false,
+    };
+}
+
+public sealed class PositionDto
+{
+    public int Line { get; set; }
+    public int Character { get; set; }
+}
+
+public sealed class RangeDto
+{
+    public PositionDto Start { get; set; } = new();
+    public PositionDto End { get; set; } = new();
+}
+
+public class LocationDto
+{
+    public string Uri { get; set; } = "";
+    public RangeDto Range { get; set; } = new();
+}
+
+public sealed class LocationWithPreviewDto : LocationDto
+{
+    public string? ProjectName { get; set; }
+    public string? Preview { get; set; }
+}
+
+public class TraceParams
+{
+    public string TraceId { get; set; } = "";
+}
+
+public class WorkspaceParams : TraceParams
+{
+    public string WorkspaceId { get; set; } = "";
+}
+
+// ------------------------------------------------------------------ lifecycle
+
+public sealed class InitializeParams : TraceParams
+{
+    public int ProtocolMajor { get; set; } = -1;
+    public int ProtocolMinor { get; set; }
+    public string ClientName { get; set; } = "";
+    public string ClientVersion { get; set; } = "";
+}
+
+public sealed class LimitsDto
+{
+    public long MaxMessageBytes { get; set; }
+}
+
+public sealed class InitializeResult
+{
+    public int ProtocolMajor { get; set; }
+    public int ProtocolMinor { get; set; }
+    public string EngineVersion { get; set; } = "";
+    public string SessionEpoch { get; set; } = "";
+    public List<string> Capabilities { get; set; } = new();
+    public LimitsDto Limits { get; set; } = new();
+}
+
+public sealed class LoadDiagnosticDto
+{
+    public string Severity { get; set; } = "error";
+    public string Message { get; set; } = "";
+    public string? ProjectPath { get; set; }
+    /// <summary>Optional (protocol 1.1): what the UI can offer, e.g. refyntra.runRestore.</summary>
+    public List<RecoveryActionDto>? RecoveryActions { get; set; }
+    /// <summary>Optional (additive): machine-readable cause — missingAssets, missingPackages, missingProjectReference; absent for raw MSBuild messages.</summary>
+    public string? Cause { get; set; }
+}
+
+public sealed class ProjectContextInfoDto
+{
+    public string ProjectContextId { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string ProjectPath { get; set; } = "";
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)] public string? TargetFramework { get; set; }
+    public string State { get; set; } = "loaded";
+    public int DocumentCount { get; set; }
+    public List<LoadDiagnosticDto> Diagnostics { get; set; } = new();
+}
+
+public sealed class SdkDto
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)] public string? Version { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)] public string? Path { get; set; }
+}
+
+public sealed class EngineStatusDto
+{
+    public string State { get; set; } = "NotStarted";
+    public string SessionEpoch { get; set; } = "";
+    public SdkDto Sdk { get; set; } = new();
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)] public string? SolutionPath { get; set; }
+    public List<ProjectContextInfoDto> Projects { get; set; } = new();
+    public List<LoadDiagnosticDto> Diagnostics { get; set; } = new();
+    public string? ReasonCode { get; set; }
+    public string? Message { get; set; }
+}
+
+public sealed class WorkspaceOpenParams : WorkspaceParams
+{
+    public string Path { get; set; } = "";
+    public bool Trusted { get; set; }
+}
+
+// ------------------------------------------------------------------ documents
+
+public sealed class DocumentEventParams
+{
+    public string WorkspaceId { get; set; } = "";
+    public string Uri { get; set; } = "";
+    public long Sequence { get; set; }
+    public long WorkspaceRevision { get; set; }
+    public string? LanguageId { get; set; }
+    public int? Version { get; set; }
+    public string? Text { get; set; }
+}
+
+public sealed class BarrierParams : WorkspaceParams
+{
+    public long Sequence { get; set; }
+}
+
+public sealed class BarrierResult
+{
+    public long AcknowledgedSequence { get; set; }
+    public string SnapshotId { get; set; } = "";
+    public long WorkspaceRevision { get; set; }
+}
+
+// ------------------------------------------------------------------ availability
+
+public sealed class RecoveryActionDto
+{
+    public string Command { get; set; } = "";
+    public string Title { get; set; } = "";
+    public List<object>? Args { get; set; }
+}
+
+public sealed class AvailabilityScopeDto
+{
+    public string WorkspaceId { get; set; } = "";
+    public string? ProjectContextId { get; set; }
+    public string? DocumentUri { get; set; }
+    public string? SymbolId { get; set; }
+}
+
+public sealed class AvailabilityDto
+{
+    public string CapabilityId { get; set; } = "";
+    public string ProviderRouteId { get; set; } = "";
+    public AvailabilityScopeDto Scope { get; set; } = new();
+    public string State { get; set; } = "unknown";
+    public string? ReasonCode { get; set; }
+    public string? Message { get; set; }
+    public List<RecoveryActionDto> RecoveryActions { get; set; } = new();
+    public string RequiredTrust { get; set; } = "workspace";
+    public string Guarantee { get; set; } = "owned-semantic";
+    public List<string> Limitations { get; set; } = new();
+}
+
+public sealed class CapabilityQueryParams : WorkspaceParams
+{
+    public string SnapshotId { get; set; } = "";
+    public string? Uri { get; set; }
+    public PositionDto? Position { get; set; }
+    public string? SymbolId { get; set; }
+}
+
+// ------------------------------------------------------------------ symbols
+
+public sealed class ProvenanceDto
+{
+    public string Kind { get; set; } = "owned-semantic";
+    public string ProviderRouteId { get; set; } = "";
+    public string SessionEpoch { get; set; } = "";
+    public string SnapshotId { get; set; } = "";
+    public string ProjectContextId { get; set; } = "";
+    public string? ObservationId { get; set; }
+}
+
+public sealed class SymbolRefDto
+{
+    public string? SymbolId { get; set; }
+    public string Name { get; set; } = "";
+    public string DisplayName { get; set; } = "";
+    public string Kind { get; set; } = "other";
+    public string? ContainerName { get; set; }
+    public string? ProjectName { get; set; }
+    public LocationDto? Location { get; set; }
+    public string Origin { get; set; } = "source";
+    public ProvenanceDto Provenance { get; set; } = new();
+}
+
+public sealed class SymbolAtParams : WorkspaceParams
+{
+    public string SnapshotId { get; set; } = "";
+    public string Uri { get; set; } = "";
+    public PositionDto Position { get; set; } = new();
+}
+
+public sealed class SearchFiltersDto
+{
+    public bool? Type { get; set; }
+    public bool? Member { get; set; }
+    public string? Project { get; set; }
+    public string? Route { get; set; }
+    public string? Method { get; set; }
+}
+
+public sealed class SearchParams : WorkspaceParams
+{
+    public string SnapshotId { get; set; } = "";
+    public string Query { get; set; } = "";
+    public SearchFiltersDto Filters { get; set; } = new();
+    public int Limit { get; set; } = 50;
+}
+
+public sealed class SearchItemDto
+{
+    public SymbolRefDto? Symbol { get; set; }
+    public EndpointInfoDto? Endpoint { get; set; }
+    public double Score { get; set; }
+}
+
+public sealed class SearchResultDto
+{
+    public List<SearchItemDto> Items { get; set; } = new();
+    public bool Truncated { get; set; }
+    public string SnapshotId { get; set; } = "";
+}
+
+// ------------------------------------------------------------------ relations
+
+public sealed class EndpointInfoDto
+{
+    public List<string> HttpMethods { get; set; } = new();
+    public string Route { get; set; } = "";
+    public bool RouteIsDynamic { get; set; }
+    public LocationDto Location { get; set; } = new();
+    public SymbolRefDto? Handler { get; set; }
+    public string Kind { get; set; } = "minimal-api";
+}
+
+public sealed class DiRegistrationInfoDto
+{
+    public string Lifetime { get; set; } = "unknown";
+    public SymbolRefDto ServiceType { get; set; } = new();
+    public SymbolRefDto? ImplementationType { get; set; }
+    public string Form { get; set; } = "";
+    public string CompositionRoot { get; set; } = "";
+    public LocationDto Location { get; set; } = new();
+    /// <summary>"type" | "factory" | "instance" (additive, optional).</summary>
+    public string? ImplementationKind { get; set; }
+    /// <summary>Key of a keyed registration as shown (additive, optional).</summary>
+    public string? Key { get; set; }
+    /// <summary>Location of the factory delegate of a factory registration (additive, optional).</summary>
+    public LocationDto? FactoryLocation { get; set; }
+}
+
+public sealed class EvidenceDto
+{
+    public string Description { get; set; } = "";
+    public LocationDto? Location { get; set; }
+}
+
+public sealed class RelationTargetDto
+{
+    public SymbolRefDto? Symbol { get; set; }
+    public EndpointInfoDto? Endpoint { get; set; }
+    public DiRegistrationInfoDto? Registration { get; set; }
+    public LocationDto? Location { get; set; }
+    public string Label { get; set; } = "";
+}
+
+public sealed class RelationDto
+{
+    public string RelationKind { get; set; } = "";
+    public string Group { get; set; } = "";
+    public RelationTargetDto Target { get; set; } = new();
+    public List<EvidenceDto> Evidence { get; set; } = new();
+    public string Confidence { get; set; } = "proven";
+    public ProvenanceDto Provenance { get; set; } = new();
+    public List<string> Limitations { get; set; } = new();
+}
+
+public sealed class RelatedParams : WorkspaceParams
+{
+    public string SnapshotId { get; set; } = "";
+    public string? SymbolId { get; set; }
+    public string? Uri { get; set; }
+    public PositionDto? Position { get; set; }
+}
+
+public sealed class RelatedResultDto
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)] public SymbolRefDto? Subject { get; set; }
+    public List<RelationDto> Relations { get; set; } = new();
+    public string Completeness { get; set; } = "complete";
+    public List<string> ScopeNotes { get; set; } = new();
+    /// <summary>Structured form of the scope (additive; protocol-v1.md). Null only from older hosts.</summary>
+    public Refyntra.Semantics.ScopeDetails? ScopeDetails { get; set; }
+    public string SnapshotId { get; set; } = "";
+}
+
+public sealed class SymbolQueryParams : WorkspaceParams
+{
+    public string SnapshotId { get; set; } = "";
+    public string SymbolId { get; set; } = "";
+}
+
+public sealed class LocationsResultDto
+{
+    public List<LocationWithPreviewDto> Locations { get; set; } = new();
+    public string Completeness { get; set; } = "complete";
+    public string SnapshotId { get; set; } = "";
+}
+
+// ------------------------------------------------------------------ refactoring plans
+
+public sealed class TextEditDto
+{
+    public RangeDto Range { get; set; } = new();
+    public string NewText { get; set; } = "";
+}
+
+public sealed class PlannedTextChangeDto
+{
+    public string Kind { get; set; } = "text";
+    public string Uri { get; set; } = "";
+    public string ExpectedHash { get; set; } = "";
+    public string ResultHash { get; set; } = "";
+    public List<TextEditDto> Edits { get; set; } = new();
+}
+
+/// <summary>File rename resource operation (protocol 1.2): rename a file after every text edit of the plan.</summary>
+public sealed class PlannedFileRenameDto
+{
+    public string Kind { get; set; } = "rename";
+    public string OldUri { get; set; } = "";
+    public string NewUri { get; set; } = "";
+    /// <summary>SHA-256 of the text the renamed file must have (the result of the plan's text edits).</summary>
+    public string ResultHash { get; set; } = "";
+}
+
+public sealed class FileRenamePairDto
+{
+    public string OldUri { get; set; } = "";
+    public string NewUri { get; set; } = "";
+}
+
+/// <summary>What "also rename the file" means for a type rename (protocol 1.2).</summary>
+public sealed class FileRenameOfferDto
+{
+    public List<FileRenamePairDto> Files { get; set; } = new();
+    public bool Available { get; set; }
+    public bool Included { get; set; }
+    public string? ReasonCode { get; set; }
+    public string? Message { get; set; }
+}
+
+/// <summary>workspace/didRenameFiles (protocol 1.2): files renamed by the client; part of the document sequence.</summary>
+public sealed class DidRenameFilesParams
+{
+    public string WorkspaceId { get; set; } = "";
+    public long Sequence { get; set; }
+    public long WorkspaceRevision { get; set; }
+    public List<FileRenamePairDto> Files { get; set; } = new();
+}
+
+public sealed class InputFingerprintDto
+{
+    public string Input { get; set; } = "";
+    public string Hash { get; set; } = "";
+}
+
+public sealed class PlanValidationDto
+{
+    public string Status { get; set; } = "valid";
+    public List<string> CheckedContexts { get; set; } = new();
+    public List<string> UncheckedContexts { get; set; } = new();
+    public string CompilationDelta { get; set; } = "not-run";
+}
+
+public sealed class RefactorPlanDto
+{
+    public string PlanId { get; set; } = "";
+    public string ActionId { get; set; } = "";
+    public string ProviderRouteId { get; set; } = "";
+    public int ProtocolMajor { get; set; }
+    public string WorkspaceId { get; set; } = "";
+    public string Kind { get; set; } = "owned-semantic";
+    public string SessionEpoch { get; set; } = "";
+    public long BaseWorkspaceRevision { get; set; }
+    public string BaseSnapshotId { get; set; } = "";
+    public List<string> ProjectContextIds { get; set; } = new();
+    /// <summary>PlannedTextChangeDto entries, then PlannedFileRenameDto entries.</summary>
+    public List<object> WriteSet { get; set; } = new();
+    public FileRenameOfferDto? FileRename { get; set; }
+    public List<InputFingerprintDto> ReadSet { get; set; } = new();
+    public List<EvidenceDto> Evidence { get; set; } = new();
+    public List<string> Limitations { get; set; } = new();
+    public PlanValidationDto Validation { get; set; } = new();
+    public string Title { get; set; } = "";
+}
+
+public sealed class PrepareParams : WorkspaceParams
+{
+    public string SnapshotId { get; set; } = "";
+    public string ActionId { get; set; } = "";
+    public string SymbolId { get; set; } = "";
+    public string NewName { get; set; } = "";
+    /// <summary>File rename (protocol 1.2): include the rename of the files named after the type when it is proven safe.</summary>
+    public bool RenameFile { get; set; }
+}
+
+public sealed class PrepareResultDto
+{
+    public string Kind { get; set; } = "unavailable";
+    public RefactorPlanDto? Plan { get; set; }
+    public string? ReasonCode { get; set; }
+    public string? Message { get; set; }
+}
+
+public sealed class RevalidateParams : WorkspaceParams
+{
+    public string PlanId { get; set; } = "";
+    public string SnapshotId { get; set; } = "";
+}
+
+public sealed class RevalidateResultDto
+{
+    /// <summary>valid | limited | stale | invalid. "limited" only for a plan prepared as limited (never upgraded).</summary>
+    public string Status { get; set; } = "valid";
+    public string? ReasonCode { get; set; }
+    public string? Message { get; set; }
+    /// <summary>Set with status "limited": the plan's limitations, to show before applying.</summary>
+    public List<string>? Limitations { get; set; }
+}
+
+public sealed class DiscardParams
+{
+    public string WorkspaceId { get; set; } = "";
+    public string PlanId { get; set; } = "";
+}
+
+public sealed class RpcErrorData
+{
+    public string ReasonCode { get; set; } = "";
+    public string Message { get; set; } = "";
+    public string? Recovery { get; set; }
+}
+
+// ------------------------------------------------------------------ analysis (rules, additive in protocol 1.1)
+
+public sealed class AnalysisRunParams : WorkspaceParams
+{
+    public string SnapshotId { get; set; } = "";
+    /// <summary>Optional: only results whose primary location is in this document.</summary>
+    public string? Uri { get; set; }
+}
+
+public sealed class RelatedLocationDto
+{
+    public LocationDto Location { get; set; } = new();
+    public string Message { get; set; } = "";
+}
+
+public sealed class RuleDiagnosticDto
+{
+    public string Id { get; set; } = "";
+    public string Severity { get; set; } = "warning";
+    public string Message { get; set; } = "";
+    public LocationDto Location { get; set; } = new();
+    public List<RelatedLocationDto> RelatedLocations { get; set; } = new();
+    public List<EvidenceDto> Evidence { get; set; } = new();
+    public string Confidence { get; set; } = "proven";
+    public string Completeness { get; set; } = "complete";
+    public string? CompositionRoot { get; set; }
+    public string? HelpUri { get; set; }
+}
+
+public sealed class RuleAbstentionDto
+{
+    public string RuleId { get; set; } = "";
+    public string Reason { get; set; } = "";
+    public string? Message { get; set; }
+    public LocationDto? Location { get; set; }
+    public string? CompositionRoot { get; set; }
+}
+
+public sealed class AnalysisRunResultDto
+{
+    public List<RuleDiagnosticDto> Diagnostics { get; set; } = new();
+    public List<RuleAbstentionDto> Abstentions { get; set; } = new();
+    public string Completeness { get; set; } = "complete";
+    public string SnapshotId { get; set; } = "";
+}

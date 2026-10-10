@@ -1,0 +1,6 @@
+namespace Renames.Lib;
+
+public partial class Device
+{
+    public Device Twice() => new() { Size = Size * 2 };
+}

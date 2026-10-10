@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows (primary)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable pnpm
+        shell: bash
+        run: |
+          corepack enable
+          corepack prepare pnpm@12.10.1 --activate
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run: pnpm -r run build
+
+      - name: Unit tests
+        run: pnpm test:unit
+
+      - name: Architecture tests
+        run: pnpm test:architecture
+
+      - name: Build host
+        run: dotnet build src/dotnet/Refyntra.sln -c Release
+
+      - name: Test host
+        run: dotnet test src/dotnet/Refyntra.sln -c Release --no-build
+
+      - name: Package VSIX
+        run: pnpm package:vsix
+
+      - name: Install smoke (installed VSIX, clean profile, non-ASCII path)
+        run: pnpm test:install
+
+      - name: Upload VSIX
+        uses: actions/upload-artifact@v4
+        with:
+          name: refyntra-vsix
+          path: "**/*.vsix"
+          if-no-files-found: error
+
+  ubuntu:
+    name: Ubuntu (compile and unit only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@12.10.1 --activate
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run: pnpm -r run build
+
+      - name: Unit tests
+        run: pnpm test:unit
+
+      - name: Architecture tests
+        run: pnpm test:architecture
+
+      - name: Build host
+        run: dotnet build src/dotnet/Refyntra.sln -c Release
+
+      - name: Test host
+        run: dotnet test src/dotnet/Refyntra.sln -c Release --no-build

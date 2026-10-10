@@ -1,0 +1,9 @@
+packages:
+  - 'packages/*'
+
+# Build scripts are opt-in (supply chain). esbuild only verifies its platform binary;
+# vsce-sign/keytar are optional signing/credential helpers of @vscode/vsce that packaging does not need.
+allowBuilds:
+  esbuild: true
+  '@vscode/vsce-sign': false
+  keytar: false

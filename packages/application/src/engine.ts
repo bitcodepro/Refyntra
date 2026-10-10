@@ -1,0 +1,660 @@
+import type { Availability, Position, RecoveryAction, RevalidateResult, ScopeDetails, SymbolRef } from '@refyntra/contracts';
+import {
+  type AnyRefactorPlan,
+  type AnyRelation,
+  type FindItem,
+  type HealthSummary,
+  type PlanState,
+  type PlanValidationIssue,
+  type RelationGroupView,
+  PlanLifecycle,
+  RECOVERY_SHOW_HEALTH,
+  acceptsSemanticRequests,
+  groupRelations,
+  mergeFindItems,
+  mergeRelations,
+  sortAvailability,
+  toFindItem,
+  unavailable,
+  validatePlanStructure,
+} from '@refyntra/domain';
+import type { AdapterRegistry, LanguageAdapter, RouteResult } from './adapters';
+import { type CancellationToken, CancelledError, throwIfCancelled } from './cancellation';
+import type { DocumentTracker } from './documents';
+import { AdapterUnavailableError, RouteUnavailableError, RpcError, StaleResultError, describeError, describeErrorWithRecovery } from './errors';
+import { type ParsedFindQuery, hasAnyFilter, parseFindQuery } from './filters';
+import type { ApplicationSettings, ApplyFileReport, ApplyResourceReport, EditApplier, Logger } from './ports';
+import { BoundedCache, type Disposable, Emitter } from './util';
+
+export interface DocumentTarget {
+  uri: string;
+  position: Position;
+}
+
+export interface Unavailable {
+  kind: 'unavailable';
+  reasonCode: string;
+  message: string;
+  recoveryActions: RecoveryAction[];
+}
+
+export interface FindOutcome {
+  query: ParsedFindQuery;
+  items: FindItem[];
+  truncated: boolean;
+  /** Per-route notes, e.g. "C#: TrustRequired — ...". Results from other routes are still shown. */
+  notes: string[];
+  /** Route label per providerRouteId of the items, e.g. "C#" or "TS/JS (delegated)". */
+  routeLabels?: Record<string, string>;
+}
+
+/** Native editor rename offered when a delegated rename cannot be confirmed safe. Not validated by Refyntra. */
+export function nativeRenameRecovery(uri: string, position: Position): RecoveryAction {
+  return { command: 'refyntra.nativeRename', title: 'Use the editor Rename (not validated by Refyntra)', args: [uri, position] };
+}
+
+/** Find note of a delegated route: never presented as a complete index. */
+export function delegatedFindNote(displayName: string): string {
+  return `${displayName}: delegated results from the installed language provider; completeness unknown (not a complete index).`;
+}
+
+export interface RelatedView {
+  kind: 'related';
+  subject: SymbolRef | null;
+  groups: RelationGroupView[];
+  completeness: 'complete' | 'partial' | 'unknown';
+  /** Every scope note: the language route's, then notes added by framework adapters. */
+  scopeNotes: string[];
+  /** Structured scope from the language route (C# host); absent for delegated routes and older hosts. */
+  scopeDetails?: ScopeDetails;
+  /** Notes added here (framework adapter failures), i.e. not covered by scopeDetails. */
+  additionalNotes: string[];
+  providerRouteId: string;
+  sessionEpoch: string;
+  snapshotId: string;
+  workspaceRevision: number;
+}
+export type RelatedOutcome = RelatedView | Unavailable;
+
+export interface ActionsOutcome {
+  items: Availability[];
+  /** Explanation when nothing is available (an empty list never replaces an explanation). */
+  note?: string;
+}
+
+export interface RenamePreview {
+  kind: 'preview';
+  planId: string;
+  /** `delegated` plans carry provider-managed semantic coverage and are never `valid`. */
+  plan: AnyRefactorPlan;
+  state: PlanState;
+  issues: PlanValidationIssue[];
+  applyEnabled: boolean;
+}
+export type RenameOutcome = RenamePreview | Unavailable;
+
+export interface ApplyOutcome {
+  /**
+   * `limited`: nothing was done; the plan is only partly validated and needs an explicit confirmation of
+   * `limitations` (call applyRename again with `acceptLimited`). The plan stays Previewing.
+   */
+  status: 'applied' | 'stale' | 'failed' | 'disabled' | 'cancelled' | 'limited';
+  message: string;
+  /** With status `limited`: what the user must confirm. */
+  limitations?: string[];
+  /** Reconciled post-state per target (present once the editor apply was started). */
+  files?: ApplyFileReport[];
+  /** File rename: reconciled post-state of each planned file rename. */
+  resources?: ApplyResourceReport[];
+  /** File rename: the text edits were applied and confirmed but a file rename was not (offer Undo of the text; nothing was rolled back). */
+  textAppliedOnly?: boolean;
+  /** Stale/failed before anything was written: running Rename again gives a fresh preview. */
+  canReprepare?: boolean;
+}
+
+export interface AnalysisView {
+  kind: 'analysis';
+  diagnostics: import('@refyntra/contracts').RuleDiagnostic[];
+  abstentions: import('@refyntra/contracts').RuleAbstention[];
+  completeness: 'complete' | 'partial' | 'unknown';
+  providerRouteId: string;
+  sessionEpoch: string;
+  snapshotId: string;
+  workspaceRevision: number;
+}
+export type AnalysisOutcome = AnalysisView | (Unavailable & { providerRouteId: string });
+
+export interface PrepareOptions {
+  renameFile?: boolean;
+}
+
+export interface ApplyOptions {
+  /** The user explicitly confirmed the limitations of a plan whose validation is `limited`. */
+  acceptLimited?: boolean;
+}
+
+/** Boundary between presentation and application. In-process implementation: RefyntraEngine. */
+export interface EngineClient {
+  readonly workspaceId: string;
+  handlesDocument(uri: string, languageId?: string): boolean;
+  documentOpened(uri: string, languageId: string, version: number, text: string, dirty: boolean): void;
+  documentChanged(uri: string, languageId: string, version: number, text: string, dirty: boolean): void;
+  documentSaved(uri: string, languageId: string, version: number, text: string): void;
+  documentClosed(uri: string): void;
+  start(): Promise<void>;
+  restart(providerRouteId?: string): Promise<void>;
+  /** Non-document inputs changed (solution choice, trust granted): bump revision and restart routes. */
+  inputsChanged(reason: string): Promise<void>;
+  find(query: string, token?: CancellationToken, limit?: number): Promise<FindOutcome>;
+  related(target: DocumentTarget, token?: CancellationToken): Promise<RelatedOutcome>;
+  actions(target: DocumentTarget, token?: CancellationToken): Promise<ActionsOutcome>;
+  /** options.renameFile: also rename the files named after a type, when the backend proves it safe. */
+  prepareRename(target: DocumentTarget, newName: string, token?: CancellationToken, options?: PrepareOptions): Promise<RenameOutcome>;
+  applyRename(planId: string, token?: CancellationToken, options?: ApplyOptions): Promise<ApplyOutcome>;
+  discardPlan(planId: string): void;
+  planState(planId: string): PlanState | undefined;
+  /** Rule analysis (`analysis/run`) of every route that offers it; one outcome per route, never throws except on cancel. */
+  analyze(options?: { uri?: string }, token?: CancellationToken): Promise<AnalysisOutcome[]>;
+  health(): HealthSummary;
+  readonly onDidChangeHealth: (l: (h: HealthSummary) => void) => Disposable;
+  /** Fires when previously shown results may be invalid (epoch change). */
+  readonly onDidInvalidate: (l: (providerRouteId: string) => void) => Disposable;
+  dispose(): Promise<void>;
+}
+
+export interface EngineOptions {
+  workspaceId: string;
+  registry: AdapterRegistry;
+  tracker: DocumentTracker;
+  editApplier: EditApplier;
+  settings: ApplicationSettings;
+  logger: Logger;
+  isTrusted: () => boolean;
+  /** How many times a request is retried after its result was dropped as stale. */
+  staleRetries?: number;
+}
+
+interface PlanEntry {
+  lifecycle: PlanLifecycle;
+  adapter: LanguageAdapter;
+  workspaceRevision: number;
+}
+
+const DEFAULT_FIND_LIMIT = 200;
+
+/** Last path segment of a URI, decoded (for messages). */
+function baseName(uri: string): string {
+  const last = uri.slice(uri.lastIndexOf('/') + 1);
+  try {
+    return decodeURIComponent(last);
+  } catch {
+    return last;
+  }
+}
+
+export class RefyntraEngine implements EngineClient {
+  readonly workspaceId: string;
+  private readonly o: EngineOptions;
+  private readonly plans = new Map<string, PlanEntry>();
+  private readonly relatedCache = new BoundedCache<RelatedView>(64);
+  private readonly subs: Disposable[] = [];
+  private readonly healthEmitter = new Emitter<HealthSummary>();
+  private readonly invalidateEmitter = new Emitter<string>();
+  readonly onDidChangeHealth = this.healthEmitter.event;
+  readonly onDidInvalidate = this.invalidateEmitter.event;
+
+  constructor(options: EngineOptions) {
+    this.o = options;
+    this.workspaceId = options.workspaceId;
+    this.subs.push(options.tracker.onDidRecord((e) => this.o.registry.routeFor(e.uri, e.languageId)?.documentEvent(e)));
+    for (const adapter of options.registry.languageAdapters()) {
+      this.subs.push(adapter.onDidChangeHealth(() => this.healthEmitter.fire(this.health())));
+      this.subs.push(adapter.onDidChangeEpoch(() => this.onEpochChanged(adapter)));
+    }
+  }
+
+  // ---------------------------------------------------------------- documents
+
+  handlesDocument(uri: string, languageId?: string): boolean {
+    return this.o.registry.routeFor(uri, languageId) !== undefined;
+  }
+
+  documentOpened(uri: string, languageId: string, version: number, text: string, dirty: boolean): void {
+    if (this.handlesDocument(uri, languageId)) this.o.tracker.open(uri, languageId, version, text, dirty);
+  }
+
+  documentChanged(uri: string, languageId: string, version: number, text: string, dirty: boolean): void {
+    if (this.handlesDocument(uri, languageId)) this.o.tracker.change(uri, languageId, version, text, dirty);
+  }
+
+  documentSaved(uri: string, languageId: string, version: number, text: string): void {
+    if (this.handlesDocument(uri, languageId)) this.o.tracker.save(uri, languageId, version, text);
+  }
+
+  documentClosed(uri: string): void {
+    this.o.tracker.close(uri);
+  }
+
+  // ---------------------------------------------------------------- lifecycle
+
+  async start(): Promise<void> {
+    await Promise.all(this.o.registry.languageAdapters().map((a) => a.start().catch((e) => this.log('error', 'start failed', { route: a.descriptor.providerRouteId, error: describeError(e) }))));
+  }
+
+  async restart(providerRouteId?: string): Promise<void> {
+    const targets = this.o.registry.languageAdapters().filter((a) => !providerRouteId || a.descriptor.providerRouteId === providerRouteId);
+    await Promise.all(targets.map((a) => a.restart('user')));
+  }
+
+  async inputsChanged(reason: string): Promise<void> {
+    this.o.tracker.bumpRevision();
+    this.relatedCache.clear();
+    // Provider route / solution / trust change: every prepared plan is invalid.
+    this.invalidatePlans(undefined, `inputs changed: ${reason}`);
+    this.log('info', 'inputs changed', { reason });
+    await this.restart();
+  }
+
+  private onEpochChanged(adapter: LanguageAdapter): void {
+    const route = adapter.descriptor.providerRouteId;
+    // A new (or no) epoch invalidates every id, plan and cached result of this route.
+    this.invalidatePlans(adapter, 'backend session changed');
+    this.relatedCache.clear();
+    this.invalidateEmitter.fire(route);
+  }
+
+  /** Marks plans Stale (not ones already applying: the editor decides those). */
+  private invalidatePlans(adapter: LanguageAdapter | undefined, reason: string): void {
+    for (const [planId, entry] of this.plans) {
+      if (adapter && entry.adapter !== adapter) continue;
+      entry.lifecycle.tryTransition('Stale', reason);
+      if (entry.lifecycle.isTerminal) this.plans.delete(planId);
+    }
+  }
+
+  health(): HealthSummary {
+    return { adapters: this.o.registry.languageAdapters().map((a) => a.health()), workspaceTrusted: this.o.isTrusted() };
+  }
+
+  async dispose(): Promise<void> {
+    for (const s of this.subs) s.dispose();
+    for (const [, entry] of this.plans) entry.lifecycle.tryTransition('Discarded', 'shutdown');
+    this.plans.clear();
+    await Promise.all(this.o.registry.languageAdapters().map((a) => a.dispose().catch(() => undefined)));
+    this.healthEmitter.dispose();
+    this.invalidateEmitter.dispose();
+  }
+
+  // ---------------------------------------------------------------- Find
+
+  async find(query: string, token?: CancellationToken, limit = DEFAULT_FIND_LIMIT): Promise<FindOutcome> {
+    const parsed = parseFindQuery(query);
+    const outcome: FindOutcome = { query: parsed, items: [], truncated: false, notes: [], routeLabels: {} };
+    if (parsed.errors.length > 0 || (parsed.text.length === 0 && !hasAnyFilter(parsed.filters))) return outcome;
+    const lists: FindItem[][] = [];
+    await Promise.all(
+      this.o.registry.languageAdapters().map(async (adapter) => {
+        if (!adapter.descriptor.operations.includes('find')) return;
+        const h = adapter.health();
+        if (!acceptsSemanticRequests(h.state) && h.state !== 'Loading' && h.state !== 'Restarting') {
+          outcome.notes.push(`${h.displayName}: ${h.state}${h.message ? ` — ${h.message}` : ''}`);
+          return;
+        }
+        try {
+          const r = await this.withStaleRetry(() => adapter.search({ query: parsed.text, filters: parsed.filters, limit }, token), token);
+          const d = adapter.descriptor;
+          outcome.routeLabels![d.providerRouteId] = d.ownership === 'delegated' ? `${d.displayName} (delegated)` : d.displayName;
+          if (d.ownership === 'delegated') outcome.notes.push(delegatedFindNote(d.displayName));
+          lists.push(r.value.items.map((i) => toFindItem(i, adapter.descriptor.providerRouteId)).filter((x): x is FindItem => !!x));
+          if (r.value.truncated) outcome.truncated = true;
+        } catch (e) {
+          if (e instanceof CancelledError) throw e;
+          outcome.notes.push(this.noteFor(adapter, e));
+        }
+      }),
+    );
+    throwIfCancelled(token);
+    const merged = mergeFindItems(lists);
+    if (merged.length > limit) outcome.truncated = true;
+    outcome.items = merged.slice(0, limit);
+    outcome.notes.sort();
+    return outcome;
+  }
+
+  // ---------------------------------------------------------------- Related
+
+  async related(target: DocumentTarget, token?: CancellationToken): Promise<RelatedOutcome> {
+    const adapter = this.o.registry.routeFor(target.uri);
+    if (!adapter || !adapter.descriptor.operations.includes('related')) {
+      return { kind: 'unavailable', reasonCode: 'NoLanguageRoute', message: 'No Refyntra language route handles this file.', recoveryActions: [RECOVERY_SHOW_HEALTH] };
+    }
+    const cacheKey = `${adapter.descriptor.providerRouteId}|${adapter.currentEpoch() ?? '-'}|${this.o.tracker.revision}|${target.uri}|${target.position.line}:${target.position.character}`;
+    const cached = this.relatedCache.get(cacheKey);
+    if (cached) return cached;
+    try {
+      const r = await this.withStaleRetry(() => adapter.related({ uri: target.uri, position: target.position }, token), token);
+      const extra: AnyRelation[][] = [];
+      const scopeNotes = [...r.value.scopeNotes];
+      const additionalNotes: string[] = [];
+      for (const fw of this.o.registry.frameworksFor(adapter.descriptor.providerRouteId)) {
+        try {
+          extra.push(await fw.related({ subject: r.value.subject, languageResult: r, language: adapter, ...(token ? { token } : {}) }));
+        } catch (e) {
+          if (e instanceof CancelledError) throw e;
+          const note = `${fw.descriptor.displayName}: ${describeError(e)}`;
+          scopeNotes.push(note);
+          additionalNotes.push(note);
+        }
+      }
+      throwIfCancelled(token);
+      // Framework results were computed after the language result; drop everything if the epoch moved meanwhile.
+      if (adapter.currentEpoch() !== r.sessionEpoch || this.o.tracker.revision !== r.workspaceRevision) throw new StaleResultError('revision');
+      const view: RelatedView = {
+        kind: 'related',
+        subject: r.value.subject,
+        groups: groupRelations(mergeRelations([r.value.relations, ...extra])),
+        completeness: r.value.completeness,
+        scopeNotes,
+        ...(r.value.scopeDetails ? { scopeDetails: r.value.scopeDetails } : {}),
+        additionalNotes,
+        providerRouteId: r.providerRouteId,
+        sessionEpoch: r.sessionEpoch,
+        snapshotId: r.snapshotId,
+        workspaceRevision: r.workspaceRevision,
+      };
+      this.relatedCache.set(cacheKey, view);
+      return view;
+    } catch (e) {
+      return this.toUnavailable(adapter, e);
+    }
+  }
+
+  // ---------------------------------------------------------------- Actions
+
+  async actions(target: DocumentTarget, token?: CancellationToken): Promise<ActionsOutcome> {
+    const adapter = this.o.registry.routeFor(target.uri);
+    if (!adapter) {
+      return {
+        items: [
+          unavailable({ capabilityId: 'refyntra.actions', providerRouteId: 'none', workspaceId: this.workspaceId, reasonCode: 'NoLanguageRoute', message: 'No Refyntra language route handles this file.', recoveryActions: [RECOVERY_SHOW_HEALTH], documentUri: target.uri }),
+        ],
+        note: 'This file type is not handled by Refyntra.',
+      };
+    }
+    const h = adapter.health();
+    const explainDown = (reasonCode: string, message: string, recovery: RecoveryAction[]): ActionsOutcome => ({
+      items: adapter.descriptor.capabilityIds.map((capabilityId) =>
+        unavailable({ capabilityId, providerRouteId: adapter.descriptor.providerRouteId, workspaceId: this.workspaceId, reasonCode, message, recoveryActions: recovery.length ? recovery : [RECOVERY_SHOW_HEALTH], documentUri: target.uri }),
+      ),
+      note: message,
+    });
+    if (!acceptsSemanticRequests(h.state) && h.state !== 'Loading' && h.state !== 'Restarting' && h.state !== 'NotStarted') {
+      return explainDown(h.reasonCode ?? h.state, h.message ?? `${h.displayName} is ${h.state}`, h.recoveryActions);
+    }
+    try {
+      const r = await this.withStaleRetry(() => adapter.capabilities({ uri: target.uri, position: target.position }, token), token);
+      const items = sortAvailability(r.value);
+      return items.length > 0 ? { items } : { items, note: `${h.displayName}: no actions are known at this position.` };
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      const u = this.toUnavailable(adapter, e);
+      return explainDown(u.reasonCode, u.message, u.recoveryActions);
+    }
+  }
+
+  // ---------------------------------------------------------------- Rename (prepare/preview/apply)
+
+  async prepareRename(target: DocumentTarget, newName: string, token?: CancellationToken, options: PrepareOptions = {}): Promise<RenameOutcome> {
+    const adapter = this.o.registry.routeFor(target.uri);
+    if (!adapter || !adapter.descriptor.operations.includes('rename') || !adapter.descriptor.renameActionId) {
+      return { kind: 'unavailable', reasonCode: 'RenameNotSupported', message: 'Rename is not provided for this file by Refyntra.', recoveryActions: [] };
+    }
+    if (adapter.descriptor.ownership === 'delegated') return this.prepareDelegatedRename(adapter, target, newName, token);
+    const actionId = adapter.descriptor.renameActionId;
+    try {
+      const prepared = await this.withStaleRetry(async () => {
+        const sym = await adapter.symbolAt(target.uri, target.position, token);
+        if (!sym.value || !sym.value.symbolId) return undefined;
+        const p = await adapter.prepare({ symbolId: sym.value.symbolId, newName, actionId, ...(options.renameFile ? { renameFile: true } : {}) }, token);
+        if (p.sessionEpoch !== sym.sessionEpoch) throw new StaleResultError('epoch');
+        return p;
+      }, token);
+      if (!prepared) return { kind: 'unavailable', reasonCode: 'NoSymbol', message: 'There is no renameable symbol at the cursor.', recoveryActions: [] };
+      const result = prepared.value;
+      if (result.kind !== 'prepared') {
+        return { kind: 'unavailable', reasonCode: result.reasonCode ?? 'Unavailable', message: result.message ?? 'Rename is unavailable here.', recoveryActions: [RECOVERY_SHOW_HEALTH] };
+      }
+      const plan = result.plan;
+      const issues = validatePlanStructure(plan);
+      if (plan.sessionEpoch !== prepared.sessionEpoch) issues.push({ code: 'wrong-kind', message: 'Plan belongs to a different backend session' });
+      const lifecycle = new PlanLifecycle(plan);
+      this.plans.set(plan.planId, { lifecycle, adapter, workspaceRevision: prepared.workspaceRevision });
+      if (issues.length > 0) lifecycle.transition('Failed', issues.map((i) => i.message).join('; '));
+      else lifecycle.transition('Previewing');
+      return { kind: 'preview', planId: plan.planId, plan, state: lifecycle.state, issues, applyEnabled: this.o.settings.applyRenameEnabled() && issues.length === 0 };
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      return this.toUnavailable(adapter, e);
+    }
+  }
+
+  /** Delegated rename preparation; the plan is never `valid`. */
+  private async prepareDelegatedRename(adapter: LanguageAdapter, target: DocumentTarget, newName: string, token?: CancellationToken): Promise<RenameOutcome> {
+    const port = adapter.delegatedRename;
+    if (!port) return { kind: 'unavailable', reasonCode: 'RenameNotSupported', message: `${adapter.descriptor.displayName}: rename is not provided by Refyntra.`, recoveryActions: [nativeRenameRecovery(target.uri, target.position)] };
+    try {
+      const prepared = await port.prepare({ uri: target.uri, position: target.position, newName }, token);
+      throwIfCancelled(token);
+      const result = prepared.value;
+      if (result.kind !== 'prepared') {
+        return { kind: 'unavailable', reasonCode: result.reasonCode, message: result.message, recoveryActions: result.nativeFallback ? [nativeRenameRecovery(target.uri, target.position)] : [] };
+      }
+      const plan = result.plan;
+      // Prepared on a state that is already gone (an edit or a route restart during preparation): refuse at once.
+      if (adapter.currentEpoch() !== prepared.sessionEpoch || plan.bridgeEpoch !== prepared.sessionEpoch || this.o.tracker.revision !== prepared.workspaceRevision) {
+        return { kind: 'unavailable', reasonCode: 'DocumentChanged', message: 'The code changed while the rename was being prepared. Run Rename again.', recoveryActions: [] };
+      }
+      const issues = validatePlanStructure(plan);
+      if (plan.providerRouteId !== adapter.descriptor.providerRouteId) issues.push({ code: 'wrong-kind', message: 'The plan belongs to a different route' });
+      const lifecycle = new PlanLifecycle<AnyRefactorPlan>(plan);
+      this.plans.set(plan.planId, { lifecycle, adapter, workspaceRevision: prepared.workspaceRevision });
+      if (issues.length > 0) lifecycle.transition('Failed', issues.map((i) => i.message).join('; '));
+      else lifecycle.transition('Previewing');
+      return { kind: 'preview', planId: plan.planId, plan, state: lifecycle.state, issues, applyEnabled: this.o.settings.applyRenameEnabled() && issues.length === 0 };
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      return this.toUnavailable(adapter, e);
+    }
+  }
+
+  planState(planId: string): PlanState | undefined {
+    return this.plans.get(planId)?.lifecycle.state;
+  }
+
+  // ---------------------------------------------------------------- Analysis (rules)
+
+  async analyze(options: { uri?: string } = {}, token?: CancellationToken): Promise<AnalysisOutcome[]> {
+    const adapters = this.o.registry.languageAdapters().filter((a) => typeof a.analyze === 'function' && (!options.uri || a === this.o.registry.routeFor(options.uri)));
+    return Promise.all(
+      adapters.map(async (adapter): Promise<AnalysisOutcome> => {
+        const providerRouteId = adapter.descriptor.providerRouteId;
+        try {
+          const r = await this.withStaleRetry(() => adapter.analyze!(options, token), token);
+          return { kind: 'analysis', ...r.value, providerRouteId, sessionEpoch: r.sessionEpoch, snapshotId: r.snapshotId, workspaceRevision: r.workspaceRevision };
+        } catch (e) {
+          if (e instanceof CancelledError) throw e;
+          return { ...this.toUnavailable(adapter, e), providerRouteId };
+        }
+      }),
+    );
+  }
+
+  discardPlan(planId: string): void {
+    const entry = this.plans.get(planId);
+    if (!entry) return;
+    entry.lifecycle.tryTransition('Discarded', 'closed by user');
+    this.plans.delete(planId);
+    entry.adapter.discard(planId);
+  }
+
+  /**
+   * Mandatory revalidation after the user confirmed:
+   *   1. the plan must still be Previewing, same epoch, same workspace revision (editor events break the lease);
+   *   2. backend revalidation (barrier + every read-set fingerprint);
+   *   3. the EditApplier reads closed targets from disk (the last await);
+   *   4. synchronously: lease check again, every target hash checked, editor apply started — no await in between;
+   *   5. post-state reconciliation; the result is reported per file, never assumed. No auto-save, no rollback.
+   */
+  async applyRename(planId: string, token?: CancellationToken, options: ApplyOptions = {}): Promise<ApplyOutcome> {
+    const entry = this.plans.get(planId);
+    if (!entry) return { status: 'stale', message: 'This preview is no longer valid. Run Rename again.', canReprepare: true };
+    const { lifecycle, adapter } = entry;
+    if (!this.o.settings.applyRenameEnabled()) return { status: 'disabled', message: 'Applying renames is turned off (refyntra.rename.apply).' };
+    // Single use: a plan that is revalidating/applying/finished cannot be applied again.
+    if (lifecycle.state !== 'Previewing') return { status: 'stale', message: `The plan is ${lifecycle.state} and cannot be applied again.`, canReprepare: lifecycle.isTerminal };
+    const finish = (to: PlanState, outcome: ApplyOutcome): ApplyOutcome => {
+      lifecycle.tryTransition(to, outcome.message);
+      if (lifecycle.isTerminal) this.plans.delete(planId);
+      return outcome;
+    };
+    const stale = (message: string): ApplyOutcome => finish('Stale', { status: 'stale', message, canReprepare: true });
+    const plan = lifecycle.plan;
+    // A plan that could only be partly validated is applied only after the user confirmed its limitations.
+    if (plan.validation.status === 'limited' && !options.acceptLimited) {
+      return {
+        status: 'limited',
+        message: `${plan.title}: the plan could only be partly validated. Confirm the limitations to apply it.`,
+        limitations: [...plan.limitations],
+      };
+    }
+    lifecycle.transition('Revalidating');
+    // Delegated plans: the lease is our bridge epoch plus the route that owns the document.
+    const planEpoch = plan.kind === 'delegated' ? plan.bridgeEpoch : plan.sessionEpoch;
+    const sameRoute = () => plan.kind !== 'delegated' || this.o.registry.routeFor(plan.origin.uri, this.o.tracker.get(plan.origin.uri)?.languageId) === adapter;
+    const lease = () => adapter.currentEpoch() === planEpoch && this.o.tracker.revision === entry.workspaceRevision && sameRoute();
+    if (!lease()) return stale('The code changed since the preview.');
+    try {
+      let verdict: RevalidateResult;
+      if (plan.kind === 'delegated') {
+        verdict = adapter.delegatedRename ? await adapter.delegatedRename.revalidate(plan, token) : { status: 'invalid', reasonCode: 'RenameNotSupported', message: 'The route no longer offers rename.' };
+      } else {
+        verdict = await adapter.revalidate(plan, token);
+      }
+      if (token?.isCancellationRequested) return finish('Cancelled', { status: 'cancelled', message: 'Rename cancelled. No file was changed.' });
+      if (verdict.status === 'stale') return stale(`The code changed since the preview (${verdict.message ?? verdict.reasonCode ?? 'read set changed'}).`);
+      if (verdict.status === 'invalid' && verdict.reasonCode === 'UnknownPlan') {
+        return stale('The preview expired (the backend no longer has this plan, e.g. after a reload). Prepare the rename again.');
+      }
+      if (verdict.status === 'limited') {
+        // Never upgraded: "limited" is accepted only for a plan that was previewed as limited and confirmed as such.
+        if (!(options.acceptLimited && plan.validation.status === 'limited')) {
+          return stale(`The backend reports the plan as only partly validated (${verdict.message ?? verdict.reasonCode ?? 'limited'}). Prepare the rename again to review its limitations.`);
+        }
+      } else if (verdict.status !== 'valid') {
+        return finish('Failed', { status: 'failed', message: verdict.message ?? `Revalidation: ${verdict.status}`, canReprepare: true });
+      }
+      const captured = await this.o.editApplier.capture(plan.writeSet);
+      // ---------------- no awaits from here until the editor apply has started ----------------
+      if (token?.isCancellationRequested) return finish('Cancelled', { status: 'cancelled', message: 'Rename cancelled. No file was changed.' });
+      if (!captured.ok) return stale(`The code changed since the preview (${captured.reason}).`);
+      if (!lease()) return stale('The code changed since the preview.');
+      const commit = captured.commit();
+      if (!commit.started) return stale(`The code changed since the preview (${commit.reason}).`);
+      lifecycle.transition('Applying');
+      // ---------------- the editor owns the outcome now ----------------
+      const report = await commit.result;
+      this.relatedCache.clear();
+      this.invalidateEmitter.fire(adapter.descriptor.providerRouteId);
+      const confirmed = report.files.filter((f) => f.status === 'confirmed');
+      const unchanged = report.files.filter((f) => f.status === 'unchanged');
+      const unknown = report.files.filter((f) => f.status === 'unknown');
+      const resources = report.resources ?? [];
+      this.resyncRenamedFiles(adapter, resources);
+      const textConfirmed = report.editorAccepted && confirmed.length === report.files.length;
+      if (textConfirmed && resources.every((r) => r.status === 'confirmed')) {
+        const renamed = resources.map((r) => ` and ${baseName(r.oldUri)} renamed to ${baseName(r.newUri)}`).join('');
+        return finish('Applied', { status: 'applied', message: `${plan.title}: ${confirmed.length} file(s) changed${renamed}`, files: report.files, ...(resources.length ? { resources } : {}) });
+      }
+      if (textConfirmed) {
+        // File rename failure path: the text edits are applied (one all-or-nothing edit), a file rename is not.
+        // Report exactly that; never roll back automatically.
+        const what = resources.filter((r) => r.status !== 'confirmed').map((r) => `${baseName(r.oldUri)} → ${baseName(r.newUri)}: ${r.status}${r.detail ? ` (${r.detail})` : ''}`).join('; ');
+        return finish('Failed', {
+          status: 'failed',
+          message: `The text edits were applied to ${confirmed.length} file(s) (not saved), but the file rename did not complete (${what}). Nothing was rolled back: use Undo in the editor to revert the text edits, or rename the file yourself.`,
+          files: report.files,
+          resources,
+          textAppliedOnly: true,
+        });
+      }
+      const message = !report.editorAccepted && unchanged.length === report.files.length
+        ? 'VS Code did not apply the edit; no file was changed.'
+        : `The result is not confirmed: ${confirmed.length} file(s) confirmed, ${unchanged.length} unchanged, ${unknown.length} unknown. Check the files; use Undo in the editor if needed.`;
+      return finish('Failed', { status: 'failed', message, files: report.files, ...(resources.length ? { resources } : {}) });
+    } catch (e) {
+      if (e instanceof CancelledError) {
+        if ((lifecycle.state as PlanState) === 'Applying') return finish('Failed', { status: 'failed', message: 'Cancelled while applying; the result is unknown. Check the files.' });
+        return finish('Cancelled', { status: 'cancelled', message: 'Rename cancelled. No file was changed.' });
+      }
+      const applying = (lifecycle.state as PlanState) === 'Applying';
+      return finish(applying ? 'Failed' : 'Stale', { status: applying ? 'failed' : 'stale', message: applying ? `The result is unknown: ${describeError(e)}` : describeError(e), canReprepare: !applying });
+    }
+  }
+
+  // ---------------------------------------------------------------- helpers
+
+  /**
+   * File rename host resync after file renames: confirmed renames move the documents in the backend (no reload). A rename
+   * whose result is unknown, or a backend that cannot take the notification, gets a route restart (full reload) so
+   * that no snapshot keeps a file that is gone. Refused/failed/not-attempted renames changed nothing on disk.
+   */
+  private resyncRenamedFiles(adapter: LanguageAdapter, resources: readonly ApplyResourceReport[]): void {
+    if (resources.length === 0) return;
+    const moved = resources.filter((r) => r.status === 'confirmed').map((r) => ({ oldUri: r.oldUri, newUri: r.newUri }));
+    const unknown = resources.some((r) => r.status === 'unknown');
+    const revision = this.o.tracker.bumpRevision();
+    const sent = moved.length === 0 || adapter.filesRenamed?.(moved, revision) === true;
+    if (!sent || unknown) {
+      this.log('warn', 'file rename resync by restart', { moved: moved.length, unknown });
+      void adapter.restart('files renamed').catch(() => undefined);
+    }
+  }
+
+  private async withStaleRetry<T>(fn: () => Promise<T>, token?: CancellationToken): Promise<T> {
+    const retries = this.o.staleRetries ?? 1;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await fn();
+      } catch (e) {
+        if (!(e instanceof StaleResultError) || attempt >= retries) throw e;
+        throwIfCancelled(token);
+        this.log('debug', 'retrying stale request', { cause: e.reason });
+      }
+    }
+  }
+
+  private noteFor(adapter: LanguageAdapter, e: unknown): string {
+    if (e instanceof AdapterUnavailableError) return `${e.health.displayName}: ${e.health.state}${e.health.message ? ` — ${e.health.message}` : ''}`;
+    if (e instanceof RouteUnavailableError) return `${adapter.descriptor.displayName}: ${e.message}`;
+    if (e instanceof StaleResultError) return `${adapter.descriptor.displayName}: results were outdated by newer edits; try again.`;
+    return `${adapter.descriptor.displayName}: ${describeErrorWithRecovery(e)}`;
+  }
+
+  private toUnavailable(adapter: LanguageAdapter, e: unknown): Unavailable {
+    if (e instanceof CancelledError) throw e;
+    if (e instanceof AdapterUnavailableError) {
+      return { kind: 'unavailable', reasonCode: e.health.reasonCode ?? e.health.state, message: this.noteFor(adapter, e), recoveryActions: e.health.recoveryActions.length ? e.health.recoveryActions : [RECOVERY_SHOW_HEALTH] };
+    }
+    if (e instanceof StaleResultError) return { kind: 'unavailable', reasonCode: 'Stale', message: this.noteFor(adapter, e), recoveryActions: [] };
+    if (e instanceof RouteUnavailableError) return { kind: 'unavailable', reasonCode: e.reasonCode, message: this.noteFor(adapter, e), recoveryActions: e.recoveryActions };
+    this.log('warn', 'request failed', { route: adapter.descriptor.providerRouteId, error: describeError(e) });
+    const reasonCode = e instanceof RpcError ? (e.reasonCode ?? `Error${e.code}`) : 'RequestFailed';
+    return { kind: 'unavailable', reasonCode, message: this.noteFor(adapter, e), recoveryActions: [RECOVERY_SHOW_HEALTH] };
+  }
+
+  private log(level: 'debug' | 'info' | 'warn' | 'error', message: string, fields?: Record<string, unknown>): void {
+    this.o.logger.log(level, 'engine', message, fields);
+  }
+}
+
+export type { RouteResult };

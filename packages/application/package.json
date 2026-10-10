@@ -1,0 +1,11 @@
+{
+  "name": "@refyntra/application",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "out/index.js",
+  "types": "out/index.d.ts",
+  "scripts": { "build": "tsc -b" },
+  "dependencies": { "@refyntra/contracts": "workspace:*", "@refyntra/domain": "workspace:*" }
+}

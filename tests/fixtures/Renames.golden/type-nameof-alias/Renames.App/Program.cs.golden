@@ -1,0 +1,9 @@
+using Renames.Lib;
+using W = Renames.Lib.Thing;
+
+var w = new W();
+w.Run(1);
+w.Run("one");
+Console.WriteLine(nameof(Thing) + " " + nameof(W) + " " + w.Describe());
+var g = new Gadget { Size = 2 }.Twice();
+Console.WriteLine(g.Size);

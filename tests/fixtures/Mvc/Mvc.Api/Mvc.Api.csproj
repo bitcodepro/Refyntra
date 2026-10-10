@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- MediatR 12.5.0 is Apache-2.0; later major versions use a different license and must not be used here. -->
+    <PackageReference Include="MediatR" Version="12.5.0" />
+  </ItemGroup>
+</Project>

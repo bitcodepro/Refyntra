@@ -1,0 +1,5 @@
+# Test fixtures and golden outputs are compared byte for byte: never convert line endings.
+tests/fixtures/** -text
+# Upstream license notices are shipped exactly as published.
+packages/extension/legal/** -text
+*.sh text eol=lf

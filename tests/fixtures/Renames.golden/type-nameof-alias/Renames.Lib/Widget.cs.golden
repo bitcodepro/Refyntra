@@ -1,0 +1,10 @@
+namespace Renames.Lib;
+
+public sealed class Thing
+{
+    public const string TypeName = nameof(Thing);
+    public string Describe() => "Widget";
+
+    public void Run(int count) { }
+    public void Run(string name) { }
+}

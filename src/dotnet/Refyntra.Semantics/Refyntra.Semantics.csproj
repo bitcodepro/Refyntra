@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../Refyntra.Workspaces/Refyntra.Workspaces.csproj" />
+    <ProjectReference Include="../Refyntra.Frameworks.Abstractions/Refyntra.Frameworks.Abstractions.csproj" />
+    <ProjectReference Include="../Refyntra.Frameworks.MediatR/Refyntra.Frameworks.MediatR.csproj" />
+    <ProjectReference Include="../Refyntra.Frameworks.AspNetCore/Refyntra.Frameworks.AspNetCore.csproj" />
+    <ProjectReference Include="../Refyntra.Frameworks.DependencyInjection/Refyntra.Frameworks.DependencyInjection.csproj" />
+  </ItemGroup>
+</Project>

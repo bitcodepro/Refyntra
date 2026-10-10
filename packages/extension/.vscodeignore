@@ -1,0 +1,10 @@
+**
+!package.json
+!LICENSE
+!README.md
+!dist/extension.js
+!media/**
+!walkthrough/**
+!host/**
+!THIRD_PARTY_NOTICES.md
+!legal/**

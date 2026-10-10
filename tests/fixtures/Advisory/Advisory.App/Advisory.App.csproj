@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <!-- Synthetic: reproduces the messages of NuGet audit warnings (NU1902/NU1903) during the design-time build without a
+       real vulnerable package. MSBuildWorkspace reports every MSBuild log item as a failure; an advisory must not make
+       the project partial. -->
+  <Target Name="FakeNuGetAudit" AfterTargets="ResolvePackageAssets">
+    <Warning Code="NU1903" Text="Package 'Fake.Vulnerable' 1.0.0 has a known high severity vulnerability, https://example.invalid/advisory" />
+    <Warning Code="NU1902" Text="Package 'Fake.Vulnerable' 1.0.0 has a known moderate severity vulnerability, https://example.invalid/advisory2" />
+  </Target>
+</Project>

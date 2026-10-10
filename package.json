@@ -1,0 +1,31 @@
+{
+  "name": "refyntra-repo",
+  "private": true,
+  "license": "MIT",
+  "packageManager": "pnpm@12.10.1",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "pnpm -r run build && pnpm run build:host",
+    "build:ts": "pnpm -r run build",
+    "build:host": "dotnet build src/dotnet/Refyntra.sln -c Release",
+    "typecheck": "tsc -b packages/extension packages/adapter-testing",
+    "test": "pnpm run test:unit && pnpm run test:architecture && pnpm run test:host",
+    "test:unit": "vitest run",
+    "test:contracts": "vitest run packages/contracts",
+    "test:architecture": "node scripts/test/architecture.mjs",
+    "test:host": "dotnet test src/dotnet/Refyntra.sln -c Release",
+    "test:integration": "pnpm --filter refyntra run test:integration",
+    "test:e2e": "pnpm --filter refyntra run test:e2e",
+    "benchmark": "node scripts/test/benchmark.mjs",
+    "test:regression": "node scripts/test/regression.mjs",
+    "package:vsix": "pnpm --filter refyntra run package",
+    "test:install": "node scripts/test/install-smoke.mjs",
+    "notices": "node scripts/package/notices.mjs",
+    "audit:vsix": "node scripts/package/audit.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "22.18.6",
+    "typescript": "5.9.3",
+    "vitest": "3.2.4"
+  }
+}

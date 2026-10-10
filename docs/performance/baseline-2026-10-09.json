@@ -1,0 +1,187 @@
+{
+  "date": "2026-10-09",
+  "machine": {
+    "os": "Windows_NT 10.0.26300 (x64)",
+    "cpu": "Intel(R) Core(TM) i7-10750H CPU @ 2.60GHz x12",
+    "ramGb": 32,
+    "dotnetSdk": "10.0.300",
+    "dotnetRuntimes": "Microsoft.NETCore.App 6.0.36; Microsoft.NETCore.App 8.0.27; Microsoft.NETCore.App 10.0.8",
+    "node": "v22.22.3",
+    "note": "VS Code is not involved: the host is driven headlessly over the JSON-RPC pipe."
+  },
+  "iterations": 30,
+  "results": [
+    {
+      "name": "Shop",
+      "target": "(temp copy of) tests/fixtures/Shop/Shop.sln",
+      "errors": [],
+      "methods": {
+        "code/search": {
+          "cold": 26.6,
+          "warm": {
+            "n": 30,
+            "min": 1.5,
+            "p50": 2,
+            "p95": 12.8,
+            "p99": 19,
+            "max": 19
+          }
+        },
+        "code/related": {
+          "cold": 350.6,
+          "warm": {
+            "n": 30,
+            "min": 3.7,
+            "p50": 6.1,
+            "p95": 19.4,
+            "p99": 21.1,
+            "max": 21.1
+          }
+        },
+        "code/references": {
+          "cold": 4.3,
+          "warm": {
+            "n": 30,
+            "min": 2.8,
+            "p50": 4.8,
+            "p95": 16.7,
+            "p99": 32.3,
+            "max": 32.3
+          }
+        },
+        "analysis/run": {
+          "cold": 48.2,
+          "warm": {
+            "n": 30,
+            "min": 0.4,
+            "p50": 0.7,
+            "p95": 2.4,
+            "p99": 21,
+            "max": 21
+          }
+        },
+        "refactor/prepare": {
+          "cold": 2472.7,
+          "warm": {
+            "n": 30,
+            "min": 337.9,
+            "p50": 508.4,
+            "p95": 697.7,
+            "p99": 770.6,
+            "max": 770.6
+          }
+        }
+      },
+      "cancelledOrFailed": {},
+      "coldOpenMs": 4069.7,
+      "timeToReadyMs": 4069.9,
+      "state": "Ready",
+      "reasonCode": null,
+      "sdkVersion": "10.0.300",
+      "projects": 2,
+      "documents": 15,
+      "csFilesOnDisk": 9,
+      "projectStates": {
+        "Shop.Contracts": "loaded/5",
+        "Shop.Api": "loaded/10"
+      },
+      "subject": {
+        "name": "Shop.Contracts.Orders.OrderDto",
+        "kind": "record",
+        "references": 9
+      },
+      "warmSeconds": 16.4,
+      "rssSteadyMb": 231,
+      "rssPeakMb": 233,
+      "maxProcessesInTree": 3,
+      "finalProcessesInTree": 1,
+      "wallSeconds": 35.7
+    },
+    {
+      "name": "DiRules",
+      "target": "(temp copy of) tests/fixtures/DiRules/DiRules.sln",
+      "errors": [],
+      "methods": {
+        "code/search": {
+          "cold": 41.1,
+          "warm": {
+            "n": 30,
+            "min": 1.9,
+            "p50": 2.8,
+            "p95": 6.7,
+            "p99": 8.7,
+            "max": 8.7
+          }
+        },
+        "code/related": {
+          "cold": 638.2,
+          "warm": {
+            "n": 30,
+            "min": 3.4,
+            "p50": 5.2,
+            "p95": 12,
+            "p99": 20.8,
+            "max": 20.8
+          }
+        },
+        "code/references": {
+          "cold": 2.4,
+          "warm": {
+            "n": 30,
+            "min": 1.7,
+            "p50": 2.5,
+            "p95": 8,
+            "p99": 10.1,
+            "max": 10.1
+          }
+        },
+        "analysis/run": {
+          "cold": 67.8,
+          "warm": {
+            "n": 30,
+            "min": 1.1,
+            "p50": 1.5,
+            "p95": 7.5,
+            "p99": 13.6,
+            "max": 13.6
+          }
+        },
+        "refactor/prepare": {
+          "cold": 1945.4,
+          "warm": {
+            "n": 30,
+            "min": 149.7,
+            "p50": 189.8,
+            "p95": 261.2,
+            "p99": 267.2,
+            "max": 267.2
+          }
+        }
+      },
+      "cancelledOrFailed": {},
+      "coldOpenMs": 5501.5,
+      "timeToReadyMs": 5501.7,
+      "state": "Ready",
+      "reasonCode": null,
+      "sdkVersion": "10.0.300",
+      "projects": 2,
+      "documents": 24,
+      "csFilesOnDisk": 18,
+      "projectStates": {
+        "DiRules.App": "loaded/19",
+        "DiRules.Tests": "loaded/5"
+      },
+      "subject": {
+        "name": "DiRules.App.Cases.ICleanClock",
+        "kind": "interface",
+        "references": 3
+      },
+      "warmSeconds": 6.5,
+      "rssSteadyMb": 206,
+      "rssPeakMb": 209,
+      "maxProcessesInTree": 3,
+      "finalProcessesInTree": 1,
+      "wallSeconds": 26.7
+    }
+  ]
+}

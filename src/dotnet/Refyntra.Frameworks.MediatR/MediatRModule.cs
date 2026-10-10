@@ -1,0 +1,318 @@
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Text;
+using Refyntra.Frameworks.Abstractions;
+
+namespace Refyntra.Frameworks.MediatR;
+
+/// <summary>
+/// MediatR request/notification ↔ handler and Send/Publish call sites. Identity is checked by metadata name, generic
+/// arity and declaring assembly ("MediatR" / "MediatR.Contracts"); a same-name interface elsewhere never matches.
+/// </summary>
+public sealed class MediatRModule : IFrameworkModule
+{
+    private static readonly string[] ContractAssemblies = { "MediatR", "MediatR.Contracts" };
+    private static readonly string[] CoreAssembly = { "MediatR" };
+
+    public static readonly KnownType IRequest1 = new("MediatR.IRequest`1", ContractAssemblies);
+    public static readonly KnownType IRequest0 = new("MediatR.IRequest", ContractAssemblies);
+    public static readonly KnownType IBaseRequest = new("MediatR.IBaseRequest", ContractAssemblies);
+    public static readonly KnownType INotification = new("MediatR.INotification", ContractAssemblies);
+    public static readonly KnownType IRequestHandler2 = new("MediatR.IRequestHandler`2", CoreAssembly);
+    public static readonly KnownType IRequestHandler1 = new("MediatR.IRequestHandler`1", CoreAssembly);
+    public static readonly KnownType INotificationHandler1 = new("MediatR.INotificationHandler`1", CoreAssembly);
+    public static readonly KnownType ISender = new("MediatR.ISender", CoreAssembly);
+    public static readonly KnownType IPublisher = new("MediatR.IPublisher", CoreAssembly);
+    public static readonly KnownType IMediator = new("MediatR.IMediator", CoreAssembly);
+    public static readonly KnownType Mediator = new("MediatR.Mediator", CoreAssembly);
+    public static readonly KnownType IStreamRequest1 = new("MediatR.IStreamRequest`1", ContractAssemblies);
+    public static readonly KnownType IStreamRequestHandler2 = new("MediatR.IStreamRequestHandler`2", CoreAssembly);
+    public static readonly KnownType IPipelineBehavior2 = new("MediatR.IPipelineBehavior`2", CoreAssembly);
+    public static readonly KnownType IStreamPipelineBehavior2 = new("MediatR.IStreamPipelineBehavior`2", CoreAssembly);
+
+    public string Id => "mediatr";
+    public string ProviderRouteId => "csharp.roslyn/mediatr";
+
+    public sealed record HandlerFact(INamedTypeSymbol HandlerType, ITypeSymbol Request, ITypeSymbol? Response, bool IsNotification,
+        INamedTypeSymbol Interface, ProjectId ProjectId);
+
+    /// <summary>An IPipelineBehavior / IStreamPipelineBehavior implementation; open generic when its request is a type parameter.</summary>
+    public sealed record BehaviorFact(INamedTypeSymbol BehaviorType, INamedTypeSymbol Interface, bool IsStream, ProjectId ProjectId)
+    {
+        public ITypeSymbol Request => Interface.TypeArguments[0];
+        public bool IsOpenGeneric => Request is ITypeParameterSymbol;
+    }
+
+    public sealed record SendFact(Location Location, ITypeSymbol RequestType, string MethodName, string Container, ProjectId ProjectId,
+        SyntaxTree Tree, TextSpan Span);
+
+    public sealed class Facts
+    {
+        public List<HandlerFact> Handlers { get; } = new();
+        public List<BehaviorFact> Behaviors { get; } = new();
+        public List<SendFact> Sends { get; } = new();
+        public SortedSet<string> AssemblyEvidence { get; } = new(StringComparer.Ordinal);
+        public bool VersionVerified { get; set; } = true;
+        public int UnresolvedSendSites { get; set; }
+    }
+
+    public async Task<object> AnalyzeAsync(FrameworkContext context, CancellationToken ct)
+    {
+        var facts = new Facts();
+        foreach (var project in context.Projects)
+        {
+            var compilation = await project.GetCompilationAsync(ct).ConfigureAwait(false);
+            if (compilation == null) continue;
+            var mediatrAssemblies = compilation.References
+                .Select(compilation.GetAssemblyOrModuleSymbol).OfType<IAssemblySymbol>()
+                .Where(a => ContractAssemblies.Contains(a.Identity.Name)).ToList();
+            if (mediatrAssemblies.Count == 0) continue;
+            foreach (var a in mediatrAssemblies)
+            {
+                facts.AssemblyEvidence.Add(SymbolIdentity.VersionEvidence(a));
+                if (!IsVerifiedVersion(a.Identity)) facts.VersionVerified = false;
+            }
+
+            foreach (var type in AllSourceTypes(compilation.Assembly.GlobalNamespace))
+            {
+                foreach (var iface in type.AllInterfaces)
+                {
+                    if (IRequestHandler2.Matches(iface))
+                        facts.Handlers.Add(new HandlerFact(type, iface.TypeArguments[0], iface.TypeArguments[1], false, iface, project.Id));
+                    else if (IRequestHandler1.Matches(iface))
+                        facts.Handlers.Add(new HandlerFact(type, iface.TypeArguments[0], null, false, iface, project.Id));
+                    else if (INotificationHandler1.Matches(iface))
+                        facts.Handlers.Add(new HandlerFact(type, iface.TypeArguments[0], null, true, iface, project.Id));
+                    else if (IStreamRequestHandler2.Matches(iface))
+                        facts.Handlers.Add(new HandlerFact(type, iface.TypeArguments[0], iface.TypeArguments[1], false, iface, project.Id));
+                    else if ((IPipelineBehavior2.Matches(iface) || IStreamPipelineBehavior2.Matches(iface)) && !type.IsAbstract)
+                        facts.Behaviors.Add(new BehaviorFact(type, iface, IStreamPipelineBehavior2.Matches(iface), project.Id));
+                }
+            }
+
+            foreach (var (doc, root, model) in await SymbolIdentity.DocumentsContainingAsync(project, new[] { "Send", "Publish", "CreateStream" }, ct).ConfigureAwait(false))
+            {
+                foreach (var inv in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
+                {
+                    var name = SymbolIdentity.InvokedName(inv);
+                    if (name is not ("Send" or "Publish" or "CreateStream")) continue;
+                    var method = SymbolIdentity.InvokedMethod(model, inv, ct);
+                    if (method == null) continue;
+                    var container = method.ContainingType;
+                    if (!(ISender.Matches(container) || IPublisher.Matches(container) || IMediator.Matches(container) || Mediator.Matches(container)))
+                        continue;
+                    if (inv.ArgumentList.Arguments.Count == 0) continue;
+                    var argType = model.GetTypeInfo(inv.ArgumentList.Arguments[0].Expression, ct).Type;
+                    if (argType == null || argType.TypeKind is TypeKind.Interface or TypeKind.TypeParameter or TypeKind.Error
+                        || argType.SpecialType == SpecialType.System_Object)
+                    {
+                        facts.UnresolvedSendSites++;
+                        continue;
+                    }
+                    var location = inv.Expression is MemberAccessExpressionSyntax ma ? ma.Name.GetLocation() : inv.GetLocation();
+                    facts.Sends.Add(new SendFact(location, argType, name, SymbolIdentity.CompositionRoot(model, inv, ct), project.Id,
+                        inv.SyntaxTree, inv.Span));
+                }
+            }
+        }
+        return facts;
+    }
+
+    private static bool IsVerifiedVersion(AssemblyIdentity id) => id.Name switch
+    {
+        // MediatR 12.x ships assembly version 12.0.0.0; MediatR.Contracts 2.x ships 2.0.0.0 (Apache-2.0 line).
+        "MediatR" => id.Version.Major is >= 10 and <= 12,
+        "MediatR.Contracts" => id.Version.Major is 1 or 2,
+        _ => false,
+    };
+
+    public string? Detection(object facts)
+    {
+        var f = (Facts)facts;
+        return f.AssemblyEvidence.Count == 0 ? null : string.Join("; ", f.AssemblyEvidence);
+    }
+
+    private static IEnumerable<INamedTypeSymbol> AllSourceTypes(INamespaceSymbol ns)
+    {
+        foreach (var member in ns.GetMembers())
+        {
+            if (member is INamespaceSymbol child)
+                foreach (var t in AllSourceTypes(child)) yield return t;
+            else if (member is INamedTypeSymbol type)
+                foreach (var t in WithNested(type)) yield return t;
+        }
+    }
+
+    private static IEnumerable<INamedTypeSymbol> WithNested(INamedTypeSymbol type)
+    {
+        if (type.Locations.Any(l => l.IsInSource)) yield return type;
+        foreach (var nested in type.GetTypeMembers())
+            foreach (var t in WithNested(nested)) yield return t;
+    }
+
+    /// <summary>
+    /// Contravariance: INotificationHandler&lt;in TNotification&gt; — a handler of a base notification (class or
+    /// interface) also receives this one when the container resolves handlers variantly. Reported as likely.
+    /// </summary>
+    private void RelateBaseNotificationHandlers(Facts facts, INamedTypeSymbol type, IReadOnlyList<string> versionLimit,
+        EvidenceItem assemblyEvidence, List<FrameworkRelation> result)
+    {
+        foreach (var h in facts.Handlers.Where(h => h.IsNotification && h.Request is INamedTypeSymbol
+                     && !SymbolIdentity.SameDefinition(h.Request, type) && IsBaseOf(h.Request, type)))
+        {
+            result.Add(new FrameworkRelation(RelationKinds.MediatRNotificationHandler, RelationGroups.Handlers,
+                new RelationTarget($"{h.HandlerType.Name} (handles base {h.Request.Name})", Symbol: h.HandlerType),
+                new[]
+                {
+                    new EvidenceItem($"{h.HandlerType.Name} implements {h.Interface.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} and {type.Name} derives from {h.Request.Name}",
+                        h.HandlerType.Locations.FirstOrDefault(l => l.IsInSource)),
+                    assemblyEvidence,
+                },
+                Confidences.Likely,
+                versionLimit.Append("Applies through contravariance (INotificationHandler<in T>); whether the container dispatches variantly depends on the MediatR/DI version and registration.").ToList(),
+                ProviderRouteId));
+        }
+    }
+
+    /// <summary>
+    /// Pipeline behaviors as known relations of a request: closed ones for exactly this request (version confidence),
+    /// open generic ones whose constraints the request satisfies as likely. Registration and order are never claimed.
+    /// </summary>
+    private void RelateBehaviors(Facts facts, INamedTypeSymbol type, bool isStream, string confidence, IReadOnlyList<string> versionLimit,
+        EvidenceItem assemblyEvidence, List<FrameworkRelation> result)
+    {
+        foreach (var b in facts.Behaviors.Where(b => b.IsStream == isStream))
+        {
+            string label, relConfidence;
+            var limitations = new List<string>(versionLimit) { "Pipeline order is not claimed: the runtime order depends on registration order." };
+            if (b.IsOpenGeneric)
+            {
+                if (!SatisfiesConstraints((ITypeParameterSymbol)b.Request, type)) continue;
+                label = $"{b.BehaviorType.Name} — applies to every request (open generic)";
+                relConfidence = Confidences.Likely;
+                limitations.Add("Open generic behavior: applies only if it is registered (as an open generic); constraints are checked statically.");
+            }
+            else
+            {
+                if (!SymbolIdentity.SameDefinition(b.Request, type)) continue;
+                label = b.BehaviorType.Name;
+                relConfidence = confidence;
+                limitations.Add("Whether the behavior is registered is not proven.");
+            }
+            result.Add(new FrameworkRelation(RelationKinds.MediatRBehavior, RelationGroups.Handlers,
+                new RelationTarget(label, Symbol: b.BehaviorType),
+                new[]
+                {
+                    new EvidenceItem($"{b.BehaviorType.Name} implements {b.Interface.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}",
+                        b.BehaviorType.Locations.FirstOrDefault(l => l.IsInSource)),
+                    assemblyEvidence,
+                },
+                relConfidence, limitations, ProviderRouteId));
+        }
+    }
+
+    /// <summary>True when <paramref name="baseType"/> is a base class or an implemented interface of <paramref name="type"/>.</summary>
+    private static bool IsBaseOf(ITypeSymbol baseType, INamedTypeSymbol type)
+    {
+        for (var t = type.BaseType; t != null; t = t.BaseType)
+            if (SymbolEqualityComparer.Default.Equals(t, baseType) || SymbolIdentity.SameDefinition(t, baseType) && !t.IsGenericType) return true;
+        return type.AllInterfaces.Any(i => SymbolEqualityComparer.Default.Equals(i, baseType) || SymbolIdentity.SameDefinition(i, baseType) && !i.IsGenericType);
+    }
+
+    /// <summary>
+    /// Static check that the request can be the open behavior's TRequest: class/struct constraints and constraint types.
+    /// A constraint that mentions another type parameter (e.g. IRequest&lt;TResponse&gt;) is accepted when the request
+    /// implements or derives from that generic definition at all.
+    /// </summary>
+    private static bool SatisfiesConstraints(ITypeParameterSymbol tp, INamedTypeSymbol request)
+    {
+        if (tp.HasReferenceTypeConstraint && !request.IsReferenceType) return false;
+        if (tp.HasValueTypeConstraint && !request.IsValueType) return false;
+        foreach (var c in tp.ConstraintTypes)
+        {
+            if (c is not INamedTypeSymbol nc) return false;
+            if (nc.TypeArguments.Any(a => a is ITypeParameterSymbol))
+            {
+                var def = nc.OriginalDefinition;
+                var found = request.AllInterfaces.Any(i => SymbolEqualityComparer.Default.Equals(i.OriginalDefinition, def));
+                for (var t = request.BaseType; t != null && !found; t = t.BaseType)
+                    found = SymbolEqualityComparer.Default.Equals(t.OriginalDefinition, def);
+                if (!found) return false;
+                continue;
+            }
+            if (SymbolEqualityComparer.Default.Equals(nc, request) || IsBaseOf(nc, request)) continue;
+            return false;
+        }
+        return true;
+    }
+
+    public IReadOnlyList<FrameworkRelation> Relate(object factsObj, ISymbol subject, FrameworkContext context)
+    {
+        var facts = (Facts)factsObj;
+        var result = new List<FrameworkRelation>();
+        if (facts.AssemblyEvidence.Count == 0) return result;
+        var type = subject switch
+        {
+            INamedTypeSymbol t => t,
+            IMethodSymbol { MethodKind: MethodKind.Constructor } c => c.ContainingType,
+            IMethodSymbol { Name: "Handle" } h => h.ContainingType,
+            _ => null,
+        };
+        if (type == null) return result;
+
+        var confidence = facts.VersionVerified ? Confidences.Proven : Confidences.Likely;
+        var versionLimit = facts.VersionVerified ? Array.Empty<string>() : new[] { "Unverified MediatR version: " + string.Join("; ", facts.AssemblyEvidence) };
+        var assemblyEvidence = new EvidenceItem("MediatR identity: " + string.Join("; ", facts.AssemblyEvidence));
+
+        var isStream = type.AllInterfaces.Any(i => IStreamRequest1.Matches(i));
+        var isRequest = isStream || type.AllInterfaces.Any(i => IRequest1.Matches(i) || IRequest0.Matches(i));
+        var isNotification = type.AllInterfaces.Any(i => INotification.Matches(i));
+
+        if (isRequest || isNotification)
+        {
+            var handlers = facts.Handlers.Where(h => h.IsNotification == isNotification && SymbolIdentity.SameDefinition(h.Request, type)).ToList();
+            foreach (var h in handlers)
+            {
+                var limitations = new List<string>(versionLimit);
+                if (!isNotification && handlers.Count > 1)
+                    limitations.Add($"{handlers.Count} source handlers found; which one runs depends on runtime registration.");
+                result.Add(new FrameworkRelation(
+                    isNotification ? RelationKinds.MediatRNotificationHandler : RelationKinds.MediatRHandler,
+                    RelationGroups.Handlers,
+                    new RelationTarget(h.HandlerType.Name, Symbol: h.HandlerType),
+                    new[]
+                    {
+                        new EvidenceItem($"{h.HandlerType.Name} implements {h.Interface.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}",
+                            h.HandlerType.Locations.FirstOrDefault(l => l.IsInSource)),
+                        assemblyEvidence,
+                    },
+                    confidence, limitations, ProviderRouteId));
+            }
+            if (isNotification) RelateBaseNotificationHandlers(facts, type, versionLimit, assemblyEvidence, result);
+            else RelateBehaviors(facts, type, isStream, confidence, versionLimit, assemblyEvidence, result);
+            foreach (var s in facts.Sends.Where(s => SymbolIdentity.SameDefinition(s.RequestType, type)))
+            {
+                result.Add(new FrameworkRelation(RelationKinds.MediatRSend, RelationGroups.Callers,
+                    new RelationTarget($"{s.MethodName} in {s.Container}", Location: s.Location),
+                    new[] { new EvidenceItem($"{s.MethodName}({type.Name}) resolved to a MediatR sender", s.Location) },
+                    confidence, versionLimit, ProviderRouteId));
+            }
+        }
+
+        foreach (var h in facts.Handlers.Where(h => SymbolIdentity.SameDefinition(h.HandlerType, type)))
+        {
+            result.Add(new FrameworkRelation(RelationKinds.MediatRRequest, RelationGroups.Declarations,
+                new RelationTarget(h.Request.Name, Symbol: h.Request),
+                new[] { new EvidenceItem($"{type.Name} implements {h.Interface.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}"), assemblyEvidence },
+                confidence, versionLimit, ProviderRouteId));
+            if (h.Response != null && h.Response.Name != "Unit")
+            {
+                result.Add(new FrameworkRelation(RelationKinds.MediatRResponse, RelationGroups.Declarations,
+                    new RelationTarget(h.Response.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat), Symbol: h.Response),
+                    new[] { new EvidenceItem($"Response type of {h.Interface.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}") },
+                    confidence, versionLimit, ProviderRouteId));
+            }
+        }
+        return result;
+    }
+}

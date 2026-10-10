@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <!-- Synthetic: any other MSBuild log item. MSBuildWorkspace does not say whether it is a warning or an error, so
+       Refyntra stays conservative and marks the project partial. -->
+  <Target Name="FakeOtherWarning" AfterTargets="ResolvePackageAssets">
+    <Warning Code="XX0001" Text="Some other build message" />
+  </Target>
+</Project>

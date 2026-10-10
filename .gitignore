@@ -1,0 +1,12 @@
+node_modules/
+dist/
+out/
+*.tsbuildinfo
+bin/
+obj/
+*.vsix
+.vscode-test/
+coverage/
+TestResults/
+tests/fixtures/**/bin/
+tests/fixtures/**/obj/

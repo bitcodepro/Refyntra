@@ -1,0 +1,46 @@
+import type { HealthSummary } from '@refyntra/domain';
+
+// Onboarding logic (pure: unit-tested with vitest, no vscode import): which welcome text the Related view shows and
+// the status bar menu.
+
+export type WelcomeVariant = 'ready' | 'untrusted' | 'noSolution' | 'hostFailed';
+
+/**
+ * Context keys for the viewsWelcome when-clauses (package.json). One key with one value, so exactly one welcome
+ * variant applies at a time. Loading/Partial show the normal welcome (the view works or will shortly).
+ */
+export function welcomeContext(h: HealthSummary): { 'refyntra.welcome': WelcomeVariant } {
+  const c = h.adapters.find((a) => a.adapterId === 'csharp');
+  let v: WelcomeVariant = 'ready';
+  if (!h.workspaceTrusted) v = 'untrusted';
+  else if (c?.reasonCode === 'NoSolutionFound') v = 'noSolution';
+  else if (c && (c.state === 'Failed' || c.state === 'Unsupported')) v = 'hostFailed';
+  return { 'refyntra.welcome': v };
+}
+
+export interface MenuEntry {
+  label: string;
+  detail: string;
+  command: string;
+}
+
+/** Status bar click → QuickPick of the main commands. */
+export const MAIN_MENU: readonly MenuEntry[] = [
+  { label: '$(search) Find', detail: 'Find a type, member, file, endpoint (filters: type: member: project: route: method:)', command: 'refyntra.find' },
+  { label: '$(references) Related', detail: 'Callers, implementations, tests, handlers, endpoints and DI registrations of the symbol at the cursor', command: 'refyntra.related' },
+  { label: '$(lightbulb) Actions', detail: 'What Refyntra can do at the cursor, and why something is unavailable', command: 'refyntra.actions' },
+  { label: '$(edit) Rename', detail: 'Rename the symbol at the cursor: preview first, then Apply', command: 'refyntra.rename' },
+  { label: '$(pulse) Show Health', detail: 'Is Refyntra working, what it means for you, and the fix (for example Restore packages)', command: 'refyntra.showHealth' },
+  { label: '$(go-to-file) Find Handler', detail: 'Jump to the request handler of the symbol at the cursor', command: 'refyntra.findHandler' },
+  { label: '$(globe) Find Endpoint', detail: 'Search ASP.NET endpoints by route', command: 'refyntra.findEndpoint' },
+  { label: '$(symbol-interface) Find DI Registration', detail: 'Jump to where the type at the cursor is registered in dependency injection', command: 'refyntra.findRegistration' },
+  { label: '$(markdown) Show Health (text)', detail: 'The Health page as a plain Markdown document', command: 'refyntra.showHealthText' },
+  { label: '$(package) Export Debug Bundle', detail: 'Save a redacted report (no source code) to attach to an issue', command: 'refyntra.exportDebugBundle' },
+  { label: '$(file-submodule) Select Solution', detail: 'Choose which .sln/.slnx/.csproj Refyntra loads', command: 'refyntra.selectSolution' },
+  { label: '$(debug-restart) Restart Backend', detail: 'Restart the C# backend and reload the solution', command: 'refyntra.restartBackend' },
+  { label: '$(book) Get Started', detail: 'Open the Refyntra walkthrough', command: 'refyntra.getStarted' },
+  { label: '$(keyboard) Keyboard Shortcuts', detail: 'Choose a keybinding preset (Visual Studio or ReSharper style)', command: 'refyntra.keyboardShortcuts' },
+];
+
+/** Walkthrough id as VS Code addresses it: <publisher>.<name>#<walkthrough id>. */
+export const WALKTHROUGH_ID = 'refyntra.refyntra#refyntra.getStarted';

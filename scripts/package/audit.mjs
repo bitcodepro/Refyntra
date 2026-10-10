@@ -1,0 +1,124 @@
+// Audits what the VSIX actually ships. Exits 1 when anything forbidden is inside.
+// Usage: pnpm audit:vsix [--vsix <path>] [--strict-binary]
+//   --strict-binary  also fail when .NET binaries embed the build machine's absolute paths (reported as warnings otherwise)
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { repo, extPkg, ensureVsix, extractVsix, walk, rel } from './lib.mjs';
+
+const vsix = ensureVsix();
+const tmp = extractVsix(vsix);
+const failures = [];
+const warnings = [];
+const fail = (m) => failures.push(m);
+
+try {
+  const files = walk(tmp).map((f) => ({ abs: f, rel: rel(tmp, f), size: fs.statSync(f).size }));
+
+  // ---- forbidden names / locations ----
+  const forbiddenBase = [
+    [/^mediatr/i, 'MediatR (test-only, must not be redistributed)'],
+    [/^xunit/i, 'xunit (test-only)'],
+    [/^(microsoft\.)?entityframework/i, 'EF Core (test-only)'],
+    [/^npgsql/i, 'Npgsql (test-only)'],
+    [/^(microsoft\.net\.test\.sdk|microsoft\.testplatform|testhost|vstest)/i, 'test platform binary'],
+    [/^\.env(\..*)?$/i, 'secrets-like file (.env)'],
+    [/\.(pfx|snk|p12|pem|key|keystore|jks|publishsettings)$/i, 'secrets-like file (key/certificate)'],
+    [/^id_(rsa|dsa|ecdsa|ed25519)/i, 'secrets-like file (ssh key)'],
+    [/\.(ts|tsx|mts|cts)$/i, 'TypeScript source / declaration'],
+    [/\.(cs|csproj|sln|slnx|vbproj|fsproj|props|targets)$/i, 'C# source / MSBuild project file'],
+    [/\.pdb$/i, 'debug symbols (embed absolute source paths; not intended in the alpha payload)'],
+    [/\.(vsix|nupkg|zip)$/i, 'nested archive'],
+  ];
+  // Our own assemblies are allowed to contain these words (Refyntra.Frameworks.MediatR.dll adds MediatR navigation).
+  const firstParty = /^refyntra\./i;
+  const forbiddenDir = [/(^|\/)tests?(\/|$)/i, /(^|\/)__tests__(\/|$)/i, /(^|\/)fixtures?(\/|$)/i, /(^|\/)node_modules(\/|$)/i, /(^|\/)\.git(\/|$)/i, /(^|\/)(bin|obj)(\/|$)/i, /(^|\/)src(\/|$)/i];
+  for (const f of files) {
+    const base = path.posix.basename(f.rel);
+    const inside = f.rel.replace(/^extension\//, '');
+    for (const [re, why] of forbiddenBase) {
+      if (re.test(base) && !firstParty.test(base)) fail(`${f.rel}: ${why}`);
+    }
+    for (const re of forbiddenDir) if (re.test(inside)) fail(`${f.rel}: forbidden folder (${re.source})`);
+    if (/\.map$/i.test(base)) fail(`${f.rel}: source map shipped (maps reference local source paths)`);
+  }
+
+  // ---- build machine paths ----
+  const user = os.userInfo().username;
+  const repoFwd = repo.split(path.sep).join('/');
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const sep = '(?:\\\\\\\\|\\\\|/)'; // \\ or \ or /
+  const parts = [
+    `E:${sep}Temp`,
+    `[A-Za-z]:${sep}Users${sep}`,
+    `/Users/[^/\\s"']+/`,
+    `/home/[^/\\s"']+/`,
+    esc(repoFwd).replace(/\//g, sep),
+    `${sep}${esc(user)}${sep}`,
+  ];
+  const pathRe = new RegExp(parts.join('|'), 'i');
+  const textExt = /\.(js|cjs|mjs|json|jsonc|md|txt|xml|config|vsixmanifest|props|targets|yml|yaml|html|css|svg|map|rtf)$/i;
+  const binaryExt = /\.(dll|exe)$/i;
+  const binaryHits = [];
+  for (const f of files) {
+    const base = path.posix.basename(f.rel);
+    if (textExt.test(base) || base === 'LICENSE' || base === 'NOTICE' || /^\[Content_Types\]/.test(base)) {
+      const text = fs.readFileSync(f.abs, 'utf8');
+      const m = pathRe.exec(text);
+      if (m) fail(`${f.rel}: contains a build-machine path: ${JSON.stringify(text.slice(Math.max(0, m.index - 10), m.index + 50))}`);
+    } else if (binaryExt.test(base)) {
+      const buf = fs.readFileSync(f.abs);
+      const probe = [repo, repoFwd, `${repo.slice(0, 1)}:\\Temp`];
+      if (probe.some((p) => buf.includes(Buffer.from(p, 'latin1')) || buf.includes(Buffer.from(p, 'utf16le')))) binaryHits.push(f.rel);
+    }
+  }
+  if (binaryHits.length) {
+    const msg = `${binaryHits.length} binaries embed the repository's absolute path (PDB path in the debug directory), e.g. ${binaryHits.slice(0, 3).join(', ')}; fix with DeterministicSourcePaths / PathMap in the host build`;
+    if (process.argv.includes('--strict-binary')) fail(msg); else warnings.push(msg);
+  }
+  const jsFiles = files.filter((f) => /\.(js|cjs|mjs)$/.test(f.rel));
+  for (const f of jsFiles) if (/\/\/# sourceMappingURL=/.test(fs.readFileSync(f.abs, 'utf8'))) fail(`${f.rel}: references a source map`);
+
+  // ---- required content ----
+  for (const need of ['extension/dist/extension.js', 'extension/host/Refyntra.Host.dll', 'extension/host/Refyntra.Host.deps.json', 'extension/LICENSE.txt', 'extension/THIRD_PARTY_NOTICES.md', 'extension/package.json']) {
+    if (!files.some((f) => f.rel === need)) fail(`${need}: required file is missing`);
+  }
+  const shippedNotices = path.join(tmp, 'extension', 'THIRD_PARTY_NOTICES.md');
+  const repoNotices = path.join(repo, 'THIRD_PARTY_NOTICES.md');
+  if (fs.existsSync(shippedNotices) && fs.existsSync(repoNotices) && fs.readFileSync(shippedNotices, 'utf8') !== fs.readFileSync(repoNotices, 'utf8')) {
+    fail('THIRD_PARTY_NOTICES.md in the VSIX differs from the repository copy; run pnpm notices and then pnpm package:vsix');
+  }
+  const legalDir = path.join(repo, 'packages', 'extension', 'legal');
+  if (fs.existsSync(legalDir)) {
+    for (const n of fs.readdirSync(legalDir)) if (!files.some((f) => f.rel === `extension/legal/${n}`)) fail(`legal/${n} is missing from the VSIX; run pnpm package:vsix`);
+  }
+  if (files.some((f) => f.rel === 'extension/host/BuildHost-net472/Microsoft.CodeAnalysis.Workspaces.MSBuild.BuildHost.exe')) {
+    fail('BuildHost-net472 is shipped (only needed for .NET Framework / non-SDK-style projects, unsupported in the alpha)');
+  }
+  const pjPath = path.join(tmp, 'extension', 'package.json');
+  const pj = fs.existsSync(pjPath) ? JSON.parse(fs.readFileSync(pjPath, 'utf8')) : {};
+  if (pj.dependencies && Object.keys(pj.dependencies).length) fail(`package.json declares runtime dependencies (${Object.keys(pj.dependencies).join(', ')}) but ships no node_modules`);
+
+  // ---- size report ----
+  const buckets = new Map();
+  const add = (k, s) => { const b = buckets.get(k) ?? { n: 0, size: 0 }; b.n++; b.size += s; buckets.set(k, b); };
+  for (const f of files) {
+    const segs = f.rel.split('/');
+    add(segs.length <= 2 ? `${segs[0]}/(root files)` : segs.slice(0, segs[1] === 'host' && segs.length > 3 ? 3 : 2).join('/'), f.size);
+  }
+  const total = files.reduce((s, f) => s + f.size, 0);
+  console.log(`VSIX: ${path.relative(repo, vsix)} (${(fs.statSync(vsix).size / 1024).toFixed(1)} KiB compressed, ${(total / 1024).toFixed(1)} KiB unpacked, ${files.length} files)\n`);
+  console.log('Unpacked size by folder:');
+  for (const [k, b] of [...buckets].sort((a, c) => c[1].size - a[1].size)) console.log(`  ${(b.size / 1024).toFixed(1).padStart(10)} KiB  ${String(b.n).padStart(4)} files  ${k}`);
+  console.log(`\nExtension ${extPkg.name}@${extPkg.version}`);
+  for (const w of warnings) console.warn(`WARNING: ${w}`);
+  if (failures.length) {
+    console.error(`\nAUDIT FAILED (${failures.length}):`);
+    for (const m of failures) console.error(`  - ${m}`);
+    process.exitCode = 1;
+  } else {
+    console.log('\nAUDIT PASSED: no test libraries, fixtures, sources, secrets, source maps or build-machine paths in text files.');
+  }
+} finally {
+  fs.rmSync(tmp, { recursive: true, force: true });
+}

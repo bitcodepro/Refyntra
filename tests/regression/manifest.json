@@ -1,0 +1,209 @@
+{
+  "$comment": "Read-only regression on permitted OSS projects. Only public, license-checked projects at pinned commits belong here. Run: pnpm run test:regression. Expectations were observed with Refyntra on 2026-10-10 and reviewed by hand against the source.",
+  "projects": [
+    {
+      "id": "clean-architecture-v8",
+      "repository": "https://github.com/jasontaylordev/CleanArchitecture",
+      "tag": "v8.0.0",
+      "commit": "f2f0445721f5e3efe98ea22266148c698b3ef288",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "licenseMarker": "MIT License",
+      "solution": "CleanArchitecture.sln",
+      "packages": {
+        "MediatR": "12.1.1 (Apache-2.0)",
+        "targetFramework": "net8.0"
+      },
+      "sdk": {
+        "$comment": "The repo pins SDK 8.0.100 with rollForward latestMinor; the override lets a newer SDK (10.0.x tested) build the net8.0 projects. Targeting packs come from NuGet.",
+        "globalJsonOverride": {
+          "sdk": {
+            "version": "8.0.100",
+            "rollForward": "latestMajor"
+          }
+        },
+        "tested": [
+          "10.0.300",
+          "10.0.401"
+        ]
+      },
+      "restoreArgs": [
+        "-p:NuGetAudit=false"
+      ],
+      "expect": {
+        "state": "Ready",
+        "projects": 9,
+        "or1001": {
+          "warnings": [],
+          "abstentions": {
+            "InstanceRegistration": 1
+          }
+        }
+      },
+      "subjects": [
+        {
+          "name": "CreateTodoItemCommand",
+          "kinds": {
+            "declaration": 1,
+            "mediatr.behavior": 4,
+            "mediatr.handler": 1,
+            "mediatr.send": 1,
+            "reference": 15,
+            "test": 7
+          },
+          "targets": {
+            "mediatr.handler": [
+              "CleanArchitecture.Application.TodoItems.Commands.CreateTodoItem.CreateTodoItemCommandHandler"
+            ],
+            "mediatr.behavior": [
+              "CleanArchitecture.Application.Common.Behaviours.AuthorizationBehaviour<TRequest, TResponse>",
+              "CleanArchitecture.Application.Common.Behaviours.PerformanceBehaviour<TRequest, TResponse>",
+              "CleanArchitecture.Application.Common.Behaviours.UnhandledExceptionBehaviour<TRequest, TResponse>",
+              "CleanArchitecture.Application.Common.Behaviours.ValidationBehaviour<TRequest, TResponse>"
+            ]
+          }
+        },
+        {
+          "name": "CreateTodoItemCommandHandler",
+          "kinds": {
+            "declaration": 1,
+            "mediatr.request": 1,
+            "mediatr.response": 1
+          },
+          "targets": {
+            "mediatr.request": [
+              "CleanArchitecture.Application.TodoItems.Commands.CreateTodoItem.CreateTodoItemCommand"
+            ]
+          }
+        },
+        {
+          "name": "PurgeTodoListsCommand",
+          "kinds": {
+            "declaration": 1,
+            "mediatr.behavior": 4,
+            "mediatr.handler": 1,
+            "reference": 6,
+            "test": 4
+          }
+        },
+        {
+          "name": "TodoItemCompletedEvent",
+          "kinds": {
+            "declaration": 1,
+            "mediatr.notificationHandler": 1,
+            "reference": 3
+          },
+          "targets": {
+            "mediatr.notificationHandler": [
+              "CleanArchitecture.Application.TodoItems.EventHandlers.TodoItemCompletedEventHandler"
+            ]
+          }
+        },
+        {
+          "name": "BaseEvent",
+          "kinds": {
+            "declaration": 1,
+            "mediatr.send": 1,
+            "implementation": 3,
+            "reference": 7
+          }
+        },
+        {
+          "name": "ApplicationDbContext",
+          "kinds": {
+            "declaration": 1,
+            "di.registration": 2,
+            "reference": 20
+          }
+        },
+        {
+          "name": "IApplicationDbContext",
+          "kinds": {
+            "declaration": 1,
+            "di.registration": 1,
+            "implementation": 1,
+            "reference": 27
+          }
+        },
+        {
+          "name": "IIdentityService",
+          "kinds": {
+            "declaration": 1,
+            "di.registration": 1,
+            "implementation": 1,
+            "di.implementation": 1,
+            "reference": 10
+          },
+          "targets": {
+            "di.implementation": [
+              "CleanArchitecture.Infrastructure.Identity.IdentityService"
+            ]
+          }
+        },
+        {
+          "name": "IUser",
+          "kinds": {
+            "declaration": 1,
+            "di.registration": 2,
+            "implementation": 1,
+            "di.implementation": 1,
+            "reference": 14
+          }
+        },
+        {
+          "name": "ITestDatabase",
+          "kinds": {
+            "declaration": 1,
+            "implementation": 3,
+            "reference": 5
+          }
+        },
+        {
+          "name": "CreateTodoItemTests",
+          "kinds": {
+            "declaration": 1,
+            "test.subject": 13
+          }
+        },
+        {
+          "name": "CustomWebApplicationFactory",
+          "kinds": {
+            "declaration": 1,
+            "reference": 2
+          }
+        }
+      ],
+      "prepare": [
+        {
+          "name": "CreateTodoItemCommand",
+          "kind": "prepared"
+        },
+        {
+          "name": "CreateTodoItemCommandHandler",
+          "kind": "prepared"
+        },
+        {
+          "name": "IApplicationDbContext",
+          "kind": "prepared"
+        },
+        {
+          "name": "IIdentityService",
+          "kind": "prepared"
+        },
+        {
+          "name": "IUser",
+          "kind": "prepared"
+        },
+        {
+          "name": "ITestDatabase",
+          "kind": "prepared"
+        },
+        {
+          "name": "CustomWebApplicationFactory",
+          "kind": "prepared",
+          "$comment": "refused with a false RenameConflict before the compilation-delta fix (pre-existing CS8618 under TreatWarningsAsErrors)"
+        }
+      ]
+    }
+  ]
+}

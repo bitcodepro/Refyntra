@@ -1,0 +1,205 @@
+{
+  "name": "refyntra",
+  "displayName": "Refyntra",
+  "description": "A free code companion for writing, analysing and navigating code: find anything, see how code is connected (callers, implementations, tests, request handlers, endpoints, DI registrations), get focused diagnostics and rename safely with a preview. C# is analysed with Roslyn; TypeScript and JavaScript use the installed language features.",
+  "version": "0.1.0",
+  "preview": true,
+  "publisher": "refyntra",
+  "license": "MIT",
+  "private": true,
+  "repository": { "type": "git", "url": "https://github.com/refyntra/refyntra.git" },
+  "engines": { "vscode": "^1.90.0" },
+  "categories": ["Programming Languages", "Other"],
+  "keywords": ["code navigation", "code analysis", "refactoring", "rename", "csharp", "typescript", "javascript", "dependency injection", "aspnetcore", "mediatr"],
+  "main": "./dist/extension.js",
+  "activationEvents": ["onStartupFinished", "workspaceContains:**/*.{sln,slnx,csproj}"],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "In Restricted Mode Refyntra only lists solution and project files and shows its UI and health. It does not start the C# host, does not run MSBuild evaluation, restore, build, source generators or analyzers, and does not read the refyntra.hostPath setting from the workspace. Find, Related, Actions and Rename explain that the workspace must be trusted.",
+      "restrictedConfigurations": ["refyntra.hostPath"]
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "Refyntra needs a local file system and a local .NET host."
+    }
+  },
+  "contributes": {
+    "commands": [
+      { "command": "refyntra.find", "title": "Find", "category": "Refyntra" },
+      { "command": "refyntra.related", "title": "Related", "category": "Refyntra" },
+      { "command": "refyntra.actions", "title": "Actions", "category": "Refyntra" },
+      { "command": "refyntra.rename", "title": "Rename", "category": "Refyntra" },
+      { "command": "refyntra.showHealth", "title": "Show Health", "category": "Refyntra" },
+      { "command": "refyntra.showHealthText", "title": "Show Health (text)", "category": "Refyntra" },
+      { "command": "refyntra.restartBackend", "title": "Restart Backend", "category": "Refyntra" },
+      { "command": "refyntra.exportDebugBundle", "title": "Export Debug Bundle", "category": "Refyntra" },
+      { "command": "refyntra.selectSolution", "title": "Select Solution", "category": "Refyntra" },
+      { "command": "refyntra.showMenu", "title": "Show Menu", "category": "Refyntra" },
+      { "command": "refyntra.getStarted", "title": "Get Started", "category": "Refyntra" },
+      { "command": "refyntra.keyboardShortcuts", "title": "Keyboard Shortcuts Preset", "category": "Refyntra" },
+      { "command": "refyntra.findHandler", "title": "Find Handler", "category": "Refyntra" },
+      { "command": "refyntra.findEndpoint", "title": "Find Endpoint", "category": "Refyntra" },
+      { "command": "refyntra.findRegistration", "title": "Find DI Registration", "category": "Refyntra" },
+      { "command": "refyntra.related.pin", "title": "Pin Related View", "category": "Refyntra", "icon": "$(pin)" },
+      { "command": "refyntra.related.unpin", "title": "Unpin Related View (Follow Cursor)", "category": "Refyntra", "icon": "$(pinned)" },
+      { "command": "refyntra.related.refresh", "title": "Refresh Related View", "category": "Refyntra", "icon": "$(refresh)" },
+      { "command": "refyntra.openLocation", "title": "Open Location", "category": "Refyntra" },
+      { "command": "refyntra.runRestore", "title": "Run dotnet restore", "category": "Refyntra" },
+      { "command": "refyntra.related.open", "title": "Open Related Item", "category": "Refyntra" },
+      { "command": "refyntra.nativeRename", "title": "Editor Rename (not validated by Refyntra)", "category": "Refyntra" }
+    ],
+    "taskDefinitions": [
+      {
+        "type": "refyntra-restore",
+        "required": ["target"],
+        "properties": { "target": { "type": "string", "description": "Absolute path of the .sln, .slnx or .csproj passed to dotnet restore as one argument." } }
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        { "command": "refyntra.openLocation", "when": "false" },
+        { "command": "refyntra.runRestore", "when": "false" },
+        { "command": "refyntra.related.open", "when": "false" },
+        { "command": "refyntra.nativeRename", "when": "false" },
+        { "command": "refyntra.related.pin", "when": "!refyntra.relatedPinned" },
+        { "command": "refyntra.related.unpin", "when": "refyntra.relatedPinned" }
+      ],
+      "view/title": [
+        { "command": "refyntra.related.pin", "when": "view == refyntra.relatedView && !refyntra.relatedPinned", "group": "navigation@1" },
+        { "command": "refyntra.related.unpin", "when": "view == refyntra.relatedView && refyntra.relatedPinned", "group": "navigation@1" },
+        { "command": "refyntra.related.refresh", "when": "view == refyntra.relatedView", "group": "navigation@2" }
+      ],
+      "editor/context": [
+        { "submenu": "refyntra.editorContext", "when": "editorLangId =~ /^(csharp|typescript|typescriptreact|javascript|javascriptreact)$/ && resourceScheme == file", "group": "navigation@90" }
+      ],
+      "refyntra.editorContext": [
+        { "command": "refyntra.related", "group": "1_navigate@1" },
+        { "command": "refyntra.actions", "group": "1_navigate@2" },
+        { "command": "refyntra.find", "group": "1_navigate@3" },
+        { "command": "refyntra.rename", "group": "2_refactor@1" }
+      ]
+    },
+    "submenus": [{ "id": "refyntra.editorContext", "label": "Refyntra" }],
+    "viewsContainers": {
+      "activitybar": [{ "id": "refyntra", "title": "Refyntra", "icon": "media/refyntra.svg" }]
+    },
+    "views": {
+      "refyntra": [{ "id": "refyntra.relatedView", "name": "Refyntra Related", "contextualTitle": "Refyntra" }]
+    },
+    "viewsWelcome": [
+      {
+        "view": "refyntra.relatedView",
+        "when": "refyntra.welcome == ready || !refyntra.welcome",
+        "contents": "Refyntra helps you write, analyse and navigate code: find anything, see how code is connected (callers, implementations, tests, request handlers, endpoints, DI registrations), get focused diagnostics and rename safely with a preview.\nTo start, open a C# file and put the cursor on a class, interface or method, then choose Related. TypeScript and JavaScript files work too.\n[Related](command:refyntra.related)\n[Find](command:refyntra.find)\n[Actions](command:refyntra.actions)\n[Rename](command:refyntra.rename)\n[Health](command:refyntra.showHealth)\n[Keyboard shortcuts](command:refyntra.keyboardShortcuts)\n[Get started](command:refyntra.getStarted)"
+      },
+      {
+        "view": "refyntra.relatedView",
+        "when": "refyntra.welcome == untrusted",
+        "contents": "This workspace is in Restricted Mode. Refyntra does not start its C# backend (no MSBuild, restore or build) until you trust the workspace, so Find, Related, Actions and Rename are unavailable for C#.\n[Manage Workspace Trust](command:workbench.trust.manage)\n[Health](command:refyntra.showHealth)\n[Get started](command:refyntra.getStarted)"
+      },
+      {
+        "view": "refyntra.relatedView",
+        "when": "refyntra.welcome == noSolution",
+        "contents": "No C# solution or project was found in this workspace. Open a folder with a .sln, .slnx or .csproj file, or choose one. TypeScript and JavaScript files still work: put the cursor on a symbol and choose Related.\n[Select Solution](command:refyntra.selectSolution)\n[Related](command:refyntra.related)\n[Find](command:refyntra.find)\n[Get started](command:refyntra.getStarted)"
+      },
+      {
+        "view": "refyntra.relatedView",
+        "when": "refyntra.welcome == hostFailed",
+        "contents": "The Refyntra C# backend could not start, so C# features are unavailable. The Health page shows the reason and how to fix it (for example a missing .NET SDK).\n[Health](command:refyntra.showHealth)\n[Restart Backend](command:refyntra.restartBackend)\n[Export Debug Bundle](command:refyntra.exportDebugBundle)\n[Get started](command:refyntra.getStarted)"
+      }
+    ],
+    "walkthroughs": [
+      {
+        "id": "refyntra.getStarted",
+        "title": "Get started with Refyntra",
+        "description": "Find code, see how it is connected and rename safely: five short steps.",
+        "steps": [
+          {"id": "solution", "title": "Open a C# solution and check Health", "description": "Open a folder with a .sln, .slnx or .csproj. The status bar shows Refyntra: C# Ready when the solution is loaded. The Health page says in one line whether C# works and offers the fix, for example Restore packages.\n[Show Health](command:refyntra.showHealth)", "media": {"markdown": "walkthrough/1-solution.md"}},
+          {"id": "related", "title": "See how code is connected (Related)", "description": "Put the cursor on a class, interface or method and open Related.\n[Show Related](command:refyntra.related)", "media": {"markdown": "walkthrough/2-related.md"}},
+          {"id": "find", "title": "Find with filters", "description": "Search types, members, files and endpoints. Narrow with type:, member:, project:, route:, method:.\n[Open Find](command:refyntra.find)", "media": {"markdown": "walkthrough/3-find.md"}},
+          {"id": "actions", "title": "Actions and safe Rename", "description": "See what you can do at the cursor; rename with a preview, then Apply.\n[Open Actions](command:refyntra.actions)\n[Rename](command:refyntra.rename)", "media": {"markdown": "walkthrough/4-actions-rename.md"}},
+          {"id": "keys", "title": "Keyboard presets", "description": "Use Visual Studio or ReSharper style shortcuts for Find, Related, Actions and Rename.\n[Choose a preset](command:refyntra.keyboardShortcuts)", "media": {"markdown": "walkthrough/5-keyboard.md"}}
+        ]
+      }
+    ],
+    "configuration": {
+      "title": "Refyntra",
+      "properties": {
+        "refyntra.hostPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Absolute path to `Refyntra.Host.dll` (started with `dotnet`) or to a host executable. Empty = the host bundled with the extension. Machine scope only: a workspace cannot change which executable runs."
+        },
+        "refyntra.rename.apply": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Offer **Apply rename** after the preview. After you confirm, the plan is revalidated, every target file is checked against the previewed text, the edit is applied to the editor buffers (not saved) and the result is reconciled per file. Undo works through the editor. Turn off for preview-only renames."
+        },
+        "refyntra.keybindings.preset": {
+          "type": "string",
+          "enum": ["none", "visualStudio", "resharper"],
+          "enumDescriptions": [
+            "No Refyntra keybindings (default). F12, Shift+F12 and your shortcuts stay untouched.",
+            "Visual Studio-like: Ctrl+, Find, Ctrl+. Actions, Ctrl+R Ctrl+R Rename, Ctrl+Shift+Alt+F12 Related.",
+            "ReSharper-like: Ctrl+T Find, Alt+Enter Actions, Ctrl+Shift+R Rename, Ctrl+Shift+G Related."
+          ],
+          "default": "none",
+          "markdownDescription": "Opt-in keybinding preset for Find / Related / Actions / Rename. Presets override some VS Code defaults (e.g. Ctrl+T, Ctrl+.) while active."
+        },
+        "refyntra.related.followCursor": {
+          "type": "boolean",
+          "default": true,
+          "description": "Update the Related view when the cursor moves (unless the view is pinned)."
+        },
+        "refyntra.trace.level": {
+          "type": "string",
+          "enum": ["debug", "info", "warn", "error"],
+          "default": "info",
+          "description": "Log level of the Refyntra output channel. Logs never contain source text."
+        },
+        "refyntra.rules.OR1001": {
+          "type": "string",
+          "enum": ["off", "information", "warning"],
+          "enumDescriptions": [
+            "Do not publish OR1001.",
+            "Publish OR1001 as information.",
+            "Publish OR1001 as a warning (default)."
+          ],
+          "default": "warning",
+          "markdownDescription": "Experimental rule OR1001 \"scoped service captured by a singleton\": reported only for a proven constructor path inside one composition root ([docs](https://github.com/refyntra/refyntra/blob/main/docs/rules/OR1001.md)). When it cannot prove a path it stays silent; the reason is shown by the code action *Refyntra: why OR1001 did not check this registration*, never in Problems."
+        }
+      }
+    },
+    "keybindings": [
+      { "command": "refyntra.find", "key": "ctrl+,", "mac": "cmd+,", "when": "config.refyntra.keybindings.preset == 'visualStudio'" },
+      { "command": "refyntra.actions", "key": "ctrl+.", "mac": "cmd+.", "when": "config.refyntra.keybindings.preset == 'visualStudio' && editorTextFocus && editorLangId =~ /^(csharp|typescript|typescriptreact|javascript|javascriptreact)$/" },
+      { "command": "refyntra.rename", "key": "ctrl+r ctrl+r", "mac": "cmd+r cmd+r", "when": "config.refyntra.keybindings.preset == 'visualStudio' && editorTextFocus && editorLangId =~ /^(csharp|typescript|typescriptreact|javascript|javascriptreact)$/" },
+      { "command": "refyntra.related", "key": "ctrl+shift+alt+f12", "mac": "cmd+shift+alt+f12", "when": "config.refyntra.keybindings.preset == 'visualStudio' && editorTextFocus && editorLangId =~ /^(csharp|typescript|typescriptreact|javascript|javascriptreact)$/" },
+      { "command": "refyntra.find", "key": "ctrl+t", "mac": "cmd+t", "when": "config.refyntra.keybindings.preset == 'resharper'" },
+      { "command": "refyntra.actions", "key": "alt+enter", "mac": "alt+enter", "when": "config.refyntra.keybindings.preset == 'resharper' && editorTextFocus && editorLangId =~ /^(csharp|typescript|typescriptreact|javascript|javascriptreact)$/" },
+      { "command": "refyntra.rename", "key": "ctrl+shift+r", "mac": "cmd+shift+r", "when": "config.refyntra.keybindings.preset == 'resharper' && editorTextFocus && editorLangId =~ /^(csharp|typescript|typescriptreact|javascript|javascriptreact)$/" },
+      { "command": "refyntra.related", "key": "ctrl+shift+g", "mac": "cmd+shift+g", "when": "config.refyntra.keybindings.preset == 'resharper' && editorTextFocus && editorLangId =~ /^(csharp|typescript|typescriptreact|javascript|javascriptreact)$/" }
+    ]
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test:integration": "node scripts/build.mjs && node test/runTest.mjs",
+    "test:e2e": "node scripts/build.mjs && node test/runTest.mjs --e2e",
+    "package": "node scripts/package.mjs"
+  },
+  "devDependencies": {
+    "@refyntra/adapter-vscode-providers": "workspace:*",
+    "@refyntra/application": "workspace:*",
+    "@refyntra/contracts": "workspace:*",
+    "@refyntra/domain": "workspace:*",
+    "@refyntra/infrastructure": "workspace:*",
+    "@types/node": "22.18.6",
+    "@types/vscode": "1.90.0",
+    "@vscode/test-electron": "2.5.2",
+    "@vscode/vsce": "3.6.2",
+    "esbuild": "0.25.10",
+    "typescript": "5.9.3"
+  }
+}

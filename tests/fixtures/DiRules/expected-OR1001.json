@@ -1,0 +1,26 @@
+{
+  "rule": "OR1001",
+  "note": "Manual labels. 'truth' = whether the singleton captures a scoped service at run time when Program.cs runs (capture | none). 'expected' = what OR1001 must report: warning | abstain | clean. 'scope' = in (OR1001 claims to decide it) | out (outside the supported scope, abstention by design).",
+  "cases": [
+    { "case": "direct",               "singleton": "PriceCache",          "truth": "capture", "expected": "warning", "scope": "in" },
+    { "case": "transitive",           "singleton": "ReportScheduler",     "truth": "capture", "expected": "warning", "scope": "in" },
+    { "case": "typeof",               "singleton": "SessionCache",        "truth": "capture", "expected": "warning", "scope": "in" },
+    { "case": "different roots",      "singleton": "SplitConsumer",       "truth": "capture", "expected": "abstain", "scope": "out" },
+    { "case": "conditional",          "singleton": "CondConsumer",        "truth": "capture", "expected": "abstain", "scope": "out" },
+    { "case": "factory dependency",   "singleton": "FactConsumer",        "truth": "capture", "expected": "abstain", "scope": "out" },
+    { "case": "factory singleton",    "singleton": "IFactCache",          "truth": "capture", "expected": "abstain", "scope": "out" },
+    { "case": "IEnumerable",          "singleton": "StepDispatcher",      "truth": "capture", "expected": "abstain", "scope": "out" },
+    { "case": "TryAdd",               "singleton": "TryConsumer",         "truth": "capture", "expected": "abstain", "scope": "out" },
+    { "case": "open generic",         "singleton": "GenericConsumer",     "truth": "capture", "expected": "abstain", "scope": "out" },
+    { "case": "keyed",                "singleton": "KeyedConsumer",       "truth": "capture", "expected": "abstain", "scope": "out" },
+    { "case": "same-name foreign",    "singleton": "ForeignConsumer",     "truth": "none",    "expected": "abstain", "scope": "in" },
+    { "case": "multiple ctors",       "singleton": "MultiConsumer",       "truth": "capture", "expected": "abstain", "scope": "out" },
+    { "case": "clean singleton",      "singleton": "CleanSingleton",      "truth": "none",    "expected": "clean",   "scope": "in" },
+    { "case": "clean transient",      "singleton": "CleanPrinter",        "truth": "none",    "expected": "clean",   "scope": "in" },
+    { "case": "clean singleton dep",  "singleton": "ICleanClock",         "truth": "none",    "expected": "clean",   "scope": "in" },
+    { "case": "overridden later",     "singleton": "OverriddenConsumer",  "truth": "none",    "expected": "abstain", "scope": "in" },
+    { "case": "overriding singleton", "singleton": "IOverriddenRepository", "truth": "none",  "expected": "clean",   "scope": "in" },
+    { "case": "duplicate",            "singleton": "DuplicateConsumer",   "truth": "none",    "expected": "abstain", "scope": "in" },
+    { "case": "duplicate singleton",  "singleton": "IDuplicateRepository", "truth": "none",   "expected": "clean",   "scope": "in" }
+  ]
+}

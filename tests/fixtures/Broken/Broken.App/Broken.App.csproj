@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Intentionally missing: the fixture shows a Partial load. -->
+    <ProjectReference Include="..\Missing.Lib\Missing.Lib.csproj" />
+  </ItemGroup>
+</Project>
