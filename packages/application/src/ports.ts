@@ -80,19 +80,20 @@ export interface ApplyFileReport {
  */
 export type ResourceStatus = 'confirmed' | 'not-attempted' | 'refused' | 'failed' | 'unknown';
 
-export interface ApplyResourceReport {
-  kind: 'rename';
-  oldUri: string;
-  newUri: string;
-  status: ResourceStatus;
-  detail?: string;
-}
+export type ApplyResourceReport =
+  | { kind: 'rename'; oldUri: string; newUri: string; status: ResourceStatus; detail?: string }
+  /**
+   * Created file (Move Type to File, Generate handler): confirmed = the file exists with exactly the planned text;
+   * refused = the target existed right before the create, nothing was created; failed = the editor did not create it
+   * and it does not exist; unknown = anything else.
+   */
+  | { kind: 'create'; uri: string; status: ResourceStatus; detail?: string };
 
 export interface ApplyReport {
   /** What the editor's apply returned. Never trusted on its own: `files` is the reconciled post-state. */
   editorAccepted: boolean;
   files: ApplyFileReport[];
-  /** File rename: one entry per planned file rename, in plan order (absent for a text-only plan). */
+  /** File rename / created files: one entry per resource operation, in plan order (absent for a text-only plan). */
   resources?: ApplyResourceReport[];
 }
 

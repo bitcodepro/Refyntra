@@ -22,6 +22,11 @@ Alpha scope is navigation for:
 - ASP.NET Core MVC controllers and actions: `[Route]`, `[HttpGet/Post/Put/Delete/Patch/Head/Options]`, `[AcceptVerbs]`,
   `[controller]`/`[action]`/`[area]` tokens, inherited routes and actions; conventional routes (`MapControllerRoute`)
   are listed but marked *conventional route, not resolved*
+- EF Core: DbContext ↔ entities (`DbSet<T>`, `Entity<T>()`, `IEntityTypeConfiguration<T>`, `ApplyConfiguration`;
+  `ApplyConfigurationsFromAssembly` as *likely*), mapped tables (`ToTable`, `[Table]`; convention names as *likely*),
+  navigations and relationships (fluent `HasOne/HasMany/WithOne/WithMany/HasForeignKey/OwnsOne/OwnsMany`, conventions
+  as *likely*), query sites (`DbSet<T>`, `Set<T>()`, with the enclosing endpoint) and migrations / model snapshots
+  (read-only). Dynamic model building is reported as unknown; no model is built at runtime and no database is accessed
 - Explicit dependency injection registrations, including keyed (`AddKeyed*`, with the key; `[FromKeyedServices]`
   parameters), factory (*likely*, with the lambda location), instance and open generic registrations (closed usages
   such as `IRepo<Widget>` as *likely*)
@@ -48,9 +53,9 @@ Framework relations are found by Roslyn from verified symbol identity (owned-sem
    when the solution is loaded; click it for a menu of every Refyntra command.
 2. Put the cursor on a class, interface or method in a C# file and run **Refyntra: Related** (editor context menu
    **Refyntra** › Related, or the Refyntra view in the activity bar). The view lists callers, implementations, tests,
-   request handlers, endpoints and DI registrations.
+   request handlers, endpoints, DI registrations and EF Core entities, tables and queries.
 3. **Refyntra: Find** searches types, members, files and endpoints; narrow with `type:`, `member:`, `project:NAME`,
-   `route:/path`, `method:GET`.
+   `route:/path`, `method:GET`, `entity:` (EF Core entities), `table:NAME` (entities by mapped table).
 4. **Refyntra: Actions** shows what is available at the cursor (and why not); **Refyntra: Rename** previews every change
    before **Apply**.
 5. Optional: set `refyntra.keybindings.preset` to `visualStudio` or `resharper` (**Refyntra: Keyboard Shortcuts Preset**).
@@ -149,6 +154,63 @@ If the file rename does not happen (for example another program created the targ
 
 Residual risks: VS Code has no transaction across text edits and file operations, so a failure between the two steps leaves the text edits applied (reported, undoable). Another program can create or change the target in the very last moment before the rename; VS Code then refuses to overwrite and the outcome is reported. MSBuild items that come from NuGet packages, the SDK or computed imports are not inspected (computed imports make the plan *limited*, and then the file is not renamed). Undo of the rename itself is VS Code's file-operation Undo (for example in the Explorer), not Refyntra's.
 
+## Move Type to File and Generate handler
+
+Two refactorings create a new C# file. Both are offered in **Actions** (and as commands) only where they apply, show a
+preview first (the new file as a diff from an empty file, plus the edits of existing files) and use the same safety
+model as renaming a file: the host proves statically that the new file belongs to the same `Compile` items as an
+existing file of the same folder (the same proof as [Renaming the file with the type](#renaming-the-file-with-the-type),
+in every project that contains that file), the target must not exist (compared ignoring case), the plan carries a read
+set and is revalidated after you confirm, and the result may not add a compiler error anywhere in the affected projects
+(the new file included).
+
+**Move Type to File** (`refyntra.moveTypeToFile`) — on the declaration of a top-level type in a file that has other
+top-level types. The type moves into `<Type>.cs` in the same folder with the same namespace declarations (file-scoped or
+block, nested block namespaces included), the comment banner at the top of the file, the comments and documentation
+directly above the type, its attributes, and only the usings the moved code needs (namespace-level usings stay inside
+the namespace). The original file loses the type and one surplus blank line; its usings are not changed. Refyntra checks
+that every name in the moved code binds to exactly the same symbol in the new file as before, and refuses the move
+otherwise. Not offered: nested types, a type alone in its file, a position that is not the declaration. Refused with the
+reason: partial types (all parts would have to move consistently; not in this version), file-local types, generated
+files, files with `#if`/`#define`/`#nullable`/`#pragma`/`#line` (and similar) directives, a type with directives inside
+it, a type that shares a line with other code, a type that needs the rest of its file (for example a file-local helper).
+
+**Generate handler** (`refyntra.generateHandler`, MediatR) — on a request type that implements MediatR's `IRequest<T>` or
+`IRequest` (identity verified by assembly; MediatR 10–12) and has no handler in source. It creates `<Request>Handler.cs`
+with a class implementing `IRequestHandler<TRequest, TResponse>` (or `IRequestHandler<TRequest>`) whose `Handle` throws
+`NotImplementedException` — an honest placeholder. The folder defaults to the one where most handlers of the solution
+live; **Change folder** in the preview lists the existing handler folders (most handlers first) and the request's own
+folder, limited to projects that reference MediatR and can see the request. The namespace is the project's
+`RootNamespace` plus the folders; the file uses file-scoped namespaces when the project does. **No DI registration is
+generated**: MediatR finds handlers by scanning assemblies, and the preview says so. Not offered on a type that is not a
+MediatR request. Unavailable with the reason: a generic (open) request, an existing handler, an unverified MediatR
+version, an abstract or inaccessible request.
+
+Order and failure semantics:
+
+1. After you confirm, the host revalidates the read set, the absence of the target and the membership proof.
+2. The new file is **created first**, on disk, with exactly the previewed text (`WorkspaceEdit.createFile`, never
+   overwriting). A created file cannot stay unsaved.
+3. Only when it exists with exactly that text are the target files checked again and the edit of the original file
+   applied (Move Type to File), unsaved, as one text edit.
+4. Refyntra reconciles each step, tells the host about the new file (no reload) and reports what happened.
+
+Why the create comes first: it is the step that can fail for reasons outside the editor (the target appears, the folder
+is not writable). When it fails, nothing has changed and the code still compiles. The edit that follows is checked
+synchronously against the previewed text, so it rarely fails; if it does, the new file stays and the type exists twice
+(the compiler reports a duplicate) — but no code is ever only in an Undo history. The other order could leave the type
+removed from the original with no new file. Refyntra reports "created, but the edit … was not applied", offers to delete
+the new file and never rolls back on its own.
+
+**Undo** (offered after the apply) undoes the edit of the original file with the editor's Undo while it still has the
+applied text, deletes the new file while it still has exactly the created text and no unsaved changes, and then reloads
+the C# analysis. Anything that changed in between is left alone and reported.
+
+Residual risks: no transaction across the file creation and the text edit (reported, undoable); another program can
+write the target in the very last moment (VS Code refuses to overwrite; reported); MSBuild items from packages, the SDK
+or computed imports are not inspected (computed imports refuse the action); between the create and a save of the
+original file the type exists twice on disk, so a command-line build in that moment reports a duplicate.
+
 ## TypeScript and JavaScript (delegated)
 
 For `.ts`, `.tsx`, `.js`, `.jsx` (and `.mts`, `.cts`, `.mjs`, `.cjs`) files, Find, Related, Actions and Rename are
@@ -177,6 +239,8 @@ rename provider of its own.
 | `refyntra.related` | Related symbols for the current position |
 | `refyntra.actions` | Available actions and reasons for unavailable ones |
 | `refyntra.rename` | Rename with preview, then apply |
+| `refyntra.moveTypeToFile` | Move the type at the cursor into its own file (preview, then apply) |
+| `refyntra.generateHandler` | Create a MediatR handler for the request at the cursor (preview, then apply) |
 | `refyntra.showHealth` | The Health page: is Refyntra working, what it means, the fix, projects by state |
 | `refyntra.showHealthText` | The same report as a Markdown document, technical details included |
 | `refyntra.restartBackend` | Restart the .NET host |

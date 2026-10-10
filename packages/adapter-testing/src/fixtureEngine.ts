@@ -271,9 +271,9 @@ export class FixtureEngine {
     };
   }
 
-  private search(p: { query: string; filters: { member?: boolean; project?: string; route?: string; method?: string }; limit: number }): SearchResult {
+  private search(p: { query: string; filters: { member?: boolean; project?: string; route?: string; method?: string; entity?: boolean; table?: string }; limit: number }): SearchResult {
     const q = p.query.toLowerCase();
-    if (p.filters.member || p.filters.route !== undefined || p.filters.method) return { items: [], truncated: false, snapshotId: this.snapshotId() };
+    if (p.filters.member || p.filters.route !== undefined || p.filters.method || p.filters.entity || p.filters.table !== undefined) return { items: [], truncated: false, snapshotId: this.snapshotId() };
     if (p.filters.project && p.filters.project.toLowerCase() !== (this.options.projectName ?? 'FixtureProject').toLowerCase()) return { items: [], truncated: false, snapshotId: this.snapshotId() };
     const items: SearchItem[] = [];
     for (const d of this.declarations()) {

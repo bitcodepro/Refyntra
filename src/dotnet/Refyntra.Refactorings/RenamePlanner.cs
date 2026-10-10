@@ -24,7 +24,7 @@ public static class ReadKinds
     public const string Documents = "documents";
     /// <summary>Project files (*.csproj, path + bytes) under a directory: projects that could start referencing the closure.</summary>
     public const string Projects = "projects";
-    /// <summary>Absence precondition: the target path of a file rename must not exist (also ignoring case).</summary>
+    /// <summary>Absence precondition: the target path of a file rename or a created file must not exist (also ignoring case).</summary>
     public const string Absent = "absent";
 }
 
@@ -49,6 +49,12 @@ public sealed class RenamePlan
     public IReadOnlyList<PlannedFileRename> FileRenames { get; init; } = Array.Empty<PlannedFileRename>();
     /// <summary>File rename: what renaming the file together with the type would mean (null when no file is named after it).</summary>
     public FileRenameOffer? FileRenameOffer { get; init; }
+    /// <summary>Move Type to File / Generate handler: files created before every text edit (empty otherwise).</summary>
+    public IReadOnlyList<PlannedFileCreate> FileCreates { get; init; } = Array.Empty<PlannedFileCreate>();
+    /// <summary>The action of the plan (csharp.rename, csharp.moveTypeToFile, csharp.generateHandler).</summary>
+    public string ActionId { get; init; } = "csharp.rename";
+    /// <summary>Generate handler: the folders the handler can be created in (first = default), with the chosen one.</summary>
+    public CreateFileOffer? CreateFileOffer { get; init; }
 }
 
 public sealed record RenameOutcome(RenamePlan? Plan, string? ReasonCode, string? Message)
@@ -274,7 +280,7 @@ public static class RenamePlanner
     /// Compiler errors of a project keyed by (id, file, span). With <paramref name="mapBack"/> the spans of edited
     /// files are mapped back to the text before the rename.
     /// </summary>
-    private static async Task<Dictionary<string, (int count, string label)>> ErrorKeysAsync(Project? project,
+    internal static async Task<Dictionary<string, (int count, string label)>> ErrorKeysAsync(Project? project,
         IReadOnlyDictionary<string, IReadOnlyList<TextChange>>? mapBack, CancellationToken ct)
     {
         var result = new Dictionary<string, (int count, string label)>(StringComparer.Ordinal);
@@ -329,7 +335,7 @@ public static class RenamePlanner
     /// Targets the extension cannot edit exactly as previewed: files that are not UTF-8 on disk, and closed files with
     /// mixed line endings (VS Code normalizes them when it loads the file, so the result would differ from the preview).
     /// </summary>
-    private static RenameOutcome? TargetGuard(WorkspaceSession session, string path, SourceText snapshotText)
+    internal static RenameOutcome? TargetGuard(WorkspaceSession session, string path, SourceText snapshotText)
     {
         byte[] bytes;
         try { bytes = File.Exists(path) ? File.ReadAllBytes(path) : Array.Empty<byte>(); }
@@ -404,7 +410,7 @@ public static class RenamePlanner
         return entries.Values.ToList();
     }
 
-    private static bool IsReadOnly(string path)
+    internal static bool IsReadOnly(string path)
     {
         try { return File.Exists(path) && new FileInfo(path).IsReadOnly; }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return true; }
@@ -505,6 +511,10 @@ public static class RenamePlanner
             return new RevalidationOutcome("stale", "EpochChanged", "The host restarted after the plan was prepared.");
         if (!ReferenceEquals(current.Session, plan.BaseSnapshot.Session) || current.Generation != plan.BaseSnapshot.Generation)
             return new RevalidationOutcome("stale", "WorkspaceReloaded", "The workspace was reloaded or reopened after the plan was prepared.");
+        // Created files first (a precise reason): the target must still be absent (also ignoring case) and its Compile
+        // membership still proven. A target that appeared also changes the membership fingerprint below.
+        if (CreateFilePlanner.Revalidate(plan.FileCreates) is { } createGuard)
+            return new RevalidationOutcome("stale", createGuard.code == "TargetExists" ? "TargetExists" : "FileCreateUnsafe", "Creating the file is no longer safe: " + createGuard.message);
         foreach (var entry in plan.ReadSet)
         {
             ct.ThrowIfCancellationRequested();
@@ -555,6 +565,7 @@ public static class RenamePlanner
         // File rename: the target of every file rename must still be absent and the rename still proven safe.
         if (FileRenamePlanner.Revalidate(plan.FileRenames) is { } fileGuard)
             return new RevalidationOutcome("stale", fileGuard.code == "TargetExists" ? "TargetExists" : "FileRenameUnsafe", "The file rename is no longer safe: " + fileGuard.message);
+
         // Revalidation never upgrades: a plan prepared as "limited" stays "limited", with the same limitations.
         if (plan.ValidationStatus != "valid")
             return new RevalidationOutcome("limited", "LimitedValidation",
@@ -595,4 +606,9 @@ public sealed class PlanStore
     }
 
     public int Count => _plans.Count;
+
+    /// <summary>The projects a prepared plan proved Compile membership of <paramref name="path"/> for (a planned created file), or null.</summary>
+    public IReadOnlyList<string>? CreatedFileProjects(string workspaceId, string path) =>
+        _plans.Values.Where(p => p.WorkspaceId == workspaceId).SelectMany(p => p.FileCreates)
+            .FirstOrDefault(c => UriPaths.PathComparer.Equals(c.Path, path))?.ProjectPaths;
 }

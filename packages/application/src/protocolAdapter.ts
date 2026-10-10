@@ -79,7 +79,7 @@ interface Session {
   maxMessageBytes: number;
   /** False until startup (open + replay + barrier) finished: a close during startup is handled by the startup path. */
   started: boolean;
-  /** Protocol minor of the backend (1.2+ understands workspace/didRenameFiles). */
+  /** Protocol minor of the backend (1.2+ understands workspace/didRenameFiles, 1.3+ workspace/didCreateFiles). */
   protocolMinor: number;
 }
 
@@ -336,7 +336,7 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
    * Sends one document notification with the next wire sequence. The sequence is consumed only when the send
    * succeeded, so a failed send never leaves a gap that would make every later barrier wait for it.
    */
-  private send<N extends 'textDocument/didOpen' | 'textDocument/didChange' | 'textDocument/didSave' | 'textDocument/didClose' | 'workspace/didRenameFiles'>(
+  private send<N extends 'textDocument/didOpen' | 'textDocument/didChange' | 'textDocument/didSave' | 'textDocument/didClose' | 'workspace/didRenameFiles' | 'workspace/didCreateFiles'>(
     session: Session,
     method: N,
     params: Omit<NotificationMap[N], 'sequence'>,
@@ -607,7 +607,7 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
 
   prepare(req: PrepareRequest, token?: CancellationToken): Promise<RouteResult<PrepareResult>> {
     return this.semantic('refactor/prepare', token, (s, snapshotId, traceId) =>
-      s.transport.request('refactor/prepare', { traceId, workspaceId: this.opts.workspaceId, snapshotId, actionId: req.actionId, symbolId: req.symbolId, newName: req.newName, ...(req.renameFile ? { renameFile: true } : {}) }, token),
+      s.transport.request('refactor/prepare', { traceId, workspaceId: this.opts.workspaceId, snapshotId, actionId: req.actionId, symbolId: req.symbolId, newName: req.newName, ...(req.renameFile ? { renameFile: true } : {}), ...(req.targetFolderUri ? { targetFolderUri: req.targetFolderUri } : {}), ...(req.documentUri ? { documentUri: req.documentUri } : {}) }, token),
     );
   }
 
@@ -653,6 +653,13 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
     const session = this.session;
     if (!session || session.protocolMinor < 2 || files.length === 0) return false;
     return this.send(session, 'workspace/didRenameFiles', { workspaceId: this.opts.workspaceId, workspaceRevision, files: files.map((f) => ({ oldUri: f.oldUri, newUri: f.newUri })) });
+  }
+
+  /** Created files: the host adds the documents of created files (same document sequence as didOpen/didClose). */
+  filesCreated(uris: readonly string[], workspaceRevision: number): boolean {
+    const session = this.session;
+    if (!session || session.protocolMinor < 3 || uris.length === 0) return false;
+    return this.send(session, 'workspace/didCreateFiles', { workspaceId: this.opts.workspaceId, workspaceRevision, files: uris.map((uri) => ({ uri })) });
   }
 
   discard(planId: string): void {

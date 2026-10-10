@@ -9,7 +9,7 @@ export interface ParsedFindQuery {
 }
 
 /** Only filters that are actually implemented. Shown as the QuickPick hint. */
-export const FIND_FILTER_HINT = 'Filters: type:  member:  project:NAME  route:/path  method:GET';
+export const FIND_FILTER_HINT = 'Filters: type:  member:  project:NAME  route:/path  method:GET  entity:  table:NAME';
 
 const HTTP_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']);
 
@@ -27,15 +27,15 @@ function unquote(v: string): string {
 }
 
 /**
- * Parses `type:`, `member:`, `project:NAME`, `route:TEXT`, `method:VERB`. `type:Foo` is `type:` plus the text
- * "Foo". Unknown `x:y` tokens stay as text (C# `global::` etc.).
+ * Parses `type:`, `member:`, `project:NAME`, `route:TEXT`, `method:VERB`, `entity:`, `table:TEXT`. `type:Foo` is
+ * `type:` plus the text "Foo" (the same for `entity:Foo`). Unknown `x:y` tokens stay as text (C# `global::` etc.).
  */
 export function parseFindQuery(input: string): ParsedFindQuery {
   const filters: SearchFilters = {};
   const errors: string[] = [];
   const text: string[] = [];
   for (const token of tokenize(input)) {
-    const m = /^(type|member|project|route|method):(.*)$/i.exec(token);
+    const m = /^(type|member|project|route|method|entity|table):(.*)$/i.exec(token);
     if (!m) {
       text.push(unquote(token));
       continue;
@@ -58,6 +58,13 @@ export function parseFindQuery(input: string): ParsedFindQuery {
       case 'route':
         filters.route = value;
         break;
+      case 'entity':
+        filters.entity = true;
+        if (value) text.push(value);
+        break;
+      case 'table':
+        filters.table = value;
+        break;
       case 'method': {
         const verb = value.toUpperCase();
         if (!verb) errors.push('method: needs an HTTP method, e.g. method:GET');
@@ -69,9 +76,10 @@ export function parseFindQuery(input: string): ParsedFindQuery {
   }
   if (filters.type && filters.member) errors.push('type: and member: cannot be combined');
   if ((filters.route !== undefined || filters.method) && (filters.type || filters.member)) errors.push('route:/method: search endpoints and cannot be combined with type:/member:');
+  if ((filters.entity || filters.table !== undefined) && (filters.member || filters.route !== undefined || filters.method)) errors.push('entity:/table: search EF Core entities and cannot be combined with member:/route:/method:');
   return { text: text.join(' ').trim(), filters, errors };
 }
 
 export function hasAnyFilter(f: SearchFilters): boolean {
-  return !!(f.type || f.member || f.project || f.route !== undefined || f.method);
+  return !!(f.type || f.member || f.project || f.route !== undefined || f.method || f.entity || f.table !== undefined);
 }

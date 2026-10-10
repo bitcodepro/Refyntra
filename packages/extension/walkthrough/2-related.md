@@ -7,7 +7,9 @@ menu under **Refyntra**). The Related view lists:
 - callers and tests,
 - MediatR request handlers and `Send` call sites,
 - ASP.NET Core endpoints,
-- DI registrations, per composition root.
+- DI registrations, per composition root,
+- EF Core: a DbContext's entities and migrations; an entity's DbContexts, configuration, table, navigations and queries
+  (group *Data*).
 
 The view follows the cursor; pin it to keep a result. Items marked *likely* are not proven. If some projects did not
 load completely, a warning under the results says so and offers the fix.

@@ -56,3 +56,43 @@ the files named after a top-level type (`Foo.cs`, partial parts `Foo.*.cs`) toge
 - Residual risks: no transaction across text and file operations; a last-moment external write to the target (the
   editor refuses to overwrite; reported); MSBuild items from packages/SDK not inspected; Undo of the file rename is the
   editor's file-operation Undo.
+
+## Amendment 2: created files (Move Type to File, Generate handler)
+
+Status: Accepted
+
+The same revisit criterion is met for a second resource operation: creating one new `.cs` file, for Move Type to File
+(a top-level type out of a file with several top-level types) and Generate handler (MediatR).
+
+- Offered only when proven safe, otherwise unavailable with the reason in Actions and the prepare result. Shared guards:
+  target absent (also ignoring case, also as a document of the solution), valid non-reserved name, folder not reached
+  through a symbolic link, and the static Compile-membership proof of Amendment 1 with an existing file of the same
+  folder as the anchor, in every project that contains the anchor. Move Type to File adds: not partial, not file-local,
+  not generated, no conditional/`#nullable`/`#pragma`/`#line` directives in the file, no directive inside the type, the
+  type on its own lines, and every name of the moved code binding to the same symbol in the new file (with the usings
+  reduced to those the moved code needs). Generate handler adds: verified MediatR identity and version, not generic, not
+  abstract or inaccessible, no source handler, a target project that references MediatR and can see the request.
+- Compilation delta: no compiler error in the affected closure after the change that did not exist before; every error
+  in the new file is new.
+- Contract: `PlannedChange` kind `create` `{uri, resultHash, text}` (additive, protocol 1.3), always **before** every
+  text change; `RefactorPlanDto.fileCreate` lists the created files (and the Generate handler folder choices);
+  `PrepareParams.documentUri` / `targetFolderUri`; notification `workspace/didCreateFiles`. Validated by the domain
+  validator (order, listing, `*.cs`, no separator, hash, size limit, no overlap with edited or renamed files); the
+  EditApplier checks `resultHash` = SHA-256(`text`) and the absence again. Revalidation re-checks absence and proof
+  first (reason `TargetExists` / `FileCreateUnsafe`), then the read set.
+- Apply order through the single EditApplier: each create as its own `WorkspaceEdit.createFile` (overwrite off) with the
+  planned bytes, reconciled (the file exists with exactly the planned text); only when every create is confirmed, every
+  text target is checked again synchronously and the text edit is applied (all-or-nothing for text). **Why create
+  first**: the create is the step exposed to the outside (target appearing, permissions); failing first leaves nothing
+  changed and the code compilable. The text edit after it is hash-checked synchronously and rarely fails; if it does,
+  the type exists twice (a loud CS0101) but no code exists only in an Undo history. Text first would, on a create
+  failure, leave the type removed from the editor buffer (and, with auto save, from disk) with no new file.
+- Failure path: create failed → nothing changed, reported. Created but text not applied → reported exactly as that
+  (`createdOnly`), deleting the new file offered, no automatic rollback. Unknown outcome → the C# route restarts.
+  Success → `workspace/didCreateFiles` adds the documents to the proven projects without a reload.
+- Undo is Refyntra's: the editor's Undo of the text edit while the text is the applied result, then deletion of the
+  created file while it still has exactly the created text and no unsaved changes (through the EditApplier), then a
+  reload of the C# route. Changed state is left alone and reported.
+- Residual risks: no transaction across file and text operations; a last-moment external write to the target (the
+  editor refuses to overwrite; reported); MSBuild items from packages/SDK not inspected; the created file is on disk while
+  the original edit is unsaved, so a build from disk in between sees the type twice.

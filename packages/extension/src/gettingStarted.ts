@@ -26,10 +26,12 @@ export interface MenuEntry {
 
 /** Status bar click → QuickPick of the main commands. */
 export const MAIN_MENU: readonly MenuEntry[] = [
-  { label: '$(search) Find', detail: 'Find a type, member, file, endpoint (filters: type: member: project: route: method:)', command: 'refyntra.find' },
+  { label: '$(search) Find', detail: 'Find a type, member, file, endpoint (filters: type: member: project: route: method: entity: table:)', command: 'refyntra.find' },
   { label: '$(references) Related', detail: 'Callers, implementations, tests, handlers, endpoints and DI registrations of the symbol at the cursor', command: 'refyntra.related' },
   { label: '$(lightbulb) Actions', detail: 'What Refyntra can do at the cursor, and why something is unavailable', command: 'refyntra.actions' },
   { label: '$(edit) Rename', detail: 'Rename the symbol at the cursor: preview first, then Apply', command: 'refyntra.rename' },
+  { label: '$(new-file) Move Type to File', detail: 'Move the type at the cursor into its own file: preview first, then Apply', command: 'refyntra.moveTypeToFile' },
+  { label: '$(new-file) Generate Handler', detail: 'Create a MediatR handler for the request at the cursor: preview first, then Apply', command: 'refyntra.generateHandler' },
   { label: '$(pulse) Show Health', detail: 'Is Refyntra working, what it means for you, and the fix (for example Restore packages)', command: 'refyntra.showHealth' },
   { label: '$(go-to-file) Find Handler', detail: 'Jump to the request handler of the symbol at the cursor', command: 'refyntra.findHandler' },
   { label: '$(globe) Find Endpoint', detail: 'Search ASP.NET endpoints by route', command: 'refyntra.findEndpoint' },

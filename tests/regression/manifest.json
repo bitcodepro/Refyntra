@@ -112,6 +112,9 @@
           "name": "ApplicationDbContext",
           "kinds": {
             "declaration": 1,
+            "efcore.entity": 9,
+            "efcore.configuration": 2,
+            "efcore.migration": 2,
             "di.registration": 2,
             "reference": 20
           }

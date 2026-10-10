@@ -91,6 +91,17 @@ a test class. It is not part of `initialize.capabilities`.
   `workspace/didRenameFiles`. A 1.1 host ignores `renameFile` (text-only plans, no offer); a 1.2 client sends
   `workspace/didRenameFiles` only to a host that reported minor ≥ 2 (it consumes a document sequence, which an older
   host would never acknowledge) and restarts the route instead.
+- 1.3 (additive, created files): actions `csharp.moveTypeToFile` and `csharp.generateHandler` for `refactor/prepare`
+  (offered by `capability/query` outside the catalogue, only where they apply); `PrepareParams.documentUri?` (Move Type
+  to File: the cursor's document) and `targetFolderUri?` (Generate handler: one of the offered folders); `PlannedChange`
+  kind `"create"` `{uri, resultHash, text}` (always before every text change); `RefactorPlanDto.fileCreate?: {files,
+  folderChoices?, selectedFolderUri?}`; notification `workspace/didCreateFiles` `{workspaceId, sequence,
+  workspaceRevision, files: [{uri}]}`. A 1.2 host answers `unavailable` / `UnsupportedAction`; a 1.3 client sends
+  `workspace/didCreateFiles` only to a host that reported minor ≥ 3 and restarts the route otherwise.
+- Additive (EF Core): relation kinds `efcore.*` and group `data` (above); `SearchFilters.entity?: boolean` ("entity:")
+  and `SearchFilters.table?: string` ("table:NAME") return EF Core entities as symbol items. Older hosts ignore the
+  filters (they return a normal symbol search); older clients render the kinds and the group generically. The
+  protocol minor stays 2.
 
 ## Lifecycle
 
@@ -130,6 +141,7 @@ issuing semantic requests.
 | `textDocument/didSave` | notif | `{workspaceId, uri, sequence, workspaceRevision}` | – |
 | `textDocument/didClose` | notif | `{workspaceId, uri, sequence, workspaceRevision}` (overlay dropped, disk text used; missing file: removed) | – |
 | `workspace/didRenameFiles` | notif | `{workspaceId, sequence, workspaceRevision, files: [{oldUri, newUri}]}` (since 1.2; documents move to the new path, overlay kept, no reload; part of the document sequence) | – |
+| `workspace/didCreateFiles` | notif | `{workspaceId, sequence, workspaceRevision, files: [{uri}]}` (since 1.3; each file becomes a document of the projects whose membership the plan proved, text from the overlay or disk, no reload; part of the document sequence) | – |
 | `workspace/snapshotBarrier` | req | `{traceId, workspaceId, sequence}` | `BarrierResult` |
 | `capability/query` | req | `CapabilityQueryParams` | `Availability[]` |
 | `code/symbolAt` | req | `SymbolAtParams` | `SymbolRef \| null` |
@@ -188,17 +200,43 @@ provenance). The TypeScript conformance route uses `fixture.engine`.
   `NoTextChange`. Revalidation re-runs the file guards and the membership proof: `stale` / `TargetExists` or
   `FileRenameUnsafe`.
 
+- Created files (1.3): `refactor/prepare` with `actionId` `csharp.moveTypeToFile` (with `documentUri`) or
+  `csharp.generateHandler` (with optional `targetFolderUri`). The `writeSet` starts with one `create` per new file
+  (`text` is the full content, `resultHash` its SHA-256), followed by the text change of the original file (Move Type to
+  File only); the read set gets `absent:<newPath>` and the anchor file. Guards and reason codes: `TargetExists`,
+  `InvalidFileName`, `ReservedFileName`, `SymbolicLink`, `SourceFileMissing`, `UnreadableFile`, the membership codes of
+  the file rename (`UnprovenMembership`, `LinkedFile`, `BuildOutputFolder`, `DefaultCompileItemsDisabled`,
+  `CustomItemExcludes`, `CompilePattern`, `ExplicitCompileItem`), `CompilationErrors`, `FileTooLarge`; Move Type to File:
+  `PartialType`, `FileLocalType`, `GeneratedCode`, `PreprocessorDirectives`, `UnsupportedLayout`, `MeaningChanges`,
+  `ReadOnlyFile`, `UnsupportedEncoding`, `MixedLineEndings`, `NotApplicable`; Generate handler: `NotARequest`,
+  `GenericRequest`, `AbstractRequest`, `InaccessibleRequest`, `HandlerExists`, `MediatRVersionUnverified`,
+  `AmbiguousRequest`, `NoHandlerProject`, `UnknownFolder`. Revalidation checks absence and membership first: `stale` /
+  `TargetExists` or `FileCreateUnsafe`. The client creates each file before applying the text change (ADR-004
+  Amendment 2) and then sends `workspace/didCreateFiles`.
+
 ## Relation kinds (alpha)
 
 `declaration`, `mediatr.handler`, `mediatr.request`, `mediatr.response`, `mediatr.send`,
 `mediatr.notificationHandler`, `mediatr.behavior`, `aspnet.endpoint`, `di.registration`, `di.implementation`, `di.service`,
-`di.openGenericUsage`,
+`di.openGenericUsage`, `efcore.entity`, `efcore.dbContext`, `efcore.configuration`, `efcore.navigation`, `efcore.table`,
+`efcore.query`, `efcore.migration`,
 `implementation`, `reference`, `test`, `test.subject`. Clients must tolerate unknown namespaced kinds (`<namespace>.<name>`)
 and unknown groups from newer backends or framework modules and render them generically.
 
 `RelatedResult` has no groups list: every entry of `relations` carries its `group`. The UI orders groups as
-declarations, handlers, callers, endpoints, registrations, implementations, references, tests; unknown groups follow
-in name order.
+declarations, handlers, callers, endpoints, data, registrations, implementations, references, tests; unknown groups
+follow in name order.
+
+EF Core kinds (provider route `csharp.roslyn/efcore`, group `data` unless noted): `efcore.entity` (DbContext or
+configuration → entity; `target.symbol` = the entity, or only a location with confidence `heuristic` and label
+"Unknown entity types: …" for dynamic model building), `efcore.dbContext` (entity/configuration → DbContext),
+`efcore.configuration` (configuration class, or the location of an `Entity<T>()` call), `efcore.table` (label = the
+table, `schema.name` when a schema is set; "Name (convention)" with confidence `likely` when no `ToTable`/`[Table]`
+exists), `efcore.navigation` (the other entity; label names the property, the fluent shape such as
+`HasMany/WithOne`, inverse and FK), `efcore.query` (group `callers`: uses of `DbSet<T>`/`Set<T>()` per method, or per
+lambda in top-level statements; an enclosing endpoint adds an `aspnet.endpoint` relation), `efcore.migration`
+(migrations and model snapshots, label ends with "read-only"; by `[DbContext]` attribute `proven`, by table/entity name
+`likely`).
 
 `RelatedResult.scopeNotes` (human-readable strings, e.g. "17 of 18 projects loaded completely" and one line per
 detected framework with its assembly identities) stays for compatibility. `RelatedResult.scopeDetails` (optional,

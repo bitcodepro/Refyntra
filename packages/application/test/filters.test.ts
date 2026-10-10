@@ -26,6 +26,16 @@ describe('Find filter parser', () => {
     expect(parseFindQuery('type: route:/x').errors[0]).toMatch(/cannot be combined/);
   });
 
+  it('parses EF Core filters like type: (entity:) and route: (table:)', () => {
+    expect(parseFindQuery('entity:Order')).toEqual({ text: 'Order', filters: { entity: true }, errors: [] });
+    expect(parseFindQuery('entity:')).toEqual({ text: '', filters: { entity: true }, errors: [] });
+    expect(parseFindQuery('table:orders project:Api')).toEqual({ text: '', filters: { table: 'orders', project: 'Api' }, errors: [] });
+    expect(parseFindQuery('table:"order lines"').filters.table).toBe('order lines');
+    expect(parseFindQuery('entity: route:/x').errors[0]).toMatch(/entity:\/table:/);
+    expect(parseFindQuery('table:x member:').errors).toContain('entity:/table: search EF Core entities and cannot be combined with member:/route:/method:');
+    expect(parseFindQuery('ENTITY:Foo').filters.entity).toBe(true);
+  });
+
   it('is case-insensitive on filter names', () => {
     expect(parseFindQuery('TYPE:Foo').filters.type).toBe(true);
   });

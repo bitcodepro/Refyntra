@@ -269,8 +269,8 @@ export class DelegatedProviderAdapter implements LanguageAdapter {
     const b = this.begin(token);
     const f = req.filters;
     let items: SearchItem[] = [];
-    // Endpoint and project filters belong to the C# route; TS/JS has neither.
-    if (!f.route && !f.method && !f.project && req.query.trim().length > 0) {
+    // Endpoint, project and EF Core (entity:/table:) filters belong to the C# route; TS/JS has none of them.
+    if (!f.route && !f.method && !f.project && !f.entity && f.table === undefined && req.query.trim().length > 0) {
       const r = await this.exec(PROVIDER_COMMANDS.workspaceSymbols, [req.query], token);
       if (!r.ok) throw new RouteUnavailableError('ProviderError', `the workspace symbol provider failed: ${r.error}`, [RECOVERY_SHOW_HEALTH]);
       // The dispatch covers every language: keep only documents this route owns.

@@ -467,6 +467,52 @@ public sealed class WorkspaceSession : IDisposable
         }
     }
 
+    /// <summary>
+    /// Created files (Move Type to File, Generate handler): files the client created (one event of the document sequence).
+    /// Each new path becomes a document of the given projects (every context of those project files), with the text of
+    /// its overlay (a didOpen may come first) or the disk text. A path that is already a document is left alone. No project
+    /// reload: Compile membership of the new file was proven by the plan.
+    /// </summary>
+    public bool ApplyFileCreates(IReadOnlyList<(string path, IReadOnlyList<string> projectPaths)> creates, long sequence, long workspaceRevision)
+    {
+        lock (_gate)
+        {
+            if (sequence <= _appliedSequence)
+            {
+                Log.Warn("overlay", $"ignored out-of-order file create {sequence} (applied {_appliedSequence})");
+                return false;
+            }
+            _appliedSequence = sequence;
+            _revision = Math.Max(_revision, workspaceRevision);
+            if (_current != null)
+            {
+                var sol = _current.Solution;
+                foreach (var (path, projectPaths) in creates)
+                {
+                    if (_pathIndex.TryGetValue(path, out var known) && !known.IsEmpty) continue;
+                    var text = _overlays.TryGetValue(path, out var o) ? o : TextFiles.TryRead(path, null);
+                    if (text == null) continue;
+                    var set = new HashSet<string>(projectPaths, UriPaths.PathComparer);
+                    var ids = ImmutableArray.CreateBuilder<DocumentId>();
+                    foreach (var project in sol.Projects.Where(p => p.FilePath != null && set.Contains(p.FilePath)).ToList())
+                    {
+                        var rel = System.IO.Path.GetRelativePath(System.IO.Path.GetDirectoryName(project.FilePath!)!, System.IO.Path.GetDirectoryName(path)!);
+                        var folders = rel == "." ? Array.Empty<string>() : rel.Split(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
+                        var id = DocumentId.CreateNewId(project.Id, System.IO.Path.GetFileName(path));
+                        sol = sol.AddDocument(id, System.IO.Path.GetFileName(path), SourceText.From(text, new UTF8Encoding(false), SourceHashAlgorithm.Sha256), folders, path);
+                        ids.Add(id);
+                    }
+                    if (ids.Count == 0) continue;
+                    _pathIndex[path] = ids.ToImmutable();
+                    Log.Info("overlay", $"file created by the client: added to {ids.Count} project context(s)");
+                }
+                if (!ReferenceEquals(sol, _current.Solution)) _current = NewSnapshotLocked(sol);
+            }
+            ReleaseWaitersLocked();
+            return true;
+        }
+    }
+
     public bool HasOverlay(string path)
     {
         lock (_gate) return _overlays.ContainsKey(path);

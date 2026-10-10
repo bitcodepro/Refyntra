@@ -113,6 +113,15 @@ const scenarios = e2e
         settings: { 'refyntra.rename.apply': true, 'files.autoSave': 'off' },
         env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' },
       },
+      // Created files: Move Type to File (apply, Undo, stale target, create failure) and Generate handler.
+      {
+        name: 'create-file',
+        copy: 'create-file',
+        copyOpts: { extra: (dest) => { for (const [rel, text] of Object.entries(createRequire(import.meta.url)('./suite/createFile.cjs').extraFiles)) fs.writeFileSync(path.join(dest, ...rel.split('/')), text); } },
+        trusted: true,
+        settings: { 'refyntra.rename.apply': true, 'files.autoSave': 'off' },
+        env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' },
+      },
       // Recovery click "Run dotnet restore": the copy is NOT restored (no obj/), the host reports the restore action.
       {
         name: 'restore-recovery',
@@ -145,6 +154,13 @@ const scenarios = e2e
       {
         name: 'mvc',
         fixtureCopy: ['Mvc', 'Mvc.sln'],
+        trusted: true,
+        env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' },
+      },
+      // EF Core on a temp copy of the EfCore fixture (Related on an entity and a DbContext, Find entity:/table:).
+      {
+        name: 'efcore',
+        fixtureCopy: ['EfCore', 'EfCore.sln'],
         trusted: true,
         env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' },
       },

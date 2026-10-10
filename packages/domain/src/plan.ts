@@ -129,7 +129,7 @@ export class PlanLifecycle<P extends { planId: string } = AnyRefactorPlan> {
 }
 
 export interface PlanValidationIssue {
-  code: 'unsupported-change' | 'non-file-uri' | 'unsorted-edits' | 'overlapping-edits' | 'duplicate-document' | 'missing-hash' | 'empty-plan' | 'wrong-kind' | 'unordered-changes' | 'invalid-rename';
+  code: 'unsupported-change' | 'non-file-uri' | 'unsorted-edits' | 'overlapping-edits' | 'duplicate-document' | 'missing-hash' | 'empty-plan' | 'wrong-kind' | 'unordered-changes' | 'invalid-rename' | 'invalid-create';
   message: string;
   uri?: string;
 }
@@ -156,13 +156,21 @@ export function validatePlanStructure(plan: AnyRefactorPlan): PlanValidationIssu
   const seen = new Set<string>();
   const texts = new Map<string, string>();
   const renames: Extract<PlannedChange, { kind: 'rename' }>[] = [];
+  const creates: Extract<PlannedChange, { kind: 'create' }>[] = [];
+  let sawOther = false;
   for (const change of plan.writeSet as PlannedChange[]) {
+    if (change && change.kind === 'create') {
+      if (sawOther) issues.push({ code: 'unordered-changes', message: 'A created file follows a text change or a file rename; created files must come first', uri: change.uri });
+      creates.push(change);
+      continue;
+    }
+    sawOther = true;
     if (change && change.kind === 'rename') {
       renames.push(change);
       continue;
     }
     if (!change || change.kind !== 'text') {
-      issues.push({ code: 'unsupported-change', message: 'Only text changes and file renames are supported in this version' });
+      issues.push({ code: 'unsupported-change', message: 'Only text changes, file renames and created files are supported in this version' });
       continue;
     }
     if (renames.length > 0) issues.push({ code: 'unordered-changes', message: 'A text change follows a file rename; file renames must come after every text change', uri: change.uri });
@@ -183,6 +191,51 @@ export function validatePlanStructure(plan: AnyRefactorPlan): PlanValidationIssu
     }
   }
   issues.push(...validateFileRenames(plan, renames, texts));
+  issues.push(...validateFileCreates(plan, creates, texts, renames));
+  return issues;
+}
+
+/** Largest created file (UTF-16 code units) a plan may carry; the host refuses larger ones earlier. */
+export const MAX_CREATED_FILE_CHARS = 512 * 1024;
+
+/**
+ * Created files: only in an owned-semantic plan that lists them (`fileCreate.files`), file: URIs, `*.cs` without an
+ * encoded path separator, a valid hash and a text within the size limit, never a text target or a file rename source
+ * or target of the same plan, no duplicates (ignoring case). The EditApplier checks `resultHash` = SHA-256(text) and the
+ * absence of the target again before creating it.
+ */
+function validateFileCreates(
+  plan: AnyRefactorPlan,
+  creates: readonly Extract<PlannedChange, { kind: 'create' }>[],
+  texts: ReadonlyMap<string, string>,
+  renames: readonly Extract<PlannedChange, { kind: 'rename' }>[],
+): PlanValidationIssue[] {
+  const issues: PlanValidationIssue[] = [];
+  if (creates.length === 0) return issues;
+  const listed = plan.kind === 'owned-semantic' ? (plan.fileCreate?.files ?? []) : [];
+  if (plan.kind !== 'owned-semantic' || !plan.fileCreate || listed.length !== creates.length) {
+    issues.push({ code: 'unsupported-change', message: 'This plan cannot create files' });
+    return issues;
+  }
+  const seen = new Set<string>();
+  const renamed = new Set(renames.flatMap((r) => [String(r.oldUri).toLowerCase(), String(r.newUri).toLowerCase()]));
+  for (const c of creates) {
+    const bad = (message: string) => issues.push({ code: 'invalid-create', message, uri: c.uri });
+    if (typeof c.uri !== 'string' || !c.uri.startsWith('file:')) {
+      issues.push({ code: 'non-file-uri', message: 'A created file is not a local file', uri: String(c.uri) });
+      continue;
+    }
+    if (!HASH_RE.test(c.resultHash ?? '')) issues.push({ code: 'missing-hash', message: 'A created file has no valid content hash', uri: c.uri });
+    if (typeof c.text !== 'string') bad('A created file has no text');
+    else if (c.text.length > MAX_CREATED_FILE_CHARS) bad('A created file is larger than this version creates');
+    if (!/\.cs$/.test(lastSegment(c.uri)) || /%2F|%5C/i.test(lastSegment(c.uri)) || lastSegment(c.uri) === '.cs') bad('A created file is not a C# file or contains a path separator');
+    if (!listed.includes(c.uri)) bad('A created file is not listed by the plan');
+    const key = c.uri.toLowerCase();
+    if (seen.has(key)) bad('A file is created twice');
+    seen.add(key);
+    if ([...texts.keys()].some((u) => u.toLowerCase() === key)) bad('A created file is also edited by the plan');
+    if (renamed.has(key)) bad('A created file is also renamed by the plan');
+  }
   return issues;
 }
 

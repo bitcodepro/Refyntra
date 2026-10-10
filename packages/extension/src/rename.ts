@@ -34,8 +34,8 @@ export class PreviewContentProvider implements vscode.TextDocumentContentProvide
     while (this.previews.size > MAX_PREVIEWS) this.previews.delete(this.previews.keys().next().value as string);
   }
 
-  summaryUri(planId: string): vscode.Uri {
-    return vscode.Uri.from({ scheme: PREVIEW_SCHEME, path: `/${encodeURIComponent(planId)}/Rename preview.md` });
+  summaryUri(planId: string, name = 'Rename preview.md'): vscode.Uri {
+    return vscode.Uri.from({ scheme: PREVIEW_SCHEME, path: `/${encodeURIComponent(planId)}/${name}` });
   }
 
   fileUri(planId: string, index: number, side: 'original' | 'modified', fileUri: string): vscode.Uri {
@@ -46,7 +46,7 @@ export class PreviewContentProvider implements vscode.TextDocumentContentProvide
   provideTextDocumentContent(uri: vscode.Uri): string {
     const parts = uri.path.split('/').filter(Boolean);
     const p = this.previews.get(decodeURIComponent(parts[0] ?? ''));
-    if (!p) return 'This preview has expired. Run "Refyntra: Rename" again.';
+    if (!p) return 'This preview has expired. Run the Refyntra action again.';
     if (parts.length === 2) return p.summary;
     const f = p.files[Number(parts[1])];
     if (!f) return '';

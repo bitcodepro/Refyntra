@@ -5,6 +5,7 @@ using Microsoft.CodeAnalysis.FindSymbols;
 using Refyntra.Frameworks.Abstractions;
 using Refyntra.Frameworks.AspNetCore;
 using Refyntra.Frameworks.DependencyInjection;
+using Refyntra.Frameworks.EfCore;
 using Refyntra.Frameworks.MediatR;
 using Refyntra.Workspaces;
 
@@ -16,7 +17,7 @@ public sealed record SearchHit(ISymbol? Symbol, Project? Project, EndpointFact? 
 
 public sealed record SearchModel(List<SearchHit> Items, bool Truncated);
 
-public sealed record SearchFiltersModel(bool Type, bool Member, string? Project, string? Route, string? Method);
+public sealed record SearchFiltersModel(bool Type, bool Member, string? Project, string? Route, string? Method, bool Entity = false, string? Table = null);
 
 public sealed record RelatedModel(ISymbol? Subject, Project? SubjectProject, List<FrameworkRelation> Relations, string Completeness, List<string> ScopeNotes, ScopeDetails Details);
 
@@ -41,7 +42,8 @@ public static class SemanticService
     public static readonly IFrameworkModule MediatR = new MediatRModule();
     public static readonly IFrameworkModule AspNetCore = new AspNetCoreModule();
     public static readonly IFrameworkModule DependencyInjection = new DependencyInjectionModule();
-    public static readonly IFrameworkModule[] Modules = { MediatR, AspNetCore, DependencyInjection };
+    public static readonly IFrameworkModule EfCore = new EfCoreModule();
+    public static readonly IFrameworkModule[] Modules = { MediatR, AspNetCore, DependencyInjection, EfCore };
 
     private static readonly ConditionalWeakTable<Solution, ConcurrentDictionary<string, Lazy<Task<object>>>> FactsCache = new();
 
@@ -91,7 +93,7 @@ public static class SemanticService
 
     private static readonly Dictionary<string, string> FrameworkNames = new()
     {
-        ["mediatr"] = "MediatR", ["aspnetcore"] = "ASP.NET Core", ["di"] = "Microsoft.Extensions.DependencyInjection",
+        ["mediatr"] = "MediatR", ["aspnetcore"] = "ASP.NET Core", ["di"] = "Microsoft.Extensions.DependencyInjection", ["efcore"] = "EF Core",
     };
 
     /// <summary>Only MediatR checks its version; ASP.NET Core and DI detection is evidence and never lowers confidence.</summary>
@@ -138,6 +140,8 @@ public static class SemanticService
             else if (t.StartsWith("project:", StringComparison.OrdinalIgnoreCase)) filters = filters with { Project = t[8..] };
             else if (t.StartsWith("route:", StringComparison.OrdinalIgnoreCase)) filters = filters with { Route = t[6..] };
             else if (t.StartsWith("method:", StringComparison.OrdinalIgnoreCase)) filters = filters with { Method = t[7..] };
+            else if (t.StartsWith("entity:", StringComparison.OrdinalIgnoreCase)) { filters = filters with { Entity = true }; if (t.Length > 7) words.Add(t[7..]); }
+            else if (t.StartsWith("table:", StringComparison.OrdinalIgnoreCase)) filters = filters with { Table = t[6..] };
             else words.Add(t);
         }
         query = string.Join(' ', words).Trim();
@@ -148,6 +152,32 @@ public static class SemanticService
                 || p.Name.StartsWith(filters.Project + "(", StringComparison.OrdinalIgnoreCase))
             .ToList();
         var projectIds = projects.Select(p => p.Id).ToHashSet();
+
+        if (filters.Entity || filters.Table != null)
+        {
+            // EF Core entities ("entity:" by type name, "table:" by mapped table name, explicit or convention).
+            var ef = await GetFactsAsync(snapshot, EfCore, ct).ConfigureAwait(false);
+            var seenEntity = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var (entity, tables) in EfCoreModule.EntitiesWithTables(ef))
+            {
+                var owner = SymbolFacts.OwningProject(snapshot.Solution, entity);
+                if (owner == null || !projectIds.Contains(owner.Id)) continue;
+                var name = entity.Name;
+                if (query.Length > 0 && !name.Contains(query, StringComparison.OrdinalIgnoreCase)) continue;
+                var tableHit = filters.Table is { Length: > 0 } tn ? tables.FirstOrDefault(t => t.Contains(tn, StringComparison.OrdinalIgnoreCase)) : "";
+                if (tableHit == null) continue;
+                var loc = SymbolFacts.PrimaryLocation(entity);
+                if (!seenEntity.Add((DocumentationCommentId.CreateDeclarationId(entity) ?? name) + "|" + loc?.SourceTree?.FilePath)) continue;
+                var needle = filters.Table is { Length: > 0 } ? filters.Table : query;
+                var hay = filters.Table is { Length: > 0 } ? tableHit : name;
+                var score = needle.Length == 0 ? 50 :
+                    hay.Equals(needle, StringComparison.OrdinalIgnoreCase) ? 100 :
+                    hay.StartsWith(needle, StringComparison.OrdinalIgnoreCase) ? 80 : 60;
+                hits.Add(new SearchHit(entity, owner, null, score, SymbolFacts.DisplayName(entity), loc?.SourceTree?.FilePath ?? ""));
+            }
+            var orderedEf = hits.OrderByDescending(h => h.Score).ThenBy(h => h.SortName, StringComparer.Ordinal).ThenBy(h => h.SortPath, StringComparer.Ordinal).ToList();
+            return new SearchModel(orderedEf.Take(limit).ToList(), orderedEf.Count > limit);
+        }
 
         var endpointSearch = filters.Route != null || filters.Method != null || query.StartsWith('/');
         if (endpointSearch)
@@ -292,7 +322,7 @@ public static class SemanticService
         // Cross-framework: a MediatR Send/Publish call site inside a Minimal API handler or an MVC action links the request to that endpoint.
         var aspFacts = (AspNetCoreModule.Facts)factsByModule[AspNetCore.Id];
         var endpointSeen = new HashSet<Location>();
-        foreach (var send in relations.Where(r => r.RelationKind == RelationKinds.MediatRSend).ToList())
+        foreach (var send in relations.Where(r => r.RelationKind is RelationKinds.MediatRSend or RelationKinds.EfCoreQuery).ToList())
         {
             var loc = send.Target.Location;
             if (loc?.SourceTree == null) continue;
@@ -301,7 +331,7 @@ public static class SemanticService
                 if (!endpointSeen.Add(endpoint.Location)) continue;
                 relations.Add(new FrameworkRelation(RelationKinds.AspNetEndpoint, RelationGroups.Endpoints,
                     new RelationTarget(AspNetCoreModule.Label(endpoint), Location: endpoint.Location, Endpoint: endpoint),
-                    new[] { new EvidenceItem($"{subject.Name} is sent inside the handler of {AspNetCoreModule.Label(endpoint)}", loc) },
+                    new[] { new EvidenceItem($"{subject.Name} is {(send.RelationKind == RelationKinds.EfCoreQuery ? "queried" : "sent")} inside the handler of {AspNetCoreModule.Label(endpoint)}", loc) },
                     Weaker(send.Confidence, endpoint.Confidence), endpoint.Limitations, AspNetCore.ProviderRouteId));
             }
         }

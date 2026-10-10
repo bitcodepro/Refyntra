@@ -15,8 +15,12 @@ namespace Refyntra.Host;
 public sealed class Engine : IRpcHandler, IDisposable
 {
     public const int ProtocolMajor = 1;
-    /// <summary>1.2: refactor/prepare renameFile, PlannedChange kind "rename", fileRename offer, workspace/didRenameFiles.</summary>
-    public const int ProtocolMinor = 2;
+    /// <summary>
+    /// 1.2: refactor/prepare renameFile, PlannedChange kind "rename", fileRename offer, workspace/didRenameFiles.
+    /// 1.3: actions csharp.moveTypeToFile / csharp.generateHandler, PlannedChange kind "create", fileCreate offer,
+    /// PrepareParams.documentUri / targetFolderUri, workspace/didCreateFiles.
+    /// </summary>
+    public const int ProtocolMinor = 3;
     /// <summary>How long workspace/snapshotBarrier waits for a missing document sequence (tests shorten it).</summary>
     public TimeSpan BarrierTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
@@ -149,6 +153,28 @@ public sealed class Engine : IRpcHandler, IDisposable
                 session.ApplyFileRenames(pairs, e.Sequence, e.WorkspaceRevision);
                 break;
             }
+            case "workspace/didCreateFiles":
+            {
+                // Created files host resync: the client created files of a plan (Move Type to File, Generate handler). The
+                // new documents join the projects whose membership the plan proved; no reload.
+                var e = p.Deserialize<DidCreateFilesParams>(Json.Options)!;
+                if (!_sessions.TryGetValue(e.WorkspaceId, out var session))
+                {
+                    Log.Warn("overlay", "file create for unknown workspace ignored");
+                    return;
+                }
+                var creates = new List<(string, IReadOnlyList<string>)>();
+                foreach (var f in e.Files)
+                {
+                    string path;
+                    try { path = UriPaths.ToPath(f.Uri); }
+                    catch (ArgumentException) { Log.Warn("overlay", "non-file uri in file create ignored"); continue; }
+                    if (_plans.CreatedFileProjects(e.WorkspaceId, path) is { } projects) creates.Add((path, projects));
+                    else Log.Warn("overlay", "created file of no known plan ignored (a reload picks it up)");
+                }
+                session.ApplyFileCreates(creates, e.Sequence, e.WorkspaceRevision);
+                break;
+            }
             case "refactor/discard":
             {
                 var d = p.Deserialize<DiscardParams>(Json.Options)!;
@@ -277,7 +303,7 @@ public sealed class Engine : IRpcHandler, IDisposable
         var snap = RequireSnapshot(p.WorkspaceId, p.SnapshotId);
         var f = p.Filters ?? new SearchFiltersDto();
         var model = await SemanticService.SearchAsync(snap, p.Query ?? "",
-            new SearchFiltersModel(f.Type == true, f.Member == true, f.Project, f.Route, f.Method), p.Limit, ct).ConfigureAwait(false);
+            new SearchFiltersModel(f.Type == true, f.Member == true, f.Project, f.Route, f.Method, f.Entity == true, f.Table), p.Limit, ct).ConfigureAwait(false);
         var fallback = AnyProject(snap);
         var result = new SearchResultDto { Truncated = model.Truncated, SnapshotId = snap.Id };
         foreach (var h in model.Items)
@@ -386,6 +412,7 @@ public sealed class Engine : IRpcHandler, IDisposable
                      ((Frameworks.Abstractions.IFrameworkModule)SemanticService.MediatR, "MediatR", "request/handler and Send relations"),
                      (SemanticService.AspNetCore, "ASP.NET Core", "Minimal API endpoint relations"),
                      (SemanticService.DependencyInjection, "Microsoft.Extensions.DependencyInjection", "DI registration relations"),
+                     (SemanticService.EfCore, "EF Core", "entity/DbContext/table relations"),
                  })
         {
             var facts = await SemanticService.GetFactsAsync(snap, module, ct).ConfigureAwait(false);
@@ -434,6 +461,7 @@ public sealed class Engine : IRpcHandler, IDisposable
         }
         list.Add(rename);
         list.Add(references);
+        if (subject != null) list.AddRange(await CreateFileActionsAsync(snap, subject.Value.symbol, p.Uri, Make, ct).ConfigureAwait(false));
         // Code ↔ tests: there is no supported public test integration, so running is explained, not offered.
         if (subject != null && TestNavigation.IsTestSymbol(subject.Value.symbol))
         {
@@ -442,6 +470,30 @@ public sealed class Engine : IRpcHandler, IDisposable
             run.Scope.ProjectContextId = contextId;
             run.Limitations.Add("Navigation between tests and code is available in Related (group Tests).");
             list.Add(run);
+        }
+        return list;
+    }
+
+    /// <summary>Move Type to File / Generate handler at the subject: shown only where they apply, with the reason when unavailable.</summary>
+    private static async Task<List<AvailabilityDto>> CreateFileActionsAsync(Snapshot snap, ISymbol symbol, string? uri,
+        Func<string, string, string?, string?, AvailabilityDto> make, CancellationToken ct)
+    {
+        var list = new List<AvailabilityDto>();
+        string? path = null;
+        if (uri != null) { try { path = UriPaths.ToPath(uri); } catch (ArgumentException) { } }
+        var move = MoveTypePlanner.Applicability(snap, symbol, path, ct);
+        if (move.Show)
+        {
+            var a = make(MoveTypePlanner.ActionId, move.ReasonCode == null ? "available" : "unavailable", move.ReasonCode, move.Message);
+            a.Limitations.Add("Preview first: the new file and the edit of this file are shown before anything is written.");
+            list.Add(a);
+        }
+        var generate = await GenerateHandlerPlanner.AnalyzeAsync(snap, symbol, ct).ConfigureAwait(false);
+        if (generate.Applicability.Show)
+        {
+            var a = make(GenerateHandlerPlanner.ActionId, generate.Applicability.ReasonCode == null ? "available" : "unavailable", generate.Applicability.ReasonCode, generate.Applicability.Message);
+            a.Limitations.Add("No DI registration is generated (MediatR scans assemblies); Handle throws NotImplementedException until implemented.");
+            list.Add(a);
         }
         return list;
     }
@@ -486,10 +538,15 @@ public sealed class Engine : IRpcHandler, IDisposable
     private async Task<PrepareResultDto> PrepareAsync(PrepareParams p, CancellationToken ct)
     {
         var snap = RequireSnapshot(p.WorkspaceId, p.SnapshotId);
-        if (p.ActionId != "csharp.rename")
+        if (p.ActionId is not ("csharp.rename" or MoveTypePlanner.ActionId or GenerateHandlerPlanner.ActionId))
             return new PrepareResultDto { Kind = "unavailable", ReasonCode = "UnsupportedAction", Message = $"Action {p.ActionId} is not supported." };
         var (symbol, project) = await SymbolIds.ResolveAsync(snap, p.SymbolId, ct).ConfigureAwait(false);
-        var outcome = await RenamePlanner.PrepareAsync(snap, symbol, p.NewName ?? "", ct, p.RenameFile).ConfigureAwait(false);
+        var outcome = p.ActionId switch
+        {
+            MoveTypePlanner.ActionId => await MoveTypePlanner.PrepareAsync(snap, symbol, p.DocumentUri != null ? PathOf(p.DocumentUri) : null, ct).ConfigureAwait(false),
+            GenerateHandlerPlanner.ActionId => await GenerateHandlerPlanner.PrepareAsync(snap, symbol, p.TargetFolderUri != null ? PathOf(p.TargetFolderUri) : null, ct).ConfigureAwait(false),
+            _ => await RenamePlanner.PrepareAsync(snap, symbol, p.NewName ?? "", ct, p.RenameFile).ConfigureAwait(false),
+        };
         if (outcome.Plan == null)
             return new PrepareResultDto { Kind = "unavailable", ReasonCode = outcome.ReasonCode, Message = outcome.Message };
         ct.ThrowIfCancellationRequested();
@@ -501,7 +558,7 @@ public sealed class Engine : IRpcHandler, IDisposable
             || !_sessions.TryGetValue(p.WorkspaceId, out var live) || !ReferenceEquals(live, snap.Session))
         {
             _plans.Remove(plan.PlanId);
-            return new PrepareResultDto { Kind = "unavailable", ReasonCode = "WorkspaceReloaded", Message = "The workspace was reloaded while the rename was prepared. Prepare it again." };
+            return new PrepareResultDto { Kind = "unavailable", ReasonCode = "WorkspaceReloaded", Message = "The workspace was reloaded while the plan was prepared. Prepare it again." };
         }
         var mapper = new Mapper(snap, project, ct);
         return new PrepareResultDto
@@ -510,7 +567,7 @@ public sealed class Engine : IRpcHandler, IDisposable
             Plan = new RefactorPlanDto
             {
                 PlanId = plan.PlanId,
-                ActionId = "csharp.rename",
+                ActionId = plan.ActionId,
                 ProviderRouteId = SemanticService.ProviderRouteId,
                 ProtocolMajor = ProtocolMajor,
                 WorkspaceId = plan.WorkspaceId,
@@ -519,14 +576,16 @@ public sealed class Engine : IRpcHandler, IDisposable
                 BaseWorkspaceRevision = snap.Revision,
                 BaseSnapshotId = snap.Id,
                 ProjectContextIds = plan.ProjectContextIds.ToList(),
-                WriteSet = plan.Changes.Select(c => new PlannedTextChangeDto
+                // Created files come first (1.3; ADR-004 Amendment 2 explains the order), then text, then file renames.
+                WriteSet = plan.FileCreates.Select(c => (object)new PlannedFileCreateDto { Uri = UriPaths.ToUri(c.Path), ResultHash = c.ResultHash, Text = c.Text })
+                    .Concat(plan.Changes.Select(c => new PlannedTextChangeDto
                 {
                     Kind = "text",
                     Uri = UriPaths.ToUri(c.Path),
                     ExpectedHash = c.ExpectedHash,
                     ResultHash = c.ResultHash,
                     Edits = c.Edits.Select(e => new TextEditDto { Range = Mapper.Range(e.Range), NewText = e.NewText }).ToList(),
-                }).Cast<object>()
+                }))
                     // File rename: resource operations follow every text change (applied after them).
                     .Concat(plan.FileRenames.Select(r => new PlannedFileRenameDto { OldUri = UriPaths.ToUri(r.OldPath), NewUri = UriPaths.ToUri(r.NewPath), ResultHash = r.ResultHash }))
                     .ToList(),
@@ -540,6 +599,12 @@ public sealed class Engine : IRpcHandler, IDisposable
                         Message = offer.Message,
                     }
                     : null,
+                FileCreate = plan.FileCreates.Count == 0 ? null : new FileCreateOfferDto
+                {
+                    Files = plan.FileCreates.Select(c => UriPaths.ToUri(c.Path)).ToList(),
+                    FolderChoices = plan.CreateFileOffer?.Folders.Select(f => new FolderChoiceDto { FolderUri = UriPaths.ToUri(f.Folder), ProjectName = f.ProjectName, HandlerCount = f.HandlerCount, Namespace = f.Namespace }).ToList(),
+                    SelectedFolderUri = plan.CreateFileOffer is { } co ? UriPaths.ToUri(co.SelectedFolder) : null,
+                },
                 ReadSet = plan.ReadSet.Select(r => new InputFingerprintDto { Input = r.Input, Hash = r.Hash }).ToList(),
                 Evidence = plan.Evidence.Select(e => new EvidenceDto { Description = e.description, Location = Mapper.Location(e.location) }).ToList(),
                 Limitations = plan.Limitations.ToList(),

@@ -108,6 +108,8 @@ export interface ApplyOutcome {
   resources?: ApplyResourceReport[];
   /** File rename: the text edits were applied and confirmed but a file rename was not (offer Undo of the text; nothing was rolled back). */
   textAppliedOnly?: boolean;
+  /** Created files: a file was created but the text edits were not applied (offer to delete the new file; nothing was rolled back). */
+  createdOnly?: boolean;
   /** Stale/failed before anything was written: running Rename again gives a fresh preview. */
   canReprepare?: boolean;
 }
@@ -126,6 +128,12 @@ export type AnalysisOutcome = AnalysisView | (Unavailable & { providerRouteId: s
 
 export interface PrepareOptions {
   renameFile?: boolean;
+}
+
+/** Options of a create-file action (Move Type to File, Generate handler). */
+export interface ActionPrepareOptions {
+  /** Generate handler: one of the folder choices of an earlier preview (absent: the default folder). */
+  targetFolderUri?: string;
 }
 
 export interface ApplyOptions {
@@ -150,6 +158,11 @@ export interface EngineClient {
   actions(target: DocumentTarget, token?: CancellationToken): Promise<ActionsOutcome>;
   /** options.renameFile: also rename the files named after a type, when the backend proves it safe. */
   prepareRename(target: DocumentTarget, newName: string, token?: CancellationToken, options?: PrepareOptions): Promise<RenameOutcome>;
+  /**
+   * Prepares a create-file refactoring of the owned route at the cursor (`csharp.moveTypeToFile`, `csharp.generateHandler`).
+   * The result is applied with applyRename (same lifecycle, revalidation and EditApplier).
+   */
+  prepareAction(target: DocumentTarget, actionId: string, token?: CancellationToken, options?: ActionPrepareOptions): Promise<RenameOutcome>;
   applyRename(planId: string, token?: CancellationToken, options?: ApplyOptions): Promise<ApplyOutcome>;
   discardPlan(planId: string): void;
   planState(planId: string): PlanState | undefined;
@@ -438,6 +451,39 @@ export class RefyntraEngine implements EngineClient {
     }
   }
 
+  async prepareAction(target: DocumentTarget, actionId: string, token?: CancellationToken, options: ActionPrepareOptions = {}): Promise<RenameOutcome> {
+    const adapter = this.o.registry.routeFor(target.uri);
+    if (!adapter || adapter.descriptor.ownership !== 'owned-semantic' || !adapter.descriptor.capabilityIds.length) {
+      return { kind: 'unavailable', reasonCode: 'ActionNotSupported', message: 'This action is not provided for this file by Refyntra.', recoveryActions: [] };
+    }
+    try {
+      const prepared = await this.withStaleRetry(async () => {
+        const sym = await adapter.symbolAt(target.uri, target.position, token);
+        if (!sym.value || !sym.value.symbolId) return undefined;
+        const p = await adapter.prepare({ symbolId: sym.value.symbolId, newName: '', actionId, documentUri: target.uri, ...(options.targetFolderUri ? { targetFolderUri: options.targetFolderUri } : {}) }, token);
+        if (p.sessionEpoch !== sym.sessionEpoch) throw new StaleResultError('epoch');
+        return p;
+      }, token);
+      if (!prepared) return { kind: 'unavailable', reasonCode: 'NoSymbol', message: 'There is no type at the cursor.', recoveryActions: [] };
+      const result = prepared.value;
+      if (result.kind !== 'prepared') {
+        return { kind: 'unavailable', reasonCode: result.reasonCode ?? 'Unavailable', message: result.message ?? 'The action is unavailable here.', recoveryActions: [RECOVERY_SHOW_HEALTH] };
+      }
+      const plan = result.plan;
+      const issues = validatePlanStructure(plan);
+      if (plan.sessionEpoch !== prepared.sessionEpoch) issues.push({ code: 'wrong-kind', message: 'Plan belongs to a different backend session' });
+      if (plan.actionId !== actionId) issues.push({ code: 'wrong-kind', message: `The plan is for ${plan.actionId}, not ${actionId}` });
+      const lifecycle = new PlanLifecycle(plan);
+      this.plans.set(plan.planId, { lifecycle, adapter, workspaceRevision: prepared.workspaceRevision });
+      if (issues.length > 0) lifecycle.transition('Failed', issues.map((i) => i.message).join('; '));
+      else lifecycle.transition('Previewing');
+      return { kind: 'preview', planId: plan.planId, plan, state: lifecycle.state, issues, applyEnabled: this.o.settings.applyRenameEnabled() && issues.length === 0 };
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      return this.toUnavailable(adapter, e);
+    }
+  }
+
   /** Delegated rename preparation; the plan is never `valid`. */
   private async prepareDelegatedRename(adapter: LanguageAdapter, target: DocumentTarget, newName: string, token?: CancellationToken): Promise<RenameOutcome> {
     const port = adapter.delegatedRename;
@@ -571,14 +617,18 @@ export class RefyntraEngine implements EngineClient {
       const resources = report.resources ?? [];
       this.resyncRenamedFiles(adapter, resources);
       const textConfirmed = report.editorAccepted && confirmed.length === report.files.length;
+      const creates = resources.filter((r): r is Extract<ApplyResourceReport, { kind: 'create' }> => r.kind === 'create');
       if (textConfirmed && resources.every((r) => r.status === 'confirmed')) {
-        const renamed = resources.map((r) => ` and ${baseName(r.oldUri)} renamed to ${baseName(r.newUri)}`).join('');
-        return finish('Applied', { status: 'applied', message: `${plan.title}: ${confirmed.length} file(s) changed${renamed}`, files: report.files, ...(resources.length ? { resources } : {}) });
+        const created = creates.map((r) => `${baseName(r.uri)} created`);
+        const renamed = resources.flatMap((r) => (r.kind === 'rename' ? [`${baseName(r.oldUri)} renamed to ${baseName(r.newUri)}`] : []));
+        const parts = [...created, ...(report.files.length || !created.length ? [`${confirmed.length} file(s) changed`] : []), ...renamed];
+        return finish('Applied', { status: 'applied', message: `${plan.title}: ${parts.join(' and ')}`, files: report.files, ...(resources.length ? { resources } : {}) });
       }
+      if (creates.length > 0) return finish('Failed', createFailure(plan.title, report.files, creates, resources));
       if (textConfirmed) {
         // File rename failure path: the text edits are applied (one all-or-nothing edit), a file rename is not.
         // Report exactly that; never roll back automatically.
-        const what = resources.filter((r) => r.status !== 'confirmed').map((r) => `${baseName(r.oldUri)} → ${baseName(r.newUri)}: ${r.status}${r.detail ? ` (${r.detail})` : ''}`).join('; ');
+        const what = resources.filter((r) => r.status !== 'confirmed').map((r) => `${r.kind === 'rename' ? `${baseName(r.oldUri)} → ${baseName(r.newUri)}` : baseName(r.uri)}: ${r.status}${r.detail ? ` (${r.detail})` : ''}`).join('; ');
         return finish('Failed', {
           status: 'failed',
           message: `The text edits were applied to ${confirmed.length} file(s) (not saved), but the file rename did not complete (${what}). Nothing was rolled back: use Undo in the editor to revert the text edits, or rename the file yourself.`,
@@ -610,12 +660,14 @@ export class RefyntraEngine implements EngineClient {
    */
   private resyncRenamedFiles(adapter: LanguageAdapter, resources: readonly ApplyResourceReport[]): void {
     if (resources.length === 0) return;
-    const moved = resources.filter((r) => r.status === 'confirmed').map((r) => ({ oldUri: r.oldUri, newUri: r.newUri }));
+    const moved = resources.flatMap((r) => (r.kind === 'rename' && r.status === 'confirmed' ? [{ oldUri: r.oldUri, newUri: r.newUri }] : []));
+    // Created files: a file that exists (confirmed, or unknown) must reach the host; an unknown outcome restarts the route.
+    const created = resources.flatMap((r) => (r.kind === 'create' && r.status === 'confirmed' ? [r.uri] : []));
     const unknown = resources.some((r) => r.status === 'unknown');
     const revision = this.o.tracker.bumpRevision();
-    const sent = moved.length === 0 || adapter.filesRenamed?.(moved, revision) === true;
+    const sent = (moved.length === 0 || adapter.filesRenamed?.(moved, revision) === true) && (created.length === 0 || adapter.filesCreated?.(created, revision) === true);
     if (!sent || unknown) {
-      this.log('warn', 'file rename resync by restart', { moved: moved.length, unknown });
+      this.log('warn', 'file operation resync by restart', { moved: moved.length, created: created.length, unknown });
       void adapter.restart('files renamed').catch(() => undefined);
     }
   }
@@ -655,6 +707,36 @@ export class RefyntraEngine implements EngineClient {
   private log(level: 'debug' | 'info' | 'warn' | 'error', message: string, fields?: Record<string, unknown>): void {
     this.o.logger.log(level, 'engine', message, fields);
   }
+}
+
+/**
+ * Created files that did not complete together with the text edits. Created first (see ADR-004 Amendment 2): a create
+ * that failed means nothing was changed; a confirmed create whose text edits did not follow leaves the new file (and the
+ * code in both places) — reported exactly, never rolled back automatically.
+ */
+function createFailure(title: string, files: readonly ApplyFileReport[], creates: readonly Extract<ApplyResourceReport, { kind: 'create' }>[], resources: ApplyResourceReport[]): ApplyOutcome {
+  const created = creates.filter((c) => c.status === 'confirmed');
+  const unknownCreate = creates.filter((c) => c.status === 'unknown');
+  const describe = (r: Extract<ApplyResourceReport, { kind: 'create' }>) => `${baseName(r.uri)}: ${r.status}${r.detail ? ` (${r.detail})` : ''}`;
+  const textChanged = files.filter((f) => f.status !== 'unchanged');
+  if (created.length === 0 && unknownCreate.length === 0 && textChanged.length === 0) {
+    return { status: 'failed', message: `${title}: the file was not created (${creates.map(describe).join('; ')}); no file was changed.`, files: [...files], resources, canReprepare: true };
+  }
+  if (created.length === creates.length && textChanged.length === 0) {
+    return {
+      status: 'failed',
+      message: `${title}: ${created.map((c) => baseName(c.uri)).join(', ')} was created, but the edit of ${files.map((f) => baseName(f.uri)).join(', ')} was not applied (${files.map((f) => f.detail ?? f.status).join('; ')}). Nothing was rolled back: the code now exists in both files until you delete the new file (Undo) or remove it from the original yourself.`,
+      files: [...files],
+      resources,
+      createdOnly: true,
+    };
+  }
+  return {
+    status: 'failed',
+    message: `${title}: the result is not confirmed (${[...creates.map(describe), ...files.map((f) => `${baseName(f.uri)}: ${f.status}`)].join('; ')}). Check the files; nothing was rolled back.`,
+    files: [...files],
+    resources,
+  };
 }
 
 export type { RouteResult };

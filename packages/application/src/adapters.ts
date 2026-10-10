@@ -65,6 +65,10 @@ export interface PrepareRequest {
   actionId: string;
   /** File rename: ask for the rename of the files named after the type (included only when proven safe). */
   renameFile?: boolean;
+  /** Generate handler: one of the offered folder choices. */
+  targetFolderUri?: string;
+  /** Move Type to File: the document of the cursor. */
+  documentUri?: string;
 }
 
 export interface DelegatedRenameRequest {
@@ -117,6 +121,11 @@ export interface LanguageAdapter {
    * cannot take it (older protocol, no session); the caller then restarts the route so nothing stays stale.
    */
   filesRenamed?(files: readonly { oldUri: string; newUri: string }[], workspaceRevision: number): boolean;
+  /**
+   * Created files host resync: files created by an applied plan (in the document sequence). Returns false when the
+   * backend cannot take it (protocol minor < 3, no session); the caller then restarts the route.
+   */
+  filesCreated?(uris: readonly string[], workspaceRevision: number): boolean;
   dispose(): Promise<void>;
   /** Present on delegated routes (descriptor.ownership 'delegated') that offer rename. */
   readonly delegatedRename?: DelegatedRenamePort;

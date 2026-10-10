@@ -27,6 +27,8 @@ import type { HealthPageModel } from './healthPageModel';
 import { HostLocator } from './host';
 import { RelatedViewProvider, runRelatedGroupPick } from './related';
 import { PREVIEW_SCHEME, PreviewContentProvider, runNativeRename, runRename } from './rename';
+import { runCreateAction, undoCreate } from './createFile';
+import { CSHARP_GENERATE_HANDLER_ACTION, CSHARP_MOVE_TYPE_ACTION } from '@refyntra/contracts';
 import { runRestore } from './restore';
 import { SolutionService } from './solution';
 
@@ -59,6 +61,8 @@ export interface RefyntraTestApi {
   editApplier: VsCodeEditApplier;
   /** Process ids of spawned hosts (e2e fault injection kills the last one). */
   hostPids(): number[];
+  /** Undo of an applied create-file plan (e2e: the same steps as the "Undo" button). */
+  undoCreate(writeSet: readonly import('@refyntra/contracts').PlannedChange[]): Promise<string[]>;
   /** Rename preview store (tests read the last preview). */
   previews: PreviewContentProvider;
   /** Title and editor command the UI uses for a capability id (catalogue checks). */
@@ -201,6 +205,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     vscode.commands.registerCommand('refyntra.related.refresh', () => related.refresh()),
     vscode.commands.registerCommand('refyntra.actions', () => runActions(engine)),
     vscode.commands.registerCommand('refyntra.rename', () => runRename(engine, previews)),
+    vscode.commands.registerCommand('refyntra.moveTypeToFile', () => runCreateAction(engine, previews, editApplier, CSHARP_MOVE_TYPE_ACTION)),
+    vscode.commands.registerCommand('refyntra.generateHandler', () => runCreateAction(engine, previews, editApplier, CSHARP_GENERATE_HANDLER_ACTION)),
     vscode.commands.registerCommand('refyntra.nativeRename', (uri?: unknown, position?: unknown) => runNativeRename(uri, position)),
     vscode.commands.registerCommand('refyntra.runRestore', (target: unknown) => runRestore(isTrusted, target)),
     vscode.commands.registerCommand('refyntra.showHealth', () => healthPage.show()),
@@ -243,6 +249,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     setHostPath: (p) => hostLocator.setOverride(p),
     hostLaunches: () => [...launches],
     editApplier,
+    undoCreate: (writeSet) => undoCreate(engine, editApplier, writeSet),
     previews,
     hostPids: () => [...pids],
     capabilityUi: (id) => ({ title: capabilityTitleOf(id), command: commandForCapability(id) }),

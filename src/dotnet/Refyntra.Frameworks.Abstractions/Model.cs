@@ -10,14 +10,19 @@ public static class RelationKinds
         MediatRBehavior = "mediatr.behavior", DiOpenGenericUsage = "di.openGenericUsage",
         AspNetEndpoint = "aspnet.endpoint", DiRegistration = "di.registration", DiImplementation = "di.implementation",
         DiService = "di.service", Implementation = "implementation", Reference = "reference", Test = "test";
+
+    // EF Core (group "data", queries in "callers").
+    public const string EfCoreEntity = "efcore.entity", EfCoreDbContext = "efcore.dbContext", EfCoreConfiguration = "efcore.configuration",
+        EfCoreNavigation = "efcore.navigation", EfCoreTable = "efcore.table", EfCoreQuery = "efcore.query", EfCoreMigration = "efcore.migration";
 }
 
 public static class RelationGroups
 {
     public const string Declarations = "declarations", Handlers = "handlers", Callers = "callers", Endpoints = "endpoints",
-        Registrations = "registrations", Implementations = "implementations", References = "references", Tests = "tests";
+        Registrations = "registrations", Implementations = "implementations", References = "references", Tests = "tests",
+        Data = "data";
 
-    public static readonly string[] Order = { Declarations, Handlers, Callers, Endpoints, Registrations, Implementations, References, Tests };
+    public static readonly string[] Order = { Declarations, Handlers, Callers, Endpoints, Data, Registrations, Implementations, References, Tests };
     public static int IndexOf(string group) { var i = Array.IndexOf(Order, group); return i < 0 ? Order.Length : i; }
 }
 

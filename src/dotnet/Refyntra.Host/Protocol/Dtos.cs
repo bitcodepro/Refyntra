@@ -225,6 +225,10 @@ public sealed class SearchFiltersDto
     public string? Project { get; set; }
     public string? Route { get; set; }
     public string? Method { get; set; }
+    /// <summary>Filter "entity:" — only EF Core entities.</summary>
+    public bool? Entity { get; set; }
+    /// <summary>Filter "table:NAME" — EF Core entities by mapped table name.</summary>
+    public string? Table { get; set; }
 }
 
 public sealed class SearchParams : WorkspaceParams
@@ -362,6 +366,47 @@ public sealed class PlannedFileRenameDto
     public string ResultHash { get; set; } = "";
 }
 
+/// <summary>Created file resource operation (protocol 1.3): created with exactly <see cref="Text"/> before every text change.</summary>
+public sealed class PlannedFileCreateDto
+{
+    public string Kind { get; set; } = "create";
+    public string Uri { get; set; } = "";
+    /// <summary>SHA-256 of <see cref="Text"/>.</summary>
+    public string ResultHash { get; set; } = "";
+    public string Text { get; set; } = "";
+}
+
+/// <summary>A folder a generated file can be created in (protocol 1.3, Generate handler).</summary>
+public sealed class FolderChoiceDto
+{
+    public string FolderUri { get; set; } = "";
+    public string ProjectName { get; set; } = "";
+    public int HandlerCount { get; set; }
+    public string Namespace { get; set; } = "";
+}
+
+/// <summary>The file a create-file plan creates and, for Generate handler, the folder choices (first = default).</summary>
+public sealed class FileCreateOfferDto
+{
+    public List<string> Files { get; set; } = new();
+    public List<FolderChoiceDto>? FolderChoices { get; set; }
+    public string? SelectedFolderUri { get; set; }
+}
+
+/// <summary>workspace/didCreateFiles (protocol 1.3): files created by the client; part of the document sequence.</summary>
+public sealed class DidCreateFilesParams
+{
+    public string WorkspaceId { get; set; } = "";
+    public long Sequence { get; set; }
+    public long WorkspaceRevision { get; set; }
+    public List<CreatedFileDto> Files { get; set; } = new();
+}
+
+public sealed class CreatedFileDto
+{
+    public string Uri { get; set; } = "";
+}
+
 public sealed class FileRenamePairDto
 {
     public string OldUri { get; set; } = "";
@@ -413,9 +458,11 @@ public sealed class RefactorPlanDto
     public long BaseWorkspaceRevision { get; set; }
     public string BaseSnapshotId { get; set; } = "";
     public List<string> ProjectContextIds { get; set; } = new();
-    /// <summary>PlannedTextChangeDto entries, then PlannedFileRenameDto entries.</summary>
+    /// <summary>PlannedFileCreateDto entries (1.3), then PlannedTextChangeDto entries, then PlannedFileRenameDto entries.</summary>
     public List<object> WriteSet { get; set; } = new();
     public FileRenameOfferDto? FileRename { get; set; }
+    /// <summary>Create-file plans (protocol 1.3): the created file and the folder choices.</summary>
+    public FileCreateOfferDto? FileCreate { get; set; }
     public List<InputFingerprintDto> ReadSet { get; set; } = new();
     public List<EvidenceDto> Evidence { get; set; } = new();
     public List<string> Limitations { get; set; } = new();
@@ -431,6 +478,10 @@ public sealed class PrepareParams : WorkspaceParams
     public string NewName { get; set; } = "";
     /// <summary>File rename (protocol 1.2): include the rename of the files named after the type when it is proven safe.</summary>
     public bool RenameFile { get; set; }
+    /// <summary>Generate handler (protocol 1.3): the folder to create the handler in (one of the offered choices).</summary>
+    public string? TargetFolderUri { get; set; }
+    /// <summary>Move Type to File (protocol 1.3): the document of the cursor (the declaration to move).</summary>
+    public string? DocumentUri { get; set; }
 }
 
 public sealed class PrepareResultDto

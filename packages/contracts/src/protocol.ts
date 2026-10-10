@@ -4,8 +4,11 @@
  */
 
 export const PROTOCOL_MAJOR = 1;
-/** 1.1: optional `LoadDiagnostic.recoveryActions` (additive). */
-export const PROTOCOL_MINOR = 2;
+/**
+ * 1.1: optional `LoadDiagnostic.recoveryActions` (additive). 1.2: file rename with a type. 1.3: created files
+ * (`PlannedChange` kind `create`, `fileCreate`, `targetFolderUri`/`documentUri`, `workspace/didCreateFiles`).
+ */
+export const PROTOCOL_MINOR = 3;
 
 /** Zero-based line, UTF-16 code unit character. */
 export interface Position {
@@ -213,6 +216,10 @@ export interface SearchFilters {
   route?: string;
   /** Filter "method:GET" — HTTP method for endpoints. */
   method?: string;
+  /** Filter "entity:" — only EF Core entities (additive; older hosts ignore it). */
+  entity?: boolean;
+  /** Filter "table:NAME" — EF Core entities by mapped table name (additive). */
+  table?: string;
 }
 export interface SearchParams extends WorkspaceParams {
   snapshotId: string;
@@ -245,10 +252,12 @@ export type RelationKind =
   | 'mediatr.behavior'
   | 'aspnet.endpoint'
   | 'di.registration' | 'di.implementation' | 'di.service' | 'di.openGenericUsage'
+  | 'efcore.entity' | 'efcore.dbContext' | 'efcore.configuration' | 'efcore.navigation' | 'efcore.table' | 'efcore.query'
+  | 'efcore.migration'
   | 'implementation' | 'reference' | 'test';
 
-export type RelationGroup = 'declarations' | 'handlers' | 'callers' | 'endpoints' | 'registrations' | 'implementations' | 'references' | 'tests';
-export const RELATION_GROUP_ORDER: readonly RelationGroup[] = ['declarations', 'handlers', 'callers', 'endpoints', 'registrations', 'implementations', 'references', 'tests'];
+export type RelationGroup = 'declarations' | 'handlers' | 'callers' | 'endpoints' | 'data' | 'registrations' | 'implementations' | 'references' | 'tests';
+export const RELATION_GROUP_ORDER: readonly RelationGroup[] = ['declarations', 'handlers', 'callers', 'endpoints', 'data', 'registrations', 'implementations', 'references', 'tests'];
 
 export interface EndpointInfo {
   /** e.g. ["GET"]; empty = any/unknown. */
@@ -371,7 +380,47 @@ export interface PlannedFileRename {
   newUri: string;
   resultHash: string;
 }
-export type PlannedChange = PlannedTextChange | PlannedFileRename;
+/**
+ * Created file resource operation (protocol 1.3, Move Type to File and Generate handler): create the file with exactly
+ * `text` (`resultHash` = SHA-256 of `text`). Always listed before every text change (see ADR-004 Amendment 2 for the
+ * order); the target must not exist (also ignoring case).
+ */
+export interface PlannedFileCreate {
+  kind: 'create';
+  uri: string;
+  resultHash: string;
+  text: string;
+}
+export type PlannedChange = PlannedTextChange | PlannedFileRename | PlannedFileCreate;
+
+/** Action ids of the create-file refactorings of the C# route (protocol 1.3; offered through capability/query). */
+export const CSHARP_MOVE_TYPE_ACTION = 'csharp.moveTypeToFile';
+export const CSHARP_GENERATE_HANDLER_ACTION = 'csharp.generateHandler';
+
+/** A folder a generated file can be created in (Generate handler; the first is the default). */
+export interface FolderChoice {
+  folderUri: string;
+  projectName: string;
+  /** Existing handlers in the folder. */
+  handlerCount: number;
+  /** Namespace the generated file gets in this folder. */
+  namespace: string;
+}
+
+/** The files a create-file plan creates (protocol 1.3) and, for Generate handler, the folder choices. */
+export interface FileCreateOffer {
+  files: string[];
+  folderChoices?: FolderChoice[];
+  selectedFolderUri?: string;
+}
+
+/** workspace/didCreateFiles (protocol 1.3): files the client created; consumes a document sequence. */
+export interface DidCreateFilesParams {
+  workspaceId: string;
+  sequence: number;
+  workspaceRevision: number;
+  files: { uri: string }[];
+}
 
 /** What "also rename the file" means for a type rename (protocol 1.2; absent when no file is named after the type). */
 export interface FileRenameOffer {
@@ -423,6 +472,8 @@ export interface RefactorPlanDto {
   title: string;
   /** File rename (protocol 1.2): the file-rename offer of a type rename. */
   fileRename?: FileRenameOffer;
+  /** Created files (protocol 1.3): what a create-file plan creates. Required when the writeSet has a `create`. */
+  fileCreate?: FileCreateOffer;
 }
 
 export interface PrepareParams extends WorkspaceParams {
@@ -433,6 +484,10 @@ export interface PrepareParams extends WorkspaceParams {
   newName: string;
   /** File rename (protocol 1.2): include the rename of the files named after the type when it is proven safe. */
   renameFile?: boolean;
+  /** Generate handler (protocol 1.3): one of the offered folder choices (absent: the default). */
+  targetFolderUri?: string;
+  /** Move Type to File (protocol 1.3): the document of the cursor (the declaration to move). */
+  documentUri?: string;
 }
 export type PrepareResult =
   | { kind: 'prepared'; plan: RefactorPlanDto }
@@ -480,6 +535,8 @@ export interface NotificationMap {
   'refactor/discard': { workspaceId: string; planId: string };
   /** File rename (protocol 1.2): files the client renamed; consumes a document sequence (sent only to hosts with minor ≥ 2). */
   'workspace/didRenameFiles': DidRenameFilesParams;
+  /** Created files (protocol 1.3): files the client created; consumes a document sequence (sent only to hosts with minor ≥ 3). */
+  'workspace/didCreateFiles': DidCreateFilesParams;
   '$/cancelRequest': { id: number | string };
 }
 export type NotificationName = keyof NotificationMap;

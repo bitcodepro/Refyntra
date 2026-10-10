@@ -354,6 +354,16 @@ describe('Related tree: accessibilityInformation on every item kind', () => {
     expect(item.description).toBe('Handler · src/Shop.Api/H.cs:12');
   });
 
+  it('EF Core relations read in words ("Table orders, EfCore.Api, proven"), never as raw efcore.* ids', () => {
+    const target = { label: 'orders', symbol: { name: 'Order', projectName: 'EfCore.Api', location: { uri: 'file:///src/EfCore.Api/C.cs', range: { start: { line: 4, character: 0 }, end: { line: 4, character: 4 } } } } };
+    const item = provider.getTreeItem({ kind: 'relation', relation: relation({ relationKind: 'efcore.table', group: 'data', target }) } as never);
+    expect(item.accessibilityInformation?.label).toBe('Table orders, EfCore.Api, proven');
+    for (const kind of ['efcore.entity', 'efcore.dbContext', 'efcore.configuration', 'efcore.navigation', 'efcore.table', 'efcore.query', 'efcore.migration'] as const) {
+      expect(RELATION_KIND_LABEL[kind]).toBeTruthy();
+      expect(RELATION_KIND_LABEL[kind]).not.toContain('efcore');
+    }
+  });
+
   it('relation: non-proven confidence and limitations are in words, not only in the tooltip or icon colour', () => {
     const item = provider.getTreeItem({ kind: 'relation', relation: relation({ confidence: 'likely', limitations: ['framework version not verified'] }) } as never);
     expect(item.accessibilityInformation?.label).toBe('Handler GetOrderQueryHandler, Shop.Api, likely. Limitations: framework version not verified');

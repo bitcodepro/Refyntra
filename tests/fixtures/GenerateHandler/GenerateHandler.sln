@@ -1,0 +1,25 @@
+
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GenerateHandler.Contracts", "GenerateHandler.Contracts\GenerateHandler.Contracts.csproj", "{B7E8DF5A-BA2D-5CEF-9CF3-142FBF49CDE7}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GenerateHandler.App", "GenerateHandler.App\GenerateHandler.App.csproj", "{B49ECC4D-AC6F-5B15-94B5-29C7AE1F21C7}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{B7E8DF5A-BA2D-5CEF-9CF3-142FBF49CDE7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B7E8DF5A-BA2D-5CEF-9CF3-142FBF49CDE7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B7E8DF5A-BA2D-5CEF-9CF3-142FBF49CDE7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B7E8DF5A-BA2D-5CEF-9CF3-142FBF49CDE7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B49ECC4D-AC6F-5B15-94B5-29C7AE1F21C7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B49ECC4D-AC6F-5B15-94B5-29C7AE1F21C7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B49ECC4D-AC6F-5B15-94B5-29C7AE1F21C7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B49ECC4D-AC6F-5B15-94B5-29C7AE1F21C7}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

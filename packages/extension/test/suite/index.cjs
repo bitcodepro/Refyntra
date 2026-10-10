@@ -403,7 +403,8 @@ scenarios.shop = [
       for (const [rel, needle] of [['Shop.Contracts/Orders/OrderRequests.cs', 'GetOrderQuery('], ['Shop.Api/Services/OrderServices.cs', 'IOrderService']]) {
         const { at } = await shopPosition(rel, needle, 1);
         const actions = await a.engine.actions(at);
-        const ids = actions.items.map((i) => i.capabilityId).sort();
+        // The catalogue plus, where they apply, the create-file actions (outside the catalogue).
+        const ids = actions.items.map((i) => i.capabilityId).filter((id) => id !== 'csharp.moveTypeToFile' && id !== 'csharp.generateHandler').sort();
         assert.deepEqual(ids, [...CAPABILITY_CATALOGUE].sort(), JSON.stringify(actions));
         const related = actions.items.find((i) => i.capabilityId === 'csharp.related');
         assert.equal(related.state, 'available');
@@ -1262,8 +1263,64 @@ scenarios.mvc = [
   ],
 ];
 
+// EF Core: on a temp copy of tests/fixtures/EfCore: entity and DbContext relations (group "data"), Find entity:/table:.
+scenarios.efcore = [
+  [
+    'EfCore loads',
+    async () => {
+      const a = await api();
+      await waitFor(() => ['Ready', 'Partial', 'Failed'].includes(csharp(a.health())?.state), 'host ready', 240000);
+      const h = csharp(a.health());
+      assert.equal(h.state, 'Ready', `${h.reasonCode}: ${h.message}`);
+    },
+  ],
+  [
+    'Related on an entity shows its DbContexts, table, navigations, queries (with the endpoint) and migrations',
+    async () => {
+      const a = await api();
+      const { at } = await shopPosition('EfCore.Domain/Entities.cs', 'class Order', 'class '.length + 1);
+      const rel = await a.engine.related(at);
+      assert.equal(rel.kind, 'related', JSON.stringify(rel));
+      const data = rel.groups.find((g) => g.group === 'data');
+      assert.ok(data, `groups: ${rel.groups.map((g) => g.group).join(', ')}`);
+      const kinds = new Set(data.relations.map((r) => r.relationKind));
+      for (const k of ['efcore.dbContext', 'efcore.configuration', 'efcore.table', 'efcore.navigation', 'efcore.migration']) assert.ok(kinds.has(k), `${k} in ${[...kinds].join(', ')}`);
+      const table = data.relations.find((r) => r.relationKind === 'efcore.table');
+      assert.equal(table.target.label, 'orders');
+      const queries = allRelations(rel).filter((r) => r.relationKind === 'efcore.query');
+      assert.ok(queries.some((q) => q.target.label.includes('OrderQueries.Open')), JSON.stringify(queries.map((q) => q.target.label)));
+      assert.ok(allRelations(rel).some((r) => r.relationKind === 'aspnet.endpoint' && r.target.endpoint.route === '/orders/{id}'));
+    },
+  ],
+  [
+    'Related on a DbContext shows its entities and its AddDbContext registration',
+    async () => {
+      const a = await api();
+      const { at } = await shopPosition('EfCore.Api/Data/ShopDbContext.cs', 'class ShopDbContext', 'class '.length + 1);
+      const rel = await a.engine.related(at);
+      const entities = allRelations(rel).filter((r) => r.relationKind === 'efcore.entity').map((r) => r.target.symbol && r.target.symbol.name);
+      for (const want of ['Customer', 'Order', 'Product', 'OrderLine']) assert.ok(entities.includes(want), `${want} in ${entities.join(', ')}`);
+      assert.ok(allRelations(rel).some((r) => r.relationKind === 'di.registration' && r.target.label.includes('AddDbContext')));
+    },
+  ],
+  [
+    'Find entity: lists EF entities only; table: finds an entity by its mapped table',
+    async () => {
+      const a = await api();
+      const r = await a.engine.find('entity:Order');
+      const names = r.items.map((i) => i.symbol && i.symbol.name);
+      assert.ok(names.includes('Order') && names.includes('OrderLine'), names.join(', '));
+      assert.ok(!names.includes('OrderSummary') && !names.includes('OrderQueries'), names.join(', '));
+      const t = await a.engine.find('table:catalog_products');
+      assert.deepEqual(t.items.map((i) => i.symbol && i.symbol.name), ['Product']);
+    },
+  ],
+];
+
 // File rename: type rename together with its file (test/suite/fileRename.cjs).
 scenarios['rename-file'] = require('./fileRename.cjs').cases({ api, csharp, waitFor });
+// Created files: Move Type to File and Generate handler (test/suite/createFile.cjs).
+scenarios['create-file'] = require('./createFile.cjs').cases({ api, csharp, waitFor });
 
 exports.run =async function run() {
   const name = process.env.REFYNTRA_TEST_SCENARIO;

@@ -305,14 +305,16 @@ public sealed class ShopTests
         var (line, ch) = TestClient.Position(text, "record GetOrderQuery", 7);
         var caps = await C.RequestAsync("capability/query", new { traceId = "t", workspaceId = C.WorkspaceId, snapshotId = snap, uri = UriPaths.ToUri(Contracts), position = new { line, character = ch } });
         var byId = caps.EnumerateArray().ToDictionary(a => a.GetProperty("capabilityId").GetString()!);
-        Assert.Equal(ReviewFindingsTests.Catalogue.OrderBy(x => x), byId.Keys.OrderBy(x => x));
+        // The catalogue, plus the create-file actions that apply here (outside the catalogue, like tests.run).
+        Assert.Equal(ReviewFindingsTests.Catalogue.Concat(new[] { "csharp.moveTypeToFile", "csharp.generateHandler" }).OrderBy(x => x), byId.Keys.OrderBy(x => x));
+        Assert.Equal("HandlerExists", byId["csharp.generateHandler"].GetProperty("reasonCode").GetString());
         Assert.Equal("available", byId["csharp.find"].GetProperty("state").GetString());
         Assert.Equal("available", byId["csharp.rename"].GetProperty("state").GetString());
         Assert.Equal("available", byId["csharp.related"].GetProperty("state").GetString());
         Assert.Equal("available", byId["csharp.references"].GetProperty("state").GetString());
         foreach (var fw in new[] { "MediatR", "ASP.NET Core", "Microsoft.Extensions.DependencyInjection" })
             Assert.Contains(fw, byId["csharp.related"].GetProperty("message").GetString());
-        Assert.DoesNotContain(byId["csharp.related"].GetProperty("limitations").EnumerateArray(), l => l.GetString()!.Contains("not referenced"));
+        Assert.DoesNotContain(byId["csharp.related"].GetProperty("limitations").EnumerateArray(), l => l.GetString()!.Contains("not referenced") && !l.GetString()!.StartsWith("EF Core", StringComparison.Ordinal)); // Shop has no EF Core
         Assert.Equal("workspace", byId["csharp.rename"].GetProperty("requiredTrust").GetString());
 
         var meta = await C.RequestAsync("capability/query", new { traceId = "t", workspaceId = C.WorkspaceId, snapshotId = snap, uri = UriPaths.ToUri(Contracts),

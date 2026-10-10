@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import type { PlannedChange, PlannedFileRename, PlannedTextChange } from '@refyntra/contracts';
+import type { PlannedChange, PlannedFileCreate, PlannedFileRename, PlannedTextChange } from '@refyntra/contracts';
 import type { ApplyFileReport, ApplyReport, ApplyResourceReport, CapturedEdit, CommitResult, EditApplier } from '@refyntra/application';
 import { applyTextEditsToText, decodeUtf8, sha256 } from './textEdits';
 
@@ -18,6 +18,11 @@ interface Target {
   change: PlannedTextChange;
   uri: vscode.Uri;
   diskText: string | undefined;
+}
+
+interface CreateTarget {
+  change: PlannedFileCreate;
+  uri: vscode.Uri;
 }
 
 interface RenameTarget {
@@ -52,6 +57,12 @@ function diskExists(uri: vscode.Uri): boolean {
 /**
  * The only place that calls workspace.applyEdit. No save, no rollback.
  *
+ * Created files (Move Type to File, Generate handler) come first, each as its own WorkspaceEdit.createFile with the
+ * planned text (overwrite off). Only when every created file is confirmed (exists with exactly the planned text) are
+ * the text targets checked again, synchronously, and the text edit started; otherwise the text edit is not attempted
+ * (reported per file). The created file is written to disk (a created file cannot stay unsaved); the text edits are not
+ * saved. See ADR-004 Amendment 2 for why the create comes first.
+ *
  * Order: every text edit in ONE WorkspaceEdit (all-or-nothing for text); only when every text target is
  * confirmed, each file rename as its own WorkspaceEdit (the editor moves open and dirty documents with the file).
  * A rename is refused (not attempted) when its target appeared meanwhile; later renames are not attempted after a
@@ -62,16 +73,36 @@ function diskExists(uri: vscode.Uri): boolean {
  * each file rename (e.g. to create the target in that moment).
  */
 export class VsCodeEditApplier implements EditApplier {
-  readonly faults: { rejectNextApply: boolean; rejectNextFileRename: boolean; beforeFileRename: ((oldUri: string, newUri: string) => void | Promise<void>) | undefined } = {
+  readonly faults: {
+    rejectNextApply: boolean;
+    rejectNextFileRename: boolean;
+    beforeFileRename: ((oldUri: string, newUri: string) => void | Promise<void>) | undefined;
+    /** Created files: the next create resolves false without calling VS Code. */
+    rejectNextCreate: boolean;
+    /** Created files: runs right after the creates and before the text targets are checked again. */
+    afterCreate: ((uri: string) => void | Promise<void>) | undefined;
+  } = {
     rejectNextApply: false,
     rejectNextFileRename: false,
     beforeFileRename: undefined,
+    rejectNextCreate: false,
+    afterCreate: undefined,
   };
 
   async capture(writeSet: readonly PlannedChange[]): Promise<CapturedEdit | { ok: false; reason: string; uri?: string }> {
     const targets: Target[] = [];
     const renames: RenameTarget[] = [];
+    const creates: CreateTarget[] = [];
     for (const change of writeSet) {
+      if (change.kind === 'create') {
+        if (targets.length > 0 || renames.length > 0) return { ok: false, reason: 'a created file follows a text change' };
+        const uri = vscode.Uri.parse(change.uri, true);
+        if (uri.scheme !== 'file') return { ok: false, reason: 'a created file is not a local file', uri: change.uri };
+        if (typeof change.text !== 'string' || sha256(change.text) !== change.resultHash) return { ok: false, reason: `the text of ${label(uri)} does not match its hash`, uri: change.uri };
+        if (targetExists(uri.fsPath) || openDocument(uri)) return { ok: false, reason: `${label(uri)} already exists`, uri: change.uri };
+        creates.push({ change, uri });
+        continue;
+      }
       if (change.kind === 'rename') {
         const oldUri = vscode.Uri.parse(change.oldUri, true);
         const newUri = vscode.Uri.parse(change.newUri, true);
@@ -97,11 +128,11 @@ export class VsCodeEditApplier implements EditApplier {
       }
       targets.push({ change, uri, diskText });
     }
-    return { ok: true, commit: () => this.commit(targets, renames) };
+    return { ok: true, commit: () => this.commit(targets, renames, creates) };
   }
 
-  /** Synchronous check of every target, then applyEdit is started with no await in between. */
-  private commit(targets: Target[], renames: RenameTarget[]): CommitResult {
+  /** Builds the text edit after checking every target synchronously; a string is the reason it cannot be applied. */
+  private textEdit(targets: Target[]): vscode.WorkspaceEdit | { started: false; reason: string; uri?: string } {
     const edit = new vscode.WorkspaceEdit();
     for (const t of targets) {
       const doc = openDocument(t.uri);
@@ -119,18 +150,34 @@ export class VsCodeEditApplier implements EditApplier {
         edit.replace(t.uri, new vscode.Range(e.range.start.line, e.range.start.character, e.range.end.line, e.range.end.character), e.newText);
       }
     }
+    return edit;
+  }
+
+  /** Starts the text edit (or resolves true at once when there is no text target). */
+  private startText(edit: vscode.WorkspaceEdit, targets: Target[]): Thenable<boolean> {
+    if (targets.length === 0) return Promise.resolve(true);
+    if (this.faults.rejectNextApply) {
+      this.faults.rejectNextApply = false;
+      return Promise.resolve(false);
+    }
+    // Plain text edit (no isRefactoring metadata: that may trigger files.refactoring.autoSave).
+    return vscode.workspace.applyEdit(edit);
+  }
+
+  /** Synchronous check of every target, then the first editor apply is started with no await in between. */
+  private commit(targets: Target[], renames: RenameTarget[], creates: CreateTarget[]): CommitResult {
+    const edit = this.textEdit(targets);
+    if (!(edit instanceof vscode.WorkspaceEdit)) return edit;
     // The absence precondition once more, synchronously: a target that appeared means nothing is applied at all.
     for (const r of renames) {
       if (targetExists(r.newUri.fsPath)) return { started: false, reason: `${label(r.newUri)} already exists`, uri: r.change.newUri };
     }
-    let applying: Thenable<boolean>;
-    if (this.faults.rejectNextApply) {
-      this.faults.rejectNextApply = false;
-      applying = Promise.resolve(false);
-    } else {
-      // Plain text edit (no isRefactoring metadata: that may trigger files.refactoring.autoSave).
-      applying = vscode.workspace.applyEdit(edit);
+    for (const c of creates) {
+      if (targetExists(c.uri.fsPath) || openDocument(c.uri)) return { started: false, reason: `${label(c.uri)} already exists`, uri: c.change.uri };
     }
+    const withRenames = async (report: ApplyReport): Promise<ApplyReport> => (renames.length === 0 ? report : { ...report, resources: [...(report.resources ?? []), ...(await this.applyRenames(report, renames))] });
+    if (creates.length > 0) return { started: true, result: this.applyCreates(creates, targets).then(withRenames) };
+    const applying = this.startText(edit, targets);
     return {
       started: true,
       result: Promise.resolve(applying)
@@ -138,8 +185,104 @@ export class VsCodeEditApplier implements EditApplier {
           (accepted) => this.reconcile(targets, accepted),
           () => this.reconcile(targets, false),
         )
-        .then(async (report) => (renames.length === 0 ? report : { ...report, resources: await this.applyRenames(report, renames) })),
+        .then(withRenames),
     };
+  }
+
+  /**
+   * Created files first (each its own createFile with the planned bytes, overwrite off), reconciled one by one; then,
+   * only when every create is confirmed, the text targets are checked again synchronously and the text edit starts.
+   * A text edit that is not attempted reports its targets as `unchanged` with the reason. Nothing is rolled back.
+   */
+  private async applyCreates(creates: CreateTarget[], targets: Target[]): Promise<ApplyReport> {
+    const resources: ApplyResourceReport[] = [];
+    let go = true;
+    for (const c of creates) {
+      if (!go) {
+        resources.push({ kind: 'create', uri: c.change.uri, status: 'not-attempted', detail: 'an earlier created file did not complete' });
+        continue;
+      }
+      let accepted: boolean;
+      if (this.faults.rejectNextCreate) {
+        this.faults.rejectNextCreate = false;
+        accepted = false;
+      } else if (targetExists(c.uri.fsPath)) {
+        resources.push({ kind: 'create', uri: c.change.uri, status: 'refused', detail: `${label(c.uri)} appeared right before it was created` });
+        go = false;
+        continue;
+      } else {
+        const edit = new vscode.WorkspaceEdit();
+        edit.createFile(c.uri, { overwrite: false, ignoreIfExists: false, contents: new TextEncoder().encode(c.change.text) });
+        try {
+          accepted = await vscode.workspace.applyEdit(edit);
+        } catch {
+          accepted = false;
+        }
+      }
+      const status = this.reconcileCreate(c, accepted);
+      resources.push({ kind: 'create', uri: c.change.uri, ...status });
+      if (status.status !== 'confirmed') go = false;
+      try {
+        await this.faults.afterCreate?.(c.change.uri);
+      } catch {
+        // Test hook only.
+      }
+    }
+    if (!go) {
+      return { editorAccepted: false, files: targets.map((t) => ({ uri: t.change.uri, status: 'unchanged' as const, detail: 'not attempted: the file was not created' })), resources };
+    }
+    // The text targets once more, synchronously, right before the text edit starts (the creates took time).
+    const edit = this.textEdit(targets);
+    if (!(edit instanceof vscode.WorkspaceEdit)) {
+      return { editorAccepted: false, files: targets.map((t) => ({ uri: t.change.uri, status: 'unchanged' as const, detail: `not attempted: ${edit.reason}` })), resources };
+    }
+    let accepted: boolean;
+    try {
+      accepted = await this.startText(edit, targets);
+    } catch {
+      accepted = false;
+    }
+    const report = await this.reconcile(targets, accepted);
+    return { ...report, resources };
+  }
+
+  /**
+   * Undo of a created file (user action after an apply): deletes the file only while it still has exactly the planned
+   * text on disk and no unsaved changes in an editor. Checked synchronously right before the delete starts.
+   */
+  async deleteCreatedFile(uri: vscode.Uri, resultHash: string): Promise<boolean> {
+    let text: string | undefined;
+    try {
+      text = decodeUtf8(fs.readFileSync(uri.fsPath));
+    } catch {
+      return false;
+    }
+    const doc = openDocument(uri);
+    if (text === undefined || sha256(text) !== resultHash || (doc && (doc.isDirty || sha256(doc.getText()) !== resultHash))) return false;
+    const edit = new vscode.WorkspaceEdit();
+    edit.deleteFile(uri, { ignoreIfNotExists: true });
+    try {
+      return await vscode.workspace.applyEdit(edit);
+    } catch {
+      return false;
+    }
+  }
+
+  /** confirmed = the file exists with exactly the planned text (editor buffer or disk); failed = it does not exist. */
+  private reconcileCreate(c: CreateTarget, accepted: boolean): { status: ApplyResourceReport['status']; detail?: string } {
+    const doc = openDocument(c.uri);
+    let text = doc?.getText();
+    const onDisk = diskExists(c.uri);
+    if (text === undefined && onDisk) {
+      try {
+        text = decodeUtf8(fs.readFileSync(c.uri.fsPath));
+      } catch {
+        text = undefined;
+      }
+    }
+    if (onDisk && text !== undefined && sha256(text) === c.change.resultHash) return { status: 'confirmed' };
+    if (!onDisk && !doc) return { status: 'failed', detail: accepted ? 'the editor reported success but the file does not exist' : 'the editor did not create the file' };
+    return { status: 'unknown', detail: `after the create: file ${onDisk ? 'present' : 'absent'}${text !== undefined && sha256(text) !== c.change.resultHash ? ', its text differs from the preview' : ''}` };
   }
 
   /** Compares the post-state of every target with resultHash. Reads only; changes nothing. */
@@ -166,6 +309,7 @@ export class VsCodeEditApplier implements EditApplier {
   /** File rename: the file renames, one operation each, only after every text target was confirmed. Never rolled back. */
   private async applyRenames(report: ApplyReport, renames: RenameTarget[]): Promise<ApplyResourceReport[]> {
     const out: ApplyResourceReport[] = [];
+    if ((report.resources ?? []).some((r) => r.status !== 'confirmed')) report = { ...report, editorAccepted: false };
     const base = (r: RenameTarget) => ({ kind: 'rename' as const, oldUri: r.change.oldUri, newUri: r.change.newUri });
     let go = report.editorAccepted && report.files.every((f) => f.status === 'confirmed');
     for (const r of renames) {

@@ -30,6 +30,8 @@
       { "command": "refyntra.related", "title": "Related", "category": "Refyntra" },
       { "command": "refyntra.actions", "title": "Actions", "category": "Refyntra" },
       { "command": "refyntra.rename", "title": "Rename", "category": "Refyntra" },
+      { "command": "refyntra.moveTypeToFile", "title": "Move Type to File", "category": "Refyntra" },
+      { "command": "refyntra.generateHandler", "title": "Generate Handler (MediatR)", "category": "Refyntra" },
       { "command": "refyntra.showHealth", "title": "Show Health", "category": "Refyntra" },
       { "command": "refyntra.showHealthText", "title": "Show Health (text)", "category": "Refyntra" },
       { "command": "refyntra.restartBackend", "title": "Restart Backend", "category": "Refyntra" },

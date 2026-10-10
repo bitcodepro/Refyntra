@@ -27,7 +27,7 @@ public sealed record FileRenameOffer(IReadOnlyList<(string OldPath, string NewPa
 /// </summary>
 public static class FileRenamePlanner
 {
-    private static readonly HashSet<string> ReservedNames = new(StringComparer.OrdinalIgnoreCase)
+    internal static readonly HashSet<string> ReservedNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$",
         "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
@@ -77,7 +77,7 @@ public static class FileRenamePlanner
         return (offer, included ? renames : new List<PlannedFileRename>());
     }
 
-    private static List<string> ProjectsOf(Snapshot snapshot, string path) =>
+    internal static List<string> ProjectsOf(Snapshot snapshot, string path) =>
         snapshot.Session.DocumentIdsForPath(path).Select(id => snapshot.Solution.GetProject(id.ProjectId)?.FilePath)
             .OfType<string>().Distinct(UriPaths.PathComparer).OrderBy(p => p, StringComparer.Ordinal).ToList();
 
@@ -176,19 +176,24 @@ public static class FileRenamePlanner
     /// in the project file, the nearest Directory.Build.props/targets or their literal imports uses a pattern or names
     /// either file. Anything that cannot be read or resolved refuses (never "probably fine").
     /// </summary>
-    public static (string code, string message)? ProveCompileMembership(string projectPath, string oldPath, string newPath)
+    /// <param name="tail">The consequence named in a refusal (rename: "only the code is renamed").</param>
+    /// <param name="what">The file in messages ("renamed" or "new").</param>
+    /// <param name="action">The operation in messages ("renaming the file" or "creating the file").</param>
+    public static (string code, string message)? ProveCompileMembership(string projectPath, string oldPath, string newPath,
+        string tail = "only the code is renamed", string what = "renamed", string action = "renaming the file")
     {
+        static string Cap(string t) => t.Length == 0 ? t : char.ToUpperInvariant(t[0]) + t.Substring(1);
         var file = Path.GetFileName(oldPath);
         var projectDir = Path.GetDirectoryName(projectPath)!;
         var projectName = Path.GetFileName(projectPath);
         if (!string.Equals(Path.GetDirectoryName(oldPath), Path.GetDirectoryName(newPath), StringComparison.Ordinal))
-            return ("UnprovenMembership", "The renamed file would move to another folder.");
+            return ("UnprovenMembership", $"The {what} file would be in another folder than {file}.");
         var rel = Path.GetRelativePath(projectDir, oldPath);
         if (Path.IsPathRooted(rel) || rel.StartsWith("..", StringComparison.Ordinal))
-            return ("LinkedFile", $"{file} is outside the folder of {projectName} (a linked file); only the code is renamed.");
+            return ("LinkedFile", $"{file} is outside the folder of {projectName} (a linked file); {tail}.");
         var segments = rel.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         if (segments.Take(segments.Length - 1).Any(s => s.Equals("bin", StringComparison.OrdinalIgnoreCase) || s.Equals("obj", StringComparison.OrdinalIgnoreCase)))
-            return ("BuildOutputFolder", $"{file} is under bin/ or obj/; only the code is renamed.");
+            return ("BuildOutputFolder", $"{file} is under bin/ or obj/; {tail}.");
 
         var inputs = new List<string> { projectPath };
         foreach (var name in new[] { "Directory.Build.props", "Directory.Build.targets" })
@@ -197,7 +202,7 @@ public static class FileRenamePlanner
         foreach (var (raw, resolved) in RenamePlanner.ExplicitImports(importer))
         {
             if (resolved == null)
-                return ("UnprovenMembership", $"{Path.GetFileName(importer)} imports {raw}, which cannot be checked; only the code is renamed.");
+                return ("UnprovenMembership", $"{Path.GetFileName(importer)} imports {raw}, which cannot be checked; {tail}.");
             if (File.Exists(resolved)) inputs.Add(resolved);
         }
 
@@ -207,7 +212,7 @@ public static class FileRenamePlanner
             try { xml = XDocument.Load(input); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Xml.XmlException)
             {
-                return ("UnprovenMembership", $"{Path.GetFileName(input)} cannot be read; only the code is renamed.");
+                return ("UnprovenMembership", $"{Path.GetFileName(input)} cannot be read; {tail}.");
             }
             var where = Path.GetFileName(input);
             foreach (var el in xml.Descendants())
@@ -216,11 +221,11 @@ public static class FileRenamePlanner
                 if (local is "EnableDefaultItems" or "EnableDefaultCompileItems" && el.Parent?.Name.LocalName == "PropertyGroup")
                 {
                     if (!string.Equals(el.Value.Trim(), "true", StringComparison.OrdinalIgnoreCase) || HasCondition(el))
-                        return ("DefaultCompileItemsDisabled", $"{where} sets {local}={el.Value.Trim()}{(HasCondition(el) ? " (conditionally)" : "")}: Compile items are not the SDK default glob, so the renamed file might leave the project; only the code is renamed.");
+                        return ("DefaultCompileItemsDisabled", $"{where} sets {local}={el.Value.Trim()}{(HasCondition(el) ? " (conditionally)" : "")}: Compile items are not the SDK default glob, so the {what} file might leave the project; {tail}.");
                     continue;
                 }
                 if (GlobProperties.Contains(local) && el.Parent?.Name.LocalName == "PropertyGroup")
-                    return ("CustomItemExcludes", $"{where} sets {local}, which changes the default Compile glob; only the code is renamed.");
+                    return ("CustomItemExcludes", $"{where} sets {local}, which changes the default Compile glob; {tail}.");
                 if (local != "Compile" || el.Parent?.Name.LocalName != "ItemGroup") continue;
                 foreach (var attr in new[] { "Include", "Remove", "Update", "Exclude" })
                 {
@@ -229,15 +234,15 @@ public static class FileRenamePlanner
                     foreach (var part in value.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
                     {
                         if (part.IndexOfAny(new[] { '*', '?' }) >= 0 || part.Contains("$(") || part.Contains("@(") || part.Contains("%("))
-                            return ("CompilePattern", $"{where} has <Compile {attr}=\"{part}\">, a pattern that might treat {Path.GetFileName(newPath)} differently from {file}; only the code is renamed.");
+                            return ("CompilePattern", $"{where} has <Compile {attr}=\"{part}\">, a pattern that might treat {Path.GetFileName(newPath)} differently from {file}; {tail}.");
                         string full;
                         try { full = Path.GetFullPath(Path.Combine(projectDir, part.Replace('\\', Path.DirectorySeparatorChar))); }
                         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
                         {
-                            return ("CompilePattern", $"{where} has a Compile item that cannot be resolved ({part}); only the code is renamed.");
+                            return ("CompilePattern", $"{where} has a Compile item that cannot be resolved ({part}); {tail}.");
                         }
                         if (string.Equals(full, oldPath, StringComparison.OrdinalIgnoreCase) || string.Equals(full, newPath, StringComparison.OrdinalIgnoreCase))
-                            return ("ExplicitCompileItem", $"{where} lists {Path.GetFileName(full)} explicitly (<Compile {attr}=\"{part}\">); renaming the file would need a project file change, which this version does not make. Only the code is renamed.");
+                            return ("ExplicitCompileItem", $"{where} lists {Path.GetFileName(full)} explicitly (<Compile {attr}=\"{part}\">); {action} would need a project file change, which this version does not make. {Cap(tail)}.");
                     }
                 }
             }

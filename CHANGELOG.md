@@ -4,6 +4,8 @@ All notable changes are listed here. The project is alpha; nothing has been rele
 
 ## Unreleased
 
+- EF Core: ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly()) and GetType().Assembly are resolved to the context's own assembly (configurations are linked, likely) instead of being reported as an unknown assembly.
+
 ### Fixed (real-code corpus)
 
 - NuGet audit advisories (and deprecated-package / end-of-life TFM notices) no longer make a project `partial`; MSBuildWorkspace reports every MSBuild message as a failure. Other MSBuild messages stay conservative.
@@ -11,6 +13,20 @@ All notable changes are listed here. The project is alpha; nothing has been rele
 - `pnpm run test:regression`: read-only regression on a pinned OSS solution (`tests/regression/manifest.json`).
 
 ### Added (refactoring)
+
+- Move Type to File and Generate handler (MediatR): two refactorings that create a C# file, offered in Actions (and as
+  `refyntra.moveTypeToFile` / `refyntra.generateHandler`) with a preview (the new file as a diff from empty, the edits of
+  the original file) and Apply. Same safety model as the file rename: static Compile-membership proof for the new file
+  (anchor: an existing file of the folder), absence precondition (ignoring case), read set + revalidation, compilation
+  delta including the new file, single EditApplier. Order: the file is created first (nothing changes if that fails),
+  then the original is edited; created-but-not-edited is reported honestly, never rolled back; Undo offered; the host
+  adds the new document without a reload. Move Type keeps namespace style, banner, comments and attributes, carries only
+  the usings the moved code needs and proves that every name binds to the same symbol; partial, file-local, generated,
+  `#if`/`#nullable`/`#pragma` files and nested types are not moved. Generate handler: `IRequestHandler<,>`/`<>` with a
+  `NotImplementedException` placeholder, folder where most handlers live (or picked), namespace from `RootNamespace` +
+  folders, file-scoped when the project uses it; no DI registration (MediatR scanning). Protocol 1.3 (additive):
+  `PlannedChange` kind `create`, `fileCreate`, `PrepareParams.documentUri`/`targetFolderUri`, `workspace/didCreateFiles`.
+  ADR-004 Amendment 2.
 
 - File rename: C# Rename of a top-level type can rename its file too (`Foo.cs` → `Bar.cs`, partial parts `Foo.*.cs`). The
   preview shows **Also rename the file Foo.cs → Bar.cs** (on by default when proven safe; otherwise the reason why the
@@ -22,6 +38,18 @@ All notable changes are listed here. The project is alpha; nothing has been rele
   `renameFile`, `PlannedChange` kind `rename`, `fileRename` offer, `workspace/didRenameFiles`. ADR-004 amended.
 
 ### Added (framework navigation)
+
+- EF Core navigation (new module `Refyntra.Frameworks.EfCore`, identity by metadata name + the
+  `Microsoft.EntityFrameworkCore*` assemblies; a same-name `DbContext`/`DbSet` elsewhere never matches). Related, group
+  `data`: DbContext → entities (`DbSet<T>` properties, `Entity<T>()`, `ApplyConfiguration`, `ApplyConfigurationsFromAssembly`
+  scan as *likely*, navigation-reachable entities by convention as *likely*), configuration classes and
+  migrations/model snapshots (`[DbContext(typeof(...))]`, read-only); entity → DbContexts, configuration classes and
+  `Entity<T>()` calls, table (`ToTable`, `[Table]`; convention name *likely*), navigations (fluent and conventions, owned
+  types), migrations that reference its table (read-only, *likely*); query sites (`DbSet<T>`, `Set<T>()`) in group
+  `callers`, linked to the enclosing endpoint. Dynamic model building (loops/reflection) is shown as unknown. Find:
+  `entity:` and `table:NAME`. Relation kinds `efcore.entity`, `efcore.dbContext`, `efcore.configuration`,
+  `efcore.navigation`, `efcore.table`, `efcore.query`, `efcore.migration`; group `data`; `SearchFilters.entity`/`table`
+  (additive). EF Core packages are test-only (fixture `tests/fixtures/EfCore`), never in the VSIX.
 
 - MVC controllers and actions: attribute routes (`[Route]`, `[Http*]`, `[AcceptVerbs]`, token replacement,
   inherited routes and actions, several attributes per action, constraints kept as text) as endpoints of kind `mvc`;
