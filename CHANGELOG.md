@@ -6,6 +6,38 @@ All notable changes are listed here. The project is alpha; nothing has been rele
 
 - EF Core: ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly()) and GetType().Assembly are resolved to the context's own assembly (configurations are linked, likely) instead of being reported as an unknown assembly.
 
+### Added (navigation)
+
+- Frontend ↔ backend HTTP links (heuristic): a `fetch`/`axios`/Angular `HttpClient`/`$http`/`ky`/`superagent` call
+  with a literal URL (string, template literal with `${…}` parameters, `+` concatenation, same-file const or
+  `axios.create({ baseURL })`) is matched to the ASP.NET Minimal API/MVC route it calls. Related from the call shows
+  the endpoint and its handler; Related on an action, handler or controller shows the new group **Clients**; Find
+  `client:` lists unlinked calls with the reason (`client:all` lists every call). Matching normalises slashes and case,
+  route parameters and constraints, and the method when known; ambiguity is shown, never guessed. Settings
+  `refyntra.http.basePaths` and `refyntra.http.origins` (default: exact match, relative URLs only). Bounded, excluding
+  workspace scan of TS/JS files, updated on save. No network, nothing executed; every link is labelled heuristic
+  (provenance `http.links`). Uses the existing endpoint listing (`code/search`, route filter ""); no protocol change.
+- Stack trace navigation: **Refyntra: Open Stack Trace** reads a pasted trace (clipboard, editor selection, terminal
+  selection) and lists the frames by exception in the **Refyntra Stack Trace** view: .NET (CoreCLR, .NET Framework,
+  ASP.NET logs, Mono, Unity; async state machines, lambdas, local functions, generics, inner exceptions, await
+  boundaries), JavaScript/TypeScript (V8, Firefox/Safari), Python tracebacks and Rust panics/backtraces. Files are
+  matched to the workspace by exact path, then path suffix (OS case rules, ambiguity offered as a choice); a line past
+  the end of the file is reported as "line may have moved". .NET frames without a usable file are resolved by symbol
+  with the new request `code/resolveFrame` (protocol 1.4, additive): exact metadata name + parameter types = proven,
+  name only = likely. External frames are collapsed; every frame status is in words; each frame has a Related button.
+  Nothing is executed or sent; missing symbols are not recovered.
+
+### Added (languages)
+
+- Python and Rust (delegated): `.py`/`.pyi` and `.rs` files get Find, Related, Actions and Rename through the same
+  delegated adapter as TypeScript/JavaScript (one implementation, a language descriptor per family; TS/JS behaviour
+  unchanged). Answers come from the language extension the user installed (a Python language server such as Pyright,
+  basedpyright or Jedi; rust-analyzer). A missing provider is detected with a document-symbol probe and shown in Health
+  with a recovery that opens the Extensions view search (never an install). Rename: per-language identifier rules
+  (Unicode Python names, Rust raw identifiers and lifetimes), refusal of renames inside strings, of Python import
+  module paths and Rust `mod name;` declarations (possible file operations) and of edits inside Rust `macro_rules!`
+  bodies; Python dynamic attribute access is listed as not covered.
+
 ### Fixed (real-code corpus)
 
 - NuGet audit advisories (and deprecated-package / end-of-life TFM notices) no longer make a project `partial`; MSBuildWorkspace reports every MSBuild message as a failure. Other MSBuild messages stay conservative.
@@ -13,6 +45,15 @@ All notable changes are listed here. The project is alpha; nothing has been rele
 - `pnpm run test:regression`: read-only regression on a pinned OSS solution (`tests/regression/manifest.json`).
 
 ### Added (refactoring)
+
+- Code Cleanup (`refyntra.cleanup`, action `csharp.cleanup`, protocol 1.4): one preview for a file, folder, project or
+  the workspace with per-file per-fix counts, diffs and the skipped files with reasons. Fixes (profile
+  `refyntra.cleanup.profile`, toggled per run): remove unnecessary usings (compiler-reported, every project context —
+  Organize Imports across many files), sort usings (System first per `.editorconfig`), file-scoped namespace (only when
+  `.editorconfig` asks and C# ≥ 10), trailing whitespace / final newline (only per `.editorconfig`). Each change is kept
+  only when Roslyn proves the code means the same (bindings, types, declarations, literal values, diagnostics) and every
+  fix is idempotent. Same pipeline as Rename (read set, revalidation, single EditApplier, reconcile, never saved); Undo
+  restores files that still have the applied text. IDE code-style fixes (IDExxxx) are not offered (internal Roslyn APIs).
 
 - Move Type to File and Generate handler (MediatR): two refactorings that create a C# file, offered in Actions (and as
   `refyntra.moveTypeToFile` / `refyntra.generateHandler`) with a preview (the new file as a diff from empty, the edits of

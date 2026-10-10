@@ -1,4 +1,5 @@
-import type { Availability, Position, RecoveryAction, RevalidateResult, ScopeDetails, SymbolRef } from '@refyntra/contracts';
+import type { Availability, PlannedChange, Position, RecoveryAction, RevalidateResult, ScopeDetails, SymbolRef } from '@refyntra/contracts';
+import { CSHARP_CLEANUP_ACTION } from '@refyntra/contracts';
 import {
   type AnyRefactorPlan,
   type AnyRelation,
@@ -25,6 +26,7 @@ import { AdapterUnavailableError, RouteUnavailableError, RpcError, StaleResultEr
 import { type ParsedFindQuery, hasAnyFilter, parseFindQuery } from './filters';
 import type { ApplicationSettings, ApplyFileReport, ApplyResourceReport, EditApplier, Logger } from './ports';
 import { BoundedCache, type Disposable, Emitter } from './util';
+import type { HttpLinkService } from './http/httpLinks';
 
 export interface DocumentTarget {
   uri: string;
@@ -124,6 +126,11 @@ export interface AnalysisView {
   snapshotId: string;
   workspaceRevision: number;
 }
+/** Stack trace navigation: candidate source symbols of one .NET frame, or why there are none. */
+export type ResolveFrameOutcome =
+  | { kind: 'candidates'; candidates: import('@refyntra/contracts').FrameCandidate[] }
+  | Unavailable;
+
 export type AnalysisOutcome = AnalysisView | (Unavailable & { providerRouteId: string });
 
 export interface PrepareOptions {
@@ -163,6 +170,11 @@ export interface EngineClient {
    * The result is applied with applyRename (same lifecycle, revalidation and EditApplier).
    */
   prepareAction(target: DocumentTarget, actionId: string, token?: CancellationToken, options?: ActionPrepareOptions): Promise<RenameOutcome>;
+  /**
+   * Code Cleanup (`csharp.cleanup`) of a scope on the owned route `adapterId`: a text-only plan, applied with applyRename
+   * (same lifecycle, revalidation and EditApplier).
+   */
+  prepareCleanup(cleanup: import('@refyntra/contracts').CleanupParams, token?: CancellationToken, adapterId?: string): Promise<RenameOutcome>;
   applyRename(planId: string, token?: CancellationToken, options?: ApplyOptions): Promise<ApplyOutcome>;
   discardPlan(planId: string): void;
   planState(planId: string): PlanState | undefined;
@@ -185,6 +197,8 @@ export interface EngineOptions {
   isTrusted: () => boolean;
   /** How many times a request is retried after its result was dropped as stale. */
   staleRetries?: number;
+  /** Frontend ↔ backend HTTP linking (heuristic): answers Find `client:`. Its framework modules are registered separately. */
+  httpLinks?: Pick<HttpLinkService, 'find'>;
 }
 
 interface PlanEntry {
@@ -303,7 +317,9 @@ export class RefyntraEngine implements EngineClient {
   async find(query: string, token?: CancellationToken, limit = DEFAULT_FIND_LIMIT): Promise<FindOutcome> {
     const parsed = parseFindQuery(query);
     const outcome: FindOutcome = { query: parsed, items: [], truncated: false, notes: [], routeLabels: {} };
-    if (parsed.errors.length > 0 || (parsed.text.length === 0 && !hasAnyFilter(parsed.filters))) return outcome;
+    if (parsed.errors.length > 0) return outcome;
+    if (parsed.client) return this.findClientCalls(parsed, outcome, token, limit);
+    if (parsed.text.length === 0 && !hasAnyFilter(parsed.filters)) return outcome;
     const lists: FindItem[][] = [];
     await Promise.all(
       this.o.registry.languageAdapters().map(async (adapter) => {
@@ -334,6 +350,40 @@ export class RefyntraEngine implements EngineClient {
     return outcome;
   }
 
+  /** Find `client:`: HTTP client call sites (heuristic), unlinked ones unless `client:all`. */
+  private async findClientCalls(parsed: ParsedFindQuery, outcome: FindOutcome, token: CancellationToken | undefined, limit: number): Promise<FindOutcome> {
+    if (!this.o.httpLinks) {
+      outcome.notes.push('HTTP links: not available in this host.');
+      return outcome;
+    }
+    try {
+      const r = await this.o.httpLinks.find(parsed.client ?? 'unlinked', parsed.text, limit, token);
+      outcome.items = r.items;
+      outcome.truncated = r.truncated;
+      outcome.routeLabels!['http.links'] = 'HTTP links (heuristic)';
+      outcome.notes.push('HTTP links: heuristic — client calls are found by their literal URL text; calls built at runtime are not linked.');
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      outcome.notes.push(`HTTP links: ${describeErrorWithRecovery(e)}`);
+    }
+    return outcome;
+  }
+
+  // ---------------------------------------------------------------- Stack frames
+
+  /** Resolves a .NET stack frame by symbol on the routes that offer it (the C# route). Read-only. */
+  async resolveFrame(req: import('@refyntra/contracts').ResolveFrameRequest, token?: CancellationToken): Promise<ResolveFrameOutcome> {
+    const adapter = this.o.registry.languageAdapters().find((a) => typeof a.resolveFrame === 'function');
+    if (!adapter?.resolveFrame) return { kind: 'unavailable', reasonCode: 'NoLanguageRoute', message: 'No Refyntra language route resolves .NET stack frames.', recoveryActions: [RECOVERY_SHOW_HEALTH] };
+    try {
+      const r = await this.withStaleRetry(() => adapter.resolveFrame!(req, token), token);
+      return { kind: 'candidates', candidates: r.value.candidates };
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      return this.toUnavailable(adapter, e);
+    }
+  }
+
   // ---------------------------------------------------------------- Related
 
   async related(target: DocumentTarget, token?: CancellationToken): Promise<RelatedOutcome> {
@@ -351,7 +401,7 @@ export class RefyntraEngine implements EngineClient {
       const additionalNotes: string[] = [];
       for (const fw of this.o.registry.frameworksFor(adapter.descriptor.providerRouteId)) {
         try {
-          extra.push(await fw.related({ subject: r.value.subject, languageResult: r, language: adapter, ...(token ? { token } : {}) }));
+          extra.push(await fw.related({ subject: r.value.subject, languageResult: r, language: adapter, target: { uri: target.uri, position: target.position }, ...(token ? { token } : {}) }));
         } catch (e) {
           if (e instanceof CancelledError) throw e;
           const note = `${fw.descriptor.displayName}: ${describeError(e)}`;
@@ -378,8 +428,41 @@ export class RefyntraEngine implements EngineClient {
       this.relatedCache.set(cacheKey, view);
       return view;
     } catch (e) {
-      return this.toUnavailable(adapter, e);
+      if (e instanceof CancelledError) throw e;
+      const fallback = await this.relatedWithoutLanguage(adapter, target, e, token);
+      return fallback ?? this.toUnavailable(adapter, e);
     }
+  }
+
+  /**
+   * The language route gave no result at the position (e.g. the cursor is inside a URL string): text-pattern framework
+   * modules (HTTP links) may still answer. Their relations are shown with the route's explanation as a note.
+   */
+  private async relatedWithoutLanguage(adapter: LanguageAdapter, target: DocumentTarget, cause: unknown, token?: CancellationToken): Promise<RelatedView | undefined> {
+    if (cause instanceof StaleResultError || cause instanceof AdapterUnavailableError) return undefined;
+    const lists: AnyRelation[][] = [];
+    for (const fw of this.o.registry.frameworksFor(adapter.descriptor.providerRouteId)) {
+      if (!fw.relatedWithoutLanguage) continue;
+      try {
+        lists.push(await fw.relatedWithoutLanguage({ uri: target.uri, position: target.position }, token));
+      } catch (e) {
+        if (e instanceof CancelledError) throw e;
+      }
+    }
+    if (!lists.some((l) => l.length > 0)) return undefined;
+    const note = this.noteFor(adapter, cause);
+    return {
+      kind: 'related',
+      subject: null,
+      groups: groupRelations(mergeRelations(lists)),
+      completeness: 'unknown',
+      scopeNotes: [note],
+      additionalNotes: [note],
+      providerRouteId: adapter.descriptor.providerRouteId,
+      sessionEpoch: adapter.currentEpoch() ?? 'unknown',
+      snapshotId: 'unknown',
+      workspaceRevision: this.o.tracker.revision,
+    };
   }
 
   // ---------------------------------------------------------------- Actions
@@ -473,6 +556,31 @@ export class RefyntraEngine implements EngineClient {
       const issues = validatePlanStructure(plan);
       if (plan.sessionEpoch !== prepared.sessionEpoch) issues.push({ code: 'wrong-kind', message: 'Plan belongs to a different backend session' });
       if (plan.actionId !== actionId) issues.push({ code: 'wrong-kind', message: `The plan is for ${plan.actionId}, not ${actionId}` });
+      const lifecycle = new PlanLifecycle(plan);
+      this.plans.set(plan.planId, { lifecycle, adapter, workspaceRevision: prepared.workspaceRevision });
+      if (issues.length > 0) lifecycle.transition('Failed', issues.map((i) => i.message).join('; '));
+      else lifecycle.transition('Previewing');
+      return { kind: 'preview', planId: plan.planId, plan, state: lifecycle.state, issues, applyEnabled: this.o.settings.applyRenameEnabled() && issues.length === 0 };
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      return this.toUnavailable(adapter, e);
+    }
+  }
+
+  async prepareCleanup(cleanup: import('@refyntra/contracts').CleanupParams, token?: CancellationToken, adapterId = 'csharp'): Promise<RenameOutcome> {
+    const adapter = this.o.registry.languageAdapters().find((a) => a.descriptor.adapterId === adapterId && a.descriptor.ownership === 'owned-semantic');
+    if (!adapter) return { kind: 'unavailable', reasonCode: 'ActionNotSupported', message: 'Code Cleanup is not provided by a Refyntra route here.', recoveryActions: [] };
+    try {
+      const prepared = await this.withStaleRetry(() => adapter.prepare({ symbolId: '', newName: '', actionId: CSHARP_CLEANUP_ACTION, cleanup }, token), token);
+      const result = prepared.value;
+      if (result.kind !== 'prepared') {
+        return { kind: 'unavailable', reasonCode: result.reasonCode ?? 'Unavailable', message: result.message ?? 'Code Cleanup is unavailable.', recoveryActions: result.reasonCode === 'NoChanges' ? [] : [RECOVERY_SHOW_HEALTH] };
+      }
+      const plan = result.plan;
+      const issues = validatePlanStructure(plan);
+      if (plan.sessionEpoch !== prepared.sessionEpoch) issues.push({ code: 'wrong-kind', message: 'Plan belongs to a different backend session' });
+      if (plan.actionId !== CSHARP_CLEANUP_ACTION) issues.push({ code: 'wrong-kind', message: `The plan is for ${plan.actionId}, not ${CSHARP_CLEANUP_ACTION}` });
+      if ((plan.writeSet as readonly PlannedChange[]).some((c) => c.kind !== 'text')) issues.push({ code: 'unsupported-change', message: 'A cleanup plan may only change text' });
       const lifecycle = new PlanLifecycle(plan);
       this.plans.set(plan.planId, { lifecycle, adapter, workspaceRevision: prepared.workspaceRevision });
       if (issues.length > 0) lifecycle.transition('Failed', issues.map((i) => i.message).join('; '));

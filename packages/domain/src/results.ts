@@ -5,7 +5,8 @@ import { compareLocations, compareStrings, locationKey } from './location';
 export interface FindItem {
   /** Stable key used for dedupe and selection. */
   key: string;
-  kind: 'symbol' | 'endpoint';
+  /** `client`: a heuristic HTTP client call site (Find `client:`). */
+  kind: 'symbol' | 'endpoint' | 'client';
   label: string;
   /** Project, origin, endpoint style. */
   description: string;

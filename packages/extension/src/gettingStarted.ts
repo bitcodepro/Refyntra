@@ -32,6 +32,7 @@ export const MAIN_MENU: readonly MenuEntry[] = [
   { label: '$(edit) Rename', detail: 'Rename the symbol at the cursor: preview first, then Apply', command: 'refyntra.rename' },
   { label: '$(new-file) Move Type to File', detail: 'Move the type at the cursor into its own file: preview first, then Apply', command: 'refyntra.moveTypeToFile' },
   { label: '$(new-file) Generate Handler', detail: 'Create a MediatR handler for the request at the cursor: preview first, then Apply', command: 'refyntra.generateHandler' },
+  { label: '$(sparkle) Code Cleanup', detail: 'Remove unnecessary usings, sort usings and more for a file, folder or project: preview first, then Apply', command: 'refyntra.cleanup' },
   { label: '$(pulse) Show Health', detail: 'Is Refyntra working, what it means for you, and the fix (for example Restore packages)', command: 'refyntra.showHealth' },
   { label: '$(go-to-file) Find Handler', detail: 'Jump to the request handler of the symbol at the cursor', command: 'refyntra.findHandler' },
   { label: '$(globe) Find Endpoint', detail: 'Search ASP.NET endpoints by route', command: 'refyntra.findEndpoint' },
@@ -40,6 +41,7 @@ export const MAIN_MENU: readonly MenuEntry[] = [
   { label: '$(package) Export Debug Bundle', detail: 'Save a redacted report (no source code) to attach to an issue', command: 'refyntra.exportDebugBundle' },
   { label: '$(file-submodule) Select Solution', detail: 'Choose which .sln/.slnx/.csproj Refyntra loads', command: 'refyntra.selectSolution' },
   { label: '$(debug-restart) Restart Backend', detail: 'Restart the C# backend and reload the solution', command: 'refyntra.restartBackend' },
+  { label: '$(debug-stackframe) Open Stack Trace', detail: 'Paste a .NET, JavaScript/TypeScript, Python or Rust stack trace and open its frames in your code', command: 'refyntra.openStackTrace' },
   { label: '$(book) Get Started', detail: 'Open the Refyntra walkthrough', command: 'refyntra.getStarted' },
   { label: '$(keyboard) Keyboard Shortcuts', detail: 'Choose a keybinding preset (Visual Studio or ReSharper style)', command: 'refyntra.keyboardShortcuts' },
 ];

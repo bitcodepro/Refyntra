@@ -31,6 +31,32 @@ const DECL = /\b(function|class|interface|enum|const|let|var|type)\s+([A-Za-z_$]
 const KIND: Record<string, number> = { function: 11, class: 4, interface: 10, enum: 9, const: 13, let: 12, var: 12, type: 25 };
 const KEYWORDS = new Set(['function', 'class', 'interface', 'enum', 'const', 'let', 'var', 'type', 'return', 'new', 'export', 'import', 'from']);
 
+/** The declaration syntax of the fake language (default: the tiny TS-like one). */
+export interface FakeSyntax {
+  /** Global RegExp: group 1 is the declaration keyword, group 2 the name. */
+  decl: RegExp;
+  kinds: Record<string, number>;
+  /** Global RegExp of a word (a possible name) on a line. */
+  word: RegExp;
+  keywords: ReadonlySet<string>;
+}
+
+export const TS_SYNTAX: FakeSyntax = { decl: DECL, kinds: KIND, word: /[A-Za-z_$][\w$]*/g, keywords: KEYWORDS };
+/** Python-like: `def NAME` / `class NAME`, Unicode names. */
+export const PYTHON_SYNTAX: FakeSyntax = {
+  decl: /\b(def|class)\s+([\p{XID_Start}_]\p{XID_Continue}*)/gu,
+  kinds: { def: 11, class: 4 },
+  word: /[\p{XID_Start}_]\p{XID_Continue}*/gu,
+  keywords: new Set(['def', 'class', 'return', 'import', 'from', 'as', 'self']),
+};
+/** Rust-like: `fn|struct|enum|trait|mod|const|static NAME`, raw identifiers `r#name`. */
+export const RUST_SYNTAX: FakeSyntax = {
+  decl: /\b(fn|struct|enum|trait|mod|const|static)\s+((?:r#)?[A-Za-z_]\w*)/g,
+  kinds: { fn: 11, struct: 22, enum: 9, trait: 10, mod: 1, const: 13, static: 12 },
+  word: /(?:r#)?[A-Za-z_]\w*/g,
+  keywords: new Set(['fn', 'struct', 'enum', 'trait', 'mod', 'const', 'static', 'let', 'pub', 'use', 'crate', 'macro_rules', 'return']),
+};
+
 interface Decl {
   uri: string;
   name: string;
@@ -67,7 +93,10 @@ export class FakeProviderWorld {
   onBufferEdit: ((uri: string, text: string) => void) | undefined;
   private renameCalls = 0;
 
-  constructor(files: Record<string, string> = {}) {
+  constructor(
+    files: Record<string, string> = {},
+    private readonly syntax: FakeSyntax = TS_SYNTAX,
+  ) {
     for (const [uri, text] of Object.entries(files)) this.files.set(uri, text);
   }
 
@@ -95,9 +124,9 @@ export class FakeProviderWorld {
     for (const u of uri ? [uri] : this.uris()) {
       const lines = (this.text(u) ?? '').split(/\r\n|\n|\r/);
       lines.forEach((line, i) => {
-        for (const m of line.matchAll(DECL)) {
+        for (const m of line.matchAll(this.syntax.decl)) {
           const name = m[2]!;
-          out.push({ uri: u, name, kind: KIND[m[1]!]!, line: i, start: (m.index ?? 0) + m[0].length - name.length });
+          out.push({ uri: u, name, kind: this.syntax.kinds[m[1]!]!, line: i, start: (m.index ?? 0) + m[0].length - name.length });
         }
       });
     }
@@ -107,9 +136,9 @@ export class FakeProviderWorld {
   private wordAt(uri: string, p: Pos): string | undefined {
     const line = (this.text(uri) ?? '').split(/\r\n|\n|\r/)[p.line];
     if (line === undefined) return undefined;
-    for (const m of line.matchAll(/[A-Za-z_$][\w$]*/g)) {
+    for (const m of line.matchAll(this.syntax.word)) {
       const a = m.index ?? 0;
-      if (a <= p.character && p.character <= a + m[0].length) return KEYWORDS.has(m[0]) ? undefined : m[0];
+      if (a <= p.character && p.character <= a + m[0].length) return this.syntax.keywords.has(m[0]) ? undefined : m[0];
     }
     return undefined;
   }

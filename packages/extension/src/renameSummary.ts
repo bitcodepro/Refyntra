@@ -44,11 +44,21 @@ export function previewTitle(plan: AnyRefactorPlan): string {
 }
 
 const TS_JS_IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
+/** Python and Rust: Unicode identifiers (Rust also r#raw and 'lifetime); the route checks keywords and the rest. */
+const PYTHON_IDENTIFIER = /^[\p{XID_Start}_]\p{XID_Continue}*$/u;
+const RUST_IDENTIFIER = /^(?:'|r#)?[\p{XID_Start}_]\p{XID_Continue}*$/u;
 const CSHARP_IDENTIFIER = /^@?[A-Za-z_][A-Za-z0-9_]*$/;
 
 /** Identifier rule of the input box per language (TS/JS allow `$`, C# allows a leading `@`). */
 export function identifierPattern(languageId: string): RegExp {
+  if (languageId === 'python') return PYTHON_IDENTIFIER;
+  if (languageId === 'rust') return RUST_IDENTIFIER;
   return /^(typescript|javascript)(react)?$/.test(languageId) ? TS_JS_IDENTIFIER : CSHARP_IDENTIFIER;
+}
+
+/** The language named in delegated rename texts, by the plan's route id. */
+export function delegatedProviderName(providerRouteId: string): string {
+  return ({ 'python.vscode-providers': 'Python', 'rust.vscode-providers': 'Rust' } as Record<string, string>)[providerRouteId] ?? 'TypeScript/JavaScript';
 }
 
 export function renamePreviewSummary(preview: SummaryInput, files: readonly PreviewFileModel[], invalid: boolean, fileLabel: (uri: string) => string = shortPath): string {
@@ -70,7 +80,7 @@ export function renamePreviewSummary(preview: SummaryInput, files: readonly Prev
     lines.push(
       '## Provider-managed semantic coverage',
       '',
-      'The edits come from the installed TypeScript/JavaScript rename provider (public VS Code commands). They are **not validated semantically by Refyntra**: Refyntra only checks that the files and the provider edit are unchanged between this preview and the apply.',
+      `The edits come from the installed ${delegatedProviderName(plan.providerRouteId)} rename provider (public VS Code commands). They are **not validated semantically by Refyntra**: Refyntra only checks that the files and the provider edit are unchanged between this preview and the apply.`,
       '',
     );
   }

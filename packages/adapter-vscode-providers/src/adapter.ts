@@ -40,38 +40,25 @@ import {
 } from '@refyntra/application';
 import { type ProviderSymbol, isMemberSymbol, isTypeSymbol, readDocumentSymbols, readLocations, readWorkspaceEdit, readWorkspaceSymbols } from './convert';
 import { type CommandExecutor, type DocumentReader, type Hasher, PROVIDER_COMMANDS, type ProviderValues } from './ports';
+import { type DelegatedLanguage, TS_JS_LANGUAGE } from './languages';
 import { applyEdits, basename, comparePos, hasMixedLineEndings, hasOverlap, identifierAt, sortEdits, textInRange } from './text';
 
-export const TS_JS_ROUTE_ID = 'typescript.vscode-providers';
-export const TS_JS_CAPABILITY_IDS = ['typescript.find', 'typescript.related', 'typescript.references', 'typescript.rename', 'typescript.frameworkRelations'] as const;
+export {
+  DELEGATED_LIMITATION,
+  DELEGATED_RENAME_LIMITATIONS,
+  FRAMEWORK_RELATIONS_UNAVAILABLE,
+  TS_JS_CAPABILITY_IDS,
+  TS_JS_DESCRIPTOR,
+  TS_JS_ROUTE_ID,
+} from './languages';
 
-/** The delegated TypeScript/JavaScript route. No Refyntra process; public VS Code provider commands only. */
-export const TS_JS_DESCRIPTOR: AdapterDescriptor = {
-  adapterId: 'typescript',
-  providerRouteId: TS_JS_ROUTE_ID,
-  displayName: 'TS/JS',
-  languageIds: ['typescript', 'typescriptreact', 'javascript', 'javascriptreact'],
-  fileExtensions: ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'],
-  uriSchemes: ['file'],
-  ownership: 'delegated',
-  operations: ['find', 'related', 'actions', 'rename'],
-  renameActionId: 'typescript.rename',
-  capabilityIds: [...TS_JS_CAPABILITY_IDS],
-};
-
-export const DELEGATED_LIMITATION = 'Results come from the installed TypeScript/JavaScript provider; completeness unknown.';
-export const FRAMEWORK_RELATIONS_UNAVAILABLE =
-  'Framework relations (handlers, endpoints, registrations) are not available for TypeScript/JavaScript: Refyntra has no TypeScript/JavaScript framework module.';
-const NO_PROVIDER_HINT = 'The built-in "TypeScript and JavaScript Language Features" extension may be disabled or still starting.';
-
-export const DELEGATED_RENAME_LIMITATIONS: readonly string[] = [
-  'Provider-managed semantic coverage: the edits come from the installed TypeScript/JavaScript rename provider; Refyntra did not compute or validate them semantically.',
-  "The provider's project context, compiler version, snapshot and read set are unknown. Asking it again before the apply checks that it returns the same edit; it does not lock or reveal the provider's internal state.",
-  'No compilation check is run (compilation delta: not-run).',
-  'Only the text edits the public API lists are applied; Refyntra builds its own edit from them.',
-];
+/** Recovery for a missing provider: the Extensions view with a search query (never an automatic install). */
+export const SEARCH_EXTENSIONS_COMMAND = 'workbench.extensions.search';
 
 export interface DelegatedProviderAdapterOptions {
+  /** The language family (default: TypeScript/JavaScript). */
+  language?: DelegatedLanguage;
+  /** Overrides the language's descriptor (tests). */
   descriptor?: AdapterDescriptor;
   workspaceId: string;
   commands: CommandExecutor;
@@ -81,7 +68,11 @@ export interface DelegatedProviderAdapterOptions {
   /** The application's document tracker: its revision is the observation clock of this route. */
   tracker: DocumentTracker;
   logger: Logger;
+  /** Delays of the provider probe after a document of this language opens (languages with `missingProvider`). */
+  probeDelaysMs?: readonly number[];
 }
+
+type ProviderPresence = 'unknown' | 'present' | 'absent';
 
 interface Observation {
   epoch: string;
@@ -95,25 +86,6 @@ type RenameObservation =
   | { kind: 'ok'; oldName: string; changes: PlannedTextChange[]; inputs: InputFingerprint[] }
   | { kind: 'unavailable'; reasonCode: string; message: string; nativeFallback: boolean };
 
-/** True when an odd number of unescaped quotes precedes the position on its line (a string literal or template). */
-function insideStringLiteral(text: string, p: Position): boolean {
-  const line = text.split(/\r\n|\n|\r/)[p.line];
-  if (line === undefined) return false;
-  let quote: string | undefined;
-  for (let i = 0; i < Math.min(p.character, line.length); i++) {
-    const c = line[i]!;
-    if (c === '\\') {
-      i++;
-      continue;
-    }
-    if (quote) {
-      if (c === quote) quote = undefined;
-    } else if (c === "'" || c === '"' || c === '`') quote = c;
-    else if (c === '/' && line[i + 1] === '/') return false;
-  }
-  return quote !== undefined;
-}
-
 const unavailableObs = (reasonCode: string, message: string, nativeFallback: boolean): RenameObservation => ({ kind: 'unavailable', reasonCode, message, nativeFallback });
 
 function matchScore(name: string, query: string): number {
@@ -125,13 +97,18 @@ function matchScore(name: string, query: string): number {
 }
 
 /**
- * LanguageAdapter for TS/JS through VS Code's public provider dispatch. Owns no semantic
+ * LanguageAdapter for one delegated language family (TS/JS, Python, Rust) through VS Code's public provider dispatch. Owns no semantic
  * backend: every result is `delegated` (observationId, unknown snapshot/context), Find is never a complete index,
  * and rename follows the delegated flow (fingerprints, refusal of non-text edits, re-ask before apply, never `valid`).
  */
 export class DelegatedProviderAdapter implements LanguageAdapter {
   readonly descriptor: AdapterDescriptor;
+  readonly language: DelegatedLanguage;
   private readonly o: DelegatedProviderAdapterOptions;
+  private provider: ProviderPresence = 'unknown';
+  private probing = false;
+  private disposed = false;
+  private readonly probeTimers = new Set<ReturnType<typeof setTimeout>>();
   private epoch: string | undefined;
   private epochCounter = 0;
   private observationCounter = 0;
@@ -149,23 +126,34 @@ export class DelegatedProviderAdapter implements LanguageAdapter {
 
   constructor(options: DelegatedProviderAdapterOptions) {
     this.o = options;
-    this.descriptor = options.descriptor ?? TS_JS_DESCRIPTOR;
+    this.language = options.language ?? TS_JS_LANGUAGE;
+    this.descriptor = options.descriptor ?? this.language.descriptor;
   }
 
   handles(uri: string, languageId?: string): boolean {
     return descriptorHandles(this.descriptor, uri, languageId);
   }
 
+  /** Help for a missing provider when the probe found none (only languages that declare `missingProvider`). */
+  private missing() {
+    return this.state === 'Ready' && this.provider === 'absent' ? this.language.missingProvider : undefined;
+  }
+
+  private installRecovery() {
+    const m = this.language.missingProvider;
+    return m ? [{ command: SEARCH_EXTENSIONS_COMMAND, title: m.recoveryTitle, args: [m.extensionQuery] }] : [];
+  }
+
   health(): AdapterHealth {
+    const missing = this.missing();
     return {
       adapterId: this.descriptor.adapterId,
       providerRouteId: this.descriptor.providerRouteId,
       displayName: this.descriptor.displayName,
       state: this.state,
-      ...(this.state === 'Ready'
-        ? { message: 'Delegated to the installed TypeScript/JavaScript language features through public VS Code provider commands. Results are not owned by Refyntra; completeness unknown.' }
-        : {}),
-      recoveryActions: [],
+      ...(this.state === 'Ready' ? { message: missing ? missing.message : this.language.readyMessage } : {}),
+      ...(missing ? { reasonCode: 'ProviderMissing' } : {}),
+      recoveryActions: missing ? this.installRecovery() : [],
       ...(this.epoch ? { sessionEpoch: this.epoch } : {}),
       projects: [],
       diagnostics: [],
@@ -184,6 +172,7 @@ export class DelegatedProviderAdapter implements LanguageAdapter {
 
   async restart(_reason: string): Promise<void> {
     this.restartCount += 1;
+    this.provider = 'unknown';
     this.newEpoch();
   }
 
@@ -195,12 +184,56 @@ export class DelegatedProviderAdapter implements LanguageAdapter {
     this.healthEmitter.fire(this.health());
   }
 
-  /** VS Code's providers read the editor state themselves; the tracker revision is our observation clock. */
-  documentEvent(_e: DocumentEvent): void {}
+  /**
+   * VS Code's providers read the editor state themselves; the tracker revision is our observation clock. For languages
+   * that need an installed extension, opening a document probes (document symbols) whether any provider answers.
+   */
+  documentEvent(e: DocumentEvent): void {
+    if (!this.language.missingProvider || e.kind !== 'open' || this.provider === 'present' || this.probing || this.disposed) return;
+    if (!this.handles(e.uri, e.languageId)) return;
+    this.probing = true;
+    const delays = this.o.probeDelaysMs ?? [1000, 5000, 15000];
+    const step = (i: number) => {
+      const t = setTimeout(() => {
+        this.probeTimers.delete(t);
+        void this.probe(e.uri).then((answered) => {
+          if (this.disposed) return;
+          if (answered || i + 1 >= delays.length) {
+            // An extension may still be activating: only the last unanswered probe reports the provider missing.
+            this.notePresence(answered);
+            this.probing = false;
+          } else step(i + 1);
+        });
+      }, delays[i]);
+      (t as { unref?: () => void }).unref?.();
+      this.probeTimers.add(t);
+    };
+    step(0);
+  }
+
+  private async probe(uri: string): Promise<boolean> {
+    try {
+      const r = await this.o.commands.executeCommand<unknown>(PROVIDER_COMMANDS.documentSymbols, this.o.values.uri(uri));
+      return r !== undefined && r !== null;
+    } catch {
+      return false;
+    }
+  }
+
+  private notePresence(answered: boolean): void {
+    if (!this.language.missingProvider) return;
+    const next: ProviderPresence = answered ? 'present' : 'absent';
+    if (next === this.provider) return;
+    this.provider = next;
+    if (!this.disposed) this.healthEmitter.fire(this.health());
+  }
 
   discard(_planId: string): void {}
 
   async dispose(): Promise<void> {
+    this.disposed = true;
+    for (const t of this.probeTimers) clearTimeout(t);
+    this.probeTimers.clear();
     this.epoch = undefined;
     this.state = 'NotStarted';
     this.healthEmitter.dispose();
@@ -212,7 +245,7 @@ export class DelegatedProviderAdapter implements LanguageAdapter {
   private begin(token?: CancellationToken): Observation {
     throwIfCancelled(token);
     const epoch = this.epoch;
-    if (!epoch) throw new RouteUnavailableError('NotStarted', 'the TypeScript/JavaScript route is not started.', [RECOVERY_SHOW_HEALTH]);
+    if (!epoch) throw new RouteUnavailableError('NotStarted', `the ${this.language.name} route is not started.`, [RECOVERY_SHOW_HEALTH]);
     this.observationCounter += 1;
     return { epoch, revision: this.o.tracker.revision, observationId: `${epoch}-obs-${this.observationCounter}` };
   }
@@ -254,6 +287,7 @@ export class DelegatedProviderAdapter implements LanguageAdapter {
 
   private async documentSymbols(uri: string, token?: CancellationToken): Promise<ProviderSymbol[] | undefined> {
     const r = await this.exec(PROVIDER_COMMANDS.documentSymbols, [this.o.values.uri(uri)], token);
+    if (r.ok) this.notePresence(r.value !== undefined && r.value !== null);
     return r.ok ? readDocumentSymbols(r.value, uri) : undefined;
   }
 
@@ -269,7 +303,7 @@ export class DelegatedProviderAdapter implements LanguageAdapter {
     const b = this.begin(token);
     const f = req.filters;
     let items: SearchItem[] = [];
-    // Endpoint, project and EF Core (entity:/table:) filters belong to the C# route; TS/JS has none of them.
+    // Endpoint, project and EF Core (entity:/table:) filters belong to the C# route; delegated routes have none of them.
     if (!f.route && !f.method && !f.project && !f.entity && f.table === undefined && req.query.trim().length > 0) {
       const r = await this.exec(PROVIDER_COMMANDS.workspaceSymbols, [req.query], token);
       if (!r.ok) throw new RouteUnavailableError('ProviderError', `the workspace symbol provider failed: ${r.error}`, [RECOVERY_SHOW_HEALTH]);
@@ -284,7 +318,10 @@ export class DelegatedProviderAdapter implements LanguageAdapter {
         seen.add(key);
         items.push({ symbol: this.symbolRef(s, b.observationId), score: matchScore(s.name, req.query.trim()) });
       }
+      if (items.length > 0) this.notePresence(true);
     }
+    const missing = this.missing();
+    if (missing && items.length === 0) throw new RouteUnavailableError('ProviderMissing', missing.message, this.installRecovery());
     items.sort((x, y) => y.score - x.score || (x.symbol!.name < y.symbol!.name ? -1 : x.symbol!.name > y.symbol!.name ? 1 : 0));
     const truncated = items.length > req.limit;
     items = items.slice(0, req.limit);
@@ -295,7 +332,7 @@ export class DelegatedProviderAdapter implements LanguageAdapter {
   async symbolAt(uri: string, position: Position, token?: CancellationToken): Promise<RouteResult<SymbolRef | null>> {
     const b = this.begin(token);
     const symbols = await this.documentSymbols(uri, token);
-    if (symbols === undefined) throw new RouteUnavailableError('ProviderUnavailable', `no TypeScript/JavaScript document symbol provider answered. ${NO_PROVIDER_HINT}`, [RECOVERY_SHOW_HEALTH]);
+    if (symbols === undefined) throw new RouteUnavailableError('ProviderUnavailable', `no ${this.language.name} document symbol provider answered. ${this.language.noProviderHint}`, [RECOVERY_SHOW_HEALTH]);
     const s = DelegatedProviderAdapter.symbolAtPosition(symbols, position);
     this.finish(b, token);
     return this.result(b, s ? this.symbolRef(s, b.observationId) : null);
@@ -308,7 +345,7 @@ export class DelegatedProviderAdapter implements LanguageAdapter {
     const b = this.begin(token);
     const args = [this.o.values.uri(target.uri), this.o.values.position(target.position)];
     const [defs, refs] = await Promise.all([this.exec(PROVIDER_COMMANDS.definitions, args, token), this.exec(PROVIDER_COMMANDS.references, args, token)]);
-    if (!defs.ok && !refs.ok) throw new RouteUnavailableError('ProviderError', `the TypeScript/JavaScript providers failed: ${defs.error}`, [RECOVERY_SHOW_HEALTH]);
+    if (!defs.ok && !refs.ok) throw new RouteUnavailableError('ProviderError', `the ${this.language.name} providers failed: ${defs.error}`, [RECOVERY_SHOW_HEALTH]);
     const defList = defs.ok ? (readLocations(defs.value) ?? []) : [];
     const refList = refs.ok ? (readLocations(refs.value) ?? []) : [];
     if (defList.length === 0 && refList.length === 0) {
@@ -316,9 +353,9 @@ export class DelegatedProviderAdapter implements LanguageAdapter {
       // (undefined without any provider) tell the two apart for this document.
       const symbols = await this.documentSymbols(target.uri, token);
       if (symbols === undefined || symbols.length === 0) {
-        throw new RouteUnavailableError('ProviderUnavailable', `no TypeScript/JavaScript provider answered for this document. ${NO_PROVIDER_HINT}`, [RECOVERY_SHOW_HEALTH]);
+        throw new RouteUnavailableError('ProviderUnavailable', `no ${this.language.name} provider answered for this document. ${this.language.noProviderHint}`, [RECOVERY_SHOW_HEALTH]);
       }
-      throw new RouteUnavailableError('ProviderEmpty', 'the installed TypeScript/JavaScript provider returned no definition or references at this position.');
+      throw new RouteUnavailableError('ProviderEmpty', `the installed ${this.language.name} provider returned no definition or references at this position.`);
     }
     const subject = await this.subjectFor(target.uri, target.position, defList, b.observationId, token);
     const provenance = delegatedProvenance(this.descriptor.providerRouteId, b.observationId);
@@ -329,14 +366,14 @@ export class DelegatedProviderAdapter implements LanguageAdapter {
       evidence: [{ description: `reported by ${command}`, location: loc }],
       confidence: 'likely',
       provenance,
-      limitations: [DELEGATED_LIMITATION],
+      limitations: [this.language.findLimitation],
     });
     const declKeys = new Set(defList.map(locationKey));
     const relations: Relation[] = [
       ...defList.map((l) => relation(l, 'declaration', PROVIDER_COMMANDS.definitions)),
       ...refList.filter((l) => !declKeys.has(locationKey(l))).map((l) => relation(l, 'reference', PROVIDER_COMMANDS.references)),
     ];
-    const scopeNotes = [DELEGATED_LIMITATION, FRAMEWORK_RELATIONS_UNAVAILABLE];
+    const scopeNotes = [this.language.findLimitation, this.language.frameworkRelationsUnavailable];
     if (!defs.ok) scopeNotes.push(`The definition provider failed: ${defs.error}`);
     if (!refs.ok) scopeNotes.push(`The reference provider failed: ${refs.error}`);
     this.finish(b, token);
@@ -351,7 +388,7 @@ export class DelegatedProviderAdapter implements LanguageAdapter {
       if (s) return this.symbolRef(s, observationId);
     }
     const doc = await this.o.documents.read(uri);
-    const name = doc.ok ? identifierAt(doc.text, position) : undefined;
+    const name = doc.ok ? identifierAt(doc.text, position, this.language.identifierPattern) : undefined;
     if (!name) return null;
     return { name, displayName: name, kind: 'other', ...(def ? { location: def } : {}), origin: 'source', provenance: delegatedProvenance(this.descriptor.providerRouteId, observationId) };
   }
@@ -373,12 +410,17 @@ export class DelegatedProviderAdapter implements LanguageAdapter {
       limitations,
       ...extra,
     });
+    const L = this.language;
+    const id = (verb: string) => `${L.capabilityPrefix}.${verb}`;
+    const missing = this.missing();
+    const down = missing ? { reasonCode: 'ProviderMissing', message: missing.message, recoveryActions: [...this.installRecovery(), RECOVERY_SHOW_HEALTH] } : undefined;
+    const usable = (capabilityId: string, state: Availability['state'], limitations: string[]) => (down ? item(capabilityId, 'unavailable', limitations, down) : item(capabilityId, state, limitations));
     const items = [
-      item('typescript.find', 'available', [DELEGATED_LIMITATION, 'Not a complete index of all languages and projects.']),
-      item('typescript.related', 'available', [DELEGATED_LIMITATION, 'Declarations and references only.']),
-      item('typescript.references', 'available', [DELEGATED_LIMITATION]),
-      item('typescript.rename', 'limited', [...DELEGATED_RENAME_LIMITATIONS]),
-      item('typescript.frameworkRelations', 'unavailable', [], { reasonCode: 'NoFrameworkModule', message: FRAMEWORK_RELATIONS_UNAVAILABLE }),
+      usable(id('find'), 'available', [L.findLimitation, 'Not a complete index of all languages and projects.']),
+      usable(id('related'), 'available', [L.findLimitation, 'Declarations and references only.']),
+      usable(id('references'), 'available', [L.findLimitation]),
+      usable(id('rename'), 'limited', [...L.renameLimitations]),
+      item(id('frameworkRelations'), 'unavailable', [], { reasonCode: 'NoFrameworkModule', message: L.frameworkRelationsUnavailable }),
     ];
     return this.result(b, items);
   }
@@ -387,11 +429,11 @@ export class DelegatedProviderAdapter implements LanguageAdapter {
 
   async prepare(): Promise<RouteResult<PrepareResult>> {
     const b = this.begin();
-    return this.result(b, { kind: 'unavailable', reasonCode: 'DelegatedRoute', message: 'The TypeScript/JavaScript route prepares delegated plans only.' });
+    return this.result(b, { kind: 'unavailable', reasonCode: 'DelegatedRoute', message: `The ${this.language.name} route prepares delegated plans only.` });
   }
 
   async revalidate(_plan: RefactorPlanDto): Promise<RevalidateResult> {
-    return { status: 'invalid', reasonCode: 'DelegatedRoute', message: 'The TypeScript/JavaScript route has no owned-semantic plans.' };
+    return { status: 'invalid', reasonCode: 'DelegatedRoute', message: `The ${this.language.name} route has no owned-semantic plans.` };
   }
 
   // ---------------------------------------------------------------- delegated rename
@@ -399,36 +441,38 @@ export class DelegatedProviderAdapter implements LanguageAdapter {
   /** Steps 1–3 on the current state: fingerprints, provider edit, refusal of everything that is not a plain text edit. */
   private async observeRename(req: DelegatedRenameRequest, b: Observation, token?: CancellationToken): Promise<RenameObservation> {
     const hash = this.o.hash;
+    const L = this.language;
     const source = await this.o.documents.read(req.uri);
     if (!source.ok) return unavailableObs('DocumentUnavailable', `${basename(req.uri)} cannot be read.`, false);
     const sourceHash = hash(source.text);
     const args = [this.o.values.uri(req.uri), this.o.values.position(req.position)];
     const prep = await this.exec(PROVIDER_COMMANDS.prepareRename, args, token);
-    if (!prep.ok) return unavailableObs('NotRenameable', `The TypeScript/JavaScript provider cannot rename here: ${prep.error}`, false);
-    if (prep.value === undefined || prep.value === null) return unavailableObs('ProviderUnavailable', `No TypeScript/JavaScript rename provider answered. ${NO_PROVIDER_HINT}`, false);
+    if (!prep.ok) return unavailableObs('NotRenameable', `The ${L.name} provider cannot rename here: ${prep.error}`, false);
+    if (prep.value === undefined || prep.value === null) return unavailableObs('ProviderUnavailable', `No ${L.name} rename provider answered. ${L.noProviderHint}`, false);
     const p = prep.value as { placeholder?: unknown; range?: { start?: Position; end?: Position }; start?: Position; end?: Position };
     const r = p.range ?? (p.start && p.end ? { start: p.start, end: p.end } : undefined);
     const oldName =
       (typeof p.placeholder === 'string' && p.placeholder) ||
       (r?.start && r.end ? textInRange(source.text, r.start, r.end) : undefined) ||
-      identifierAt(source.text, req.position) ||
+      identifierAt(source.text, req.position, L.identifierPattern) ||
       'symbol';
-    // Inside a string literal (a module path): the provider may rename the file, which the public WorkspaceEdit API
-    // does not list (entries() has text edits only), so the preview could not show it.
-    if (r?.start && insideStringLiteral(source.text, r.start)) {
-      return unavailableObs('PossibleFileOperation', 'Renaming inside a string (such as a module path) may rename a file; the public VS Code API does not show file operations, so Refyntra cannot preview this rename.', true);
-    }
+    const invalidName = L.validateNewName?.(req.newName, oldName);
+    if (invalidName) return unavailableObs('InvalidName', invalidName, false);
+    // A rename whose effect the public WorkspaceEdit API cannot list (entries() has text edits only), e.g. a file
+    // rename from a module path: the preview could not show it.
+    const refusedAt = L.positionRefusal(source.text, r?.start ?? req.position);
+    if (refusedAt) return unavailableObs(refusedAt.reasonCode, refusedAt.message, true);
     const edit = await this.exec(PROVIDER_COMMANDS.rename, [...args, req.newName], token);
-    if (!edit.ok) return unavailableObs('ProviderError', `The TypeScript/JavaScript rename provider failed: ${edit.error}`, false);
-    if (edit.value === undefined || edit.value === null) return unavailableObs('ProviderUnavailable', `No TypeScript/JavaScript rename provider answered. ${NO_PROVIDER_HINT}`, false);
+    if (!edit.ok) return unavailableObs('ProviderError', `The ${L.name} rename provider failed: ${edit.error}`, false);
+    if (edit.value === undefined || edit.value === null) return unavailableObs('ProviderUnavailable', `No ${L.name} rename provider answered. ${L.noProviderHint}`, false);
     const read = readWorkspaceEdit(edit.value);
     // Safety cannot be confirmed for these: the editor's own rename may still be used, explicitly not validated by us.
     if (!read.ok) return unavailableObs(read.reasonCode, read.message, true);
     if (read.changes.length === 0) {
       // VS Code answers an empty edit also when no rename provider exists for the document; tell the two apart.
       const symbols = await this.documentSymbols(req.uri, token);
-      if (symbols === undefined || symbols.length === 0) return unavailableObs('ProviderUnavailable', `No TypeScript/JavaScript provider answered for this document. ${NO_PROVIDER_HINT}`, false);
-      return unavailableObs('ProviderEmpty', 'The TypeScript/JavaScript rename provider returned no changes.', false);
+      if (symbols === undefined || symbols.length === 0) return unavailableObs('ProviderUnavailable', `No ${L.name} provider answered for this document. ${L.noProviderHint}`, false);
+      return unavailableObs('ProviderEmpty', `The ${L.name} rename provider returned no changes.`, false);
     }
     const changes: PlannedTextChange[] = [];
     const inputs = new Map<string, string>([[req.uri, sourceHash]]);
@@ -443,6 +487,8 @@ export class DelegatedProviderAdapter implements LanguageAdapter {
       if (!doc.open && hasMixedLineEndings(doc.text)) return unavailableObs('MixedLineEndings', `${name} has mixed line endings; VS Code would normalize it when opening, so the preview could not match the result.`, true);
       const edits = sortEdits(change.edits);
       if (hasOverlap(edits)) return unavailableObs('OverlappingEdits', `The provider edit for ${name} has overlapping changes.`, true);
+      const refused = L.editRefusal?.(doc.text, edits, oldName);
+      if (refused) return unavailableObs(refused.reasonCode, `${name}: ${refused.message}`, true);
       let result: string;
       try {
         result = applyEdits(doc.text, edits);
@@ -469,7 +515,7 @@ export class DelegatedProviderAdapter implements LanguageAdapter {
     this.planCounter += 1;
     const plan: DelegatedRefactorPlan = {
       planId: `${b.epoch}-plan-${this.planCounter}`,
-      actionId: this.descriptor.renameActionId ?? 'typescript.rename',
+      actionId: this.descriptor.renameActionId ?? `${this.language.capabilityPrefix}.rename`,
       providerRouteId: this.descriptor.providerRouteId,
       workspaceId: this.o.workspaceId,
       kind: 'delegated',
@@ -484,7 +530,7 @@ export class DelegatedProviderAdapter implements LanguageAdapter {
       origin: { uri: req.uri, position: { line: req.position.line, character: req.position.character }, newName: req.newName },
       writeSet: obs.changes,
       evidence: [{ description: `Edits returned by ${PROVIDER_COMMANDS.rename} (after ${PROVIDER_COMMANDS.prepareRename}) for ${basename(req.uri)}:${req.position.line + 1}` }],
-      limitations: [...DELEGATED_RENAME_LIMITATIONS],
+      limitations: [...this.language.renameLimitations],
       validation: { status: 'limited', compilationDelta: 'not-run', providerReprepared: false, returnedEditsMatchedPreview: false },
       title: `Rename ${obs.oldName} to ${req.newName}`,
     };
@@ -494,7 +540,7 @@ export class DelegatedProviderAdapter implements LanguageAdapter {
   /** Step 5: the provider is asked again on the current state; only an identical edit on identical inputs passes. */
   private async revalidateDelegated(plan: DelegatedRefactorPlan, token?: CancellationToken): Promise<RevalidateResult> {
     if (!this.epoch || plan.bridgeEpoch !== this.epoch || plan.providerRouteId !== this.descriptor.providerRouteId) {
-      return { status: 'stale', reasonCode: 'RouteChanged', message: 'the TypeScript/JavaScript route changed since the preview' };
+      return { status: 'stale', reasonCode: 'RouteChanged', message: `the ${this.language.name} route changed since the preview` };
     }
     const b = this.begin(token);
     const obs = await this.observeRename(plan.origin, b, token);

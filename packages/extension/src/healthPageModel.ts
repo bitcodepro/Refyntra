@@ -17,9 +17,10 @@ export type HealthActionId =
   | 'exportDebugBundle'
   | 'getStarted'
   | 'copyText'
-  | 'showText';
+  | 'showText'
+  | 'searchExtensions';
 
-export const HEALTH_ACTION_IDS: readonly HealthActionId[] = ['restore', 'showRestoreOutput', 'installSdk', 'openGlobalJson', 'trustWorkspace', 'selectSolution', 'restartBackend', 'exportDebugBundle', 'getStarted', 'copyText', 'showText'];
+export const HEALTH_ACTION_IDS: readonly HealthActionId[] = ['restore', 'showRestoreOutput', 'installSdk', 'openGlobalJson', 'trustWorkspace', 'selectSolution', 'restartBackend', 'exportDebugBundle', 'getStarted', 'copyText', 'showText', 'searchExtensions'];
 
 export interface HealthAction {
   /** Unique within one model; the webview sends this key back and the extension looks the action up in its own model. */
@@ -268,8 +269,30 @@ function csharpSection(a: AdapterHealth, trusted: boolean, key: (id: HealthActio
   return s('error', `${a.displayName} is not running`, `The Refyntra ${a.displayName} backend could not start${reason}, so Find, Related, Actions and Rename are unavailable for ${a.displayName}. Restart it; if that does not help, export a debug bundle and report the problem.`, restart, [], groups);
 }
 
-function otherSection(a: AdapterHealth): LanguageSection {
+/** Delegated routes that need an installed language extension: Health headline and meaning while ready. */
+const DELEGATED_READY: Record<string, { headline: string; meaning: string }> = {
+  python: {
+    headline: 'Python: ready (uses the installed Python language extension)',
+    meaning: 'Related, Find and Rename for Python files are delegated to the Python language extension you installed (for example one with Pyright, basedpyright or Jedi). Refyntra bundles none; if none answers, this line says so.',
+  },
+  rust: {
+    headline: 'Rust: ready (uses the installed rust-analyzer)',
+    meaning: 'Related, Find and Rename for Rust files are delegated to the rust-analyzer extension you installed. Refyntra bundles none; if none answers, this line says so.',
+  },
+};
+
+function otherSection(a: AdapterHealth, key: (id: HealthActionId) => string): LanguageSection {
   const name = a.adapterId === 'typescript' ? 'TypeScript / JavaScript' : a.displayName;
+  if (a.state === 'Ready' && a.reasonCode === 'ProviderMissing') {
+    // No provider answered for a document of this language: name the missing extension and open the Extensions
+    // view with a search (never an automatic install).
+    const install = a.recoveryActions.find((r) => r.command === 'workbench.extensions.search');
+    const query = typeof install?.args?.[0] === 'string' ? install.args[0] : undefined;
+    const primary: HealthAction | undefined = install && query ? { key: key('searchExtensions'), id: 'searchExtensions', label: install.title, hint: `Opens the Extensions view searching for "${query}". Refyntra does not install anything itself.`, arg: query } : undefined;
+    return { adapterId: a.adapterId, icon: 'warning', headline: `${name}: no language provider installed`, meaning: a.message ?? '', ...(primary ? { primary } : {}), more: [], groups: [] };
+  }
+  const delegated = DELEGATED_READY[a.adapterId];
+  if (a.state === 'Ready' && delegated) return { adapterId: a.adapterId, icon: 'ok', headline: delegated.headline, meaning: delegated.meaning, more: [], groups: [] };
   if (a.state === 'Ready') {
     return { adapterId: a.adapterId, icon: 'ok', headline: TS_HEADLINE[a.state] && a.adapterId === 'typescript' ? TS_HEADLINE[a.state]! : `${name}: ready`, meaning: a.adapterId === 'typescript' ? 'Related, Find and Rename for TypeScript and JavaScript files use the language support built into VS Code; nothing to set up.' : '', more: [], groups: [] };
   }
@@ -286,7 +309,7 @@ export function buildHealthPage(input: HealthPageInput): HealthPageModel {
     return n === 1 ? id : `${id}-${n}`;
   };
   const ordered = [...health.adapters].sort((x, y) => (x.adapterId === 'csharp' ? -1 : y.adapterId === 'csharp' ? 1 : 0));
-  const sections = ordered.map((a) => (a.adapterId === 'csharp' ? csharpSection(a, health.workspaceTrusted, key, restore) : otherSection(a)));
+  const sections = ordered.map((a) => (a.adapterId === 'csharp' ? csharpSection(a, health.workspaceTrusted, key, restore) : otherSection(a, key)));
   const model: HealthPageModel = {
     sections,
     secondary: [

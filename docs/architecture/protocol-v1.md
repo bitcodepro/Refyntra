@@ -98,6 +98,20 @@ a test class. It is not part of `initialize.capabilities`.
   folderChoices?, selectedFolderUri?}`; notification `workspace/didCreateFiles` `{workspaceId, sequence,
   workspaceRevision, files: [{uri}]}`. A 1.2 host answers `unavailable` / `UnsupportedAction`; a 1.3 client sends
   `workspace/didCreateFiles` only to a host that reported minor ≥ 3 and restarts the route otherwise.
+- 1.4 (additive, Code Cleanup): action `csharp.cleanup` for `refactor/prepare` with `symbolId` `""` and
+  `PrepareParams.cleanup?: {scopeUris, fixes}`; the plan is text-only and carries `RefactorPlanDto.cleanup?: {fixes,
+  files: [{uri, fixes: [{fixId, count}]}], skipped: [{uri?, fixId?, reasonCode, message}], filesInScope}`. A host before
+  1.4 answers `unavailable` / `UnsupportedAction`.
+- 1.4 (additive, stack trace navigation): request `code/resolveFrame` `ResolveFrameParams` `{traceId, workspaceId,
+  snapshotId, typeName, methodName, localFunctionName?, methodArity?, parameterTypes?}` → `ResolveFrameResult`
+  `{candidates: [{symbol, location, confidence: "proven" | "likely", reason}], snapshotId}`. The client decodes
+  compiler-generated names (async state machines, lambdas, local functions) to the user method before asking and omits
+  `parameterTypes` when the frame does not show the user method's parameters. `typeName` is dotted as a trace prints it
+  (nested types with `.` or `+`, generic arity with `` `N ``). `proven` = the type was found by its exact metadata name
+  and exactly one overload has the printed parameter types (namespace, generic arguments, `&` and C# keyword spellings
+  are normalised); everything else is `likely`. Only source symbols are returned (metadata-only symbols have nothing
+  to open); a method that no longer exists on a found type yields the type, `likely`. Read-only, no document sequence.
+  A client sends it only to a host that reported minor ≥ 4 (an older host would answer `MethodNotFound`).
 - Additive (EF Core): relation kinds `efcore.*` and group `data` (above); `SearchFilters.entity?: boolean` ("entity:")
   and `SearchFilters.table?: string` ("table:NAME") return EF Core entities as symbol items. Older hosts ignore the
   filters (they return a normal symbol search); older clients render the kinds and the group generically. The
@@ -147,6 +161,7 @@ issuing semantic requests.
 | `code/symbolAt` | req | `SymbolAtParams` | `SymbolRef \| null` |
 | `code/search` | req | `SearchParams` | `SearchResult` |
 | `code/related` | req | `RelatedParams` | `RelatedResult` |
+| `code/resolveFrame` | req | `ResolveFrameParams` (since 1.4) | `ResolveFrameResult` |
 | `code/references` | req | `SymbolQueryParams` | `LocationsResult` |
 | `code/implementations` | req | `SymbolQueryParams` | `LocationsResult` |
 | `refactor/prepare` | req | `PrepareParams` | `PrepareResult` |
@@ -214,6 +229,14 @@ provenance). The TypeScript conformance route uses `fixture.engine`.
   `TargetExists` or `FileCreateUnsafe`. The client creates each file before applying the text change (ADR-004
   Amendment 2) and then sends `workspace/didCreateFiles`.
 
+- Code Cleanup (1.4): `refactor/prepare` with `actionId` `csharp.cleanup`, `symbolId` `""` and `cleanup: {scopeUris,
+  fixes}` (file, folder or `.csproj` URIs; fix ids `removeUnnecessaryUsings`, `sortUsings`, `fileScopedNamespace`,
+  `whitespace`; empty = the default profile; `editorConfigCodeStyle` and unknown ids are reported in `skipped` as
+  `NotOffered` / `UnknownFix`). The `writeSet` has only `text` changes; files and fixes that are not provably safe are
+  listed in `plan.cleanup.skipped` (ADR-004 Amendment 3 lists the codes). Refusals: `NoFixes`, `NoScope`,
+  `NoFilesInScope`, `ScopeTooLarge` (more than 2000 C# files), `NoChanges` (nothing to change; the message counts the
+  skipped files by reason), `IncompleteProjectClosure`. Revalidation is the ordinary read-set check.
+
 ## Relation kinds (alpha)
 
 `declaration`, `mediatr.handler`, `mediatr.request`, `mediatr.response`, `mediatr.send`,
@@ -223,8 +246,15 @@ provenance). The TypeScript conformance route uses `fixture.engine`.
 `implementation`, `reference`, `test`, `test.subject`. Clients must tolerate unknown namespaced kinds (`<namespace>.<name>`)
 and unknown groups from newer backends or framework modules and render them generically.
 
+HTTP links (TS side only, never sent by the host): `http.call` (group `endpoints` from a client call site, with
+`target.endpoint`; group `clients` from an endpoint, with `target.location` = the call site) and `http.handler` (group
+`handlers`, `target.symbol` = the endpoint's handler). Their confidence is always `heuristic` and their provenance is
+`{ kind: "heuristic", providerRouteId: "http.links", basis }` (additive `HeuristicProvenance`; `sessionEpoch`/`snapshotId`
+of the C# result that listed the endpoints). The endpoint list comes from the existing `code/search` with
+`filters.route = ""` (every endpoint, with methods, route, location and handler); no new method was needed.
+
 `RelatedResult` has no groups list: every entry of `relations` carries its `group`. The UI orders groups as
-declarations, handlers, callers, endpoints, data, registrations, implementations, references, tests; unknown groups
+declarations, handlers, callers, clients (TS-side HTTP links), endpoints, data, registrations, implementations, references, tests; unknown groups
 follow in name order.
 
 EF Core kinds (provider route `csharp.roslyn/efcore`, group `data` unless noted): `efcore.entity` (DbContext or

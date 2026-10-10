@@ -468,6 +468,8 @@ public sealed class RefactorPlanDto
     public List<string> Limitations { get; set; } = new();
     public PlanValidationDto Validation { get; set; } = new();
     public string Title { get; set; } = "";
+    /// <summary>Code Cleanup (protocol 1.4): fixes, per file per fix counts, skipped files with reasons.</summary>
+    public CleanupReportDto? Cleanup { get; set; }
 }
 
 public sealed class PrepareParams : WorkspaceParams
@@ -482,6 +484,8 @@ public sealed class PrepareParams : WorkspaceParams
     public string? TargetFolderUri { get; set; }
     /// <summary>Move Type to File (protocol 1.3): the document of the cursor (the declaration to move).</summary>
     public string? DocumentUri { get; set; }
+    /// <summary>Code Cleanup (protocol 1.4, action csharp.cleanup): the scope and the fixes.</summary>
+    public CleanupParamsDto? Cleanup { get; set; }
 }
 
 public sealed class PrepareResultDto

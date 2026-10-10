@@ -17,6 +17,17 @@ export const CAPABILITY_TITLES: Readonly<Record<string, string>> = {
   'typescript.references': 'Show references (delegated)',
   'typescript.rename': 'Rename with preview (provider-managed semantic coverage)',
   'typescript.frameworkRelations': 'Framework relations (handlers, endpoints, registrations)',
+  // Delegated Python and Rust routes (the installed language extension answers; results not owned by Refyntra).
+  'python.find': 'Find Python symbol (delegated)',
+  'python.related': 'Show declarations and references (delegated)',
+  'python.references': 'Show references (delegated)',
+  'python.rename': 'Rename with preview (provider-managed semantic coverage)',
+  'python.frameworkRelations': 'Framework relations (handlers, endpoints, registrations)',
+  'rust.find': 'Find Rust symbol (delegated)',
+  'rust.related': 'Show declarations and references (delegated)',
+  'rust.references': 'Show references (delegated)',
+  'rust.rename': 'Rename with preview (provider-managed semantic coverage)',
+  'rust.frameworkRelations': 'Framework relations (handlers, endpoints, registrations)',
 };
 
 /** Which command runs an available capability: matched on the capability's last segment. */

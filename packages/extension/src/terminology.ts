@@ -42,6 +42,18 @@ export const REASON_PHRASE: Readonly<Record<string, string>> = {
   InternalError: 'internal error in the backend',
   ProtocolMismatch: 'backend version does not match',
   Cancelled: 'cancelled',
+  // Code Cleanup (per-file skip reasons are in cleanupSummary.ts)
+  NoChanges: 'nothing to change',
+  NoFilesInScope: 'no C# file of the loaded solution in the scope',
+  ScopeTooLarge: 'the scope has too many files',
+  NoFixes: 'no supported fix selected',
+  // Delegated routes (TS/JS, Python, Rust).
+  ProviderMissing: 'no language provider installed for this language',
+  ProviderUnavailable: 'no language provider answered for this file',
+  InvalidName: 'the new name is not valid for this language',
+  InsideString: 'the cursor is inside a string',
+  PossibleFileOperation: 'the rename may rename or move a file',
+  MacroDefinition: 'the rename changes a macro definition',
 };
 
 /** The phrase for a reason code, or undefined when the code is unknown. */
@@ -81,8 +93,17 @@ export const RELATION_KIND_LABEL: Readonly<Record<RelationKind, string>> = {
   test: 'Test',
 };
 
+/**
+ * Namespaced kinds contributed by TS-side modules. HTTP links (heuristic): "Client call" is a fetch/axios/HttpClient
+ * call site matched to an endpoint (shown under Endpoints from the call, under Clients from the endpoint).
+ */
+export const MODULE_RELATION_KIND_LABEL: Readonly<Record<string, string>> = {
+  'http.call': 'Client call',
+  'http.handler': 'Handler (via HTTP route)',
+};
+
 export function relationKindLabel(kind: string): string {
-  return (RELATION_KIND_LABEL as Readonly<Record<string, string>>)[kind] ?? kind;
+  return (RELATION_KIND_LABEL as Readonly<Record<string, string>>)[kind] ?? MODULE_RELATION_KIND_LABEL[kind] ?? kind;
 }
 
 export interface RelationLabelInput {
@@ -148,6 +169,8 @@ export const GLOSSARY: ReadonlyArray<{ term: string; meaning: string; where: str
   { term: 'unavailable', meaning: 'A feature cannot run now; the reason and the recovery action are shown.', where: 'Actions, Rename, Health' },
   { term: 'not checked', meaning: 'OR1001 stayed silent because it could not prove a path. Not a problem.', where: 'OR1001 explanation (abstentions), Problems "Explain" action' },
   { term: 'preview', meaning: 'Rename shows files, edits, project contexts and limits first. Nothing changes until Apply rename.', where: 'Rename preview, walkthrough' },
+  { term: 'Client call', meaning: 'A fetch/axios/HttpClient call in TypeScript or JavaScript whose literal URL matches an ASP.NET route. Always heuristic.', where: 'Related (Endpoints from the call, Clients from the endpoint), Find client:' },
+  { term: 'Clients', meaning: 'The Related group of an endpoint or action that lists its client calls (heuristic).', where: 'Related' },
 ];
 
 /** The Actions QuickPick row of a feature that cannot run: always starts with the word "Unavailable" (the icon is only decoration). */
@@ -161,3 +184,13 @@ export function unavailableDetail(a: { reasonCode?: string | undefined; message?
   const msg = a.message && a.message !== phrase ? a.message : undefined;
   return [msg, recoveryTitle ? `Select to: ${recoveryTitle}` : undefined].filter(Boolean).join(' — ') || undefined;
 }
+
+/** Stack trace frames: one phrase per frame status (tree description and screen-reader label). */
+export type FrameStatus = 'user' | 'external' | 'ambiguous' | 'missing' | 'bySymbol';
+export const FRAME_STATUS_PHRASE: Readonly<Record<FrameStatus, string>> = {
+  user: 'your code',
+  external: 'external',
+  ambiguous: 'several files match',
+  missing: 'file not in workspace',
+  bySymbol: 'find by symbol',
+};

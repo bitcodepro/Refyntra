@@ -7,3 +7,6 @@ export * from './adapters';
 export * from './filters';
 export * from './protocolAdapter';
 export * from './engine';
+export * from './http/clientCalls';
+export * from './http/routeMatch';
+export * from './http/httpLinks';

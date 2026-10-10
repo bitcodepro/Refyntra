@@ -80,6 +80,8 @@ Defined once in `packages/extension/src/terminology.ts` (`GLOSSARY`, `STATE_PHRA
 | **unavailable** | A feature cannot run now; the reason and the recovery action are shown. | Actions, Rename, Health |
 | **not checked** | OR1001 stayed silent because it could not prove a path. Not a problem. | OR1001 explanation (abstentions), Problems "Explain" action |
 | **preview** | Rename shows files, edits, project contexts and limits first. Nothing changes until Apply rename. | Rename preview, walkthrough |
+| **Client call** | A fetch/axios/HttpClient call in TypeScript or JavaScript whose literal URL matches an ASP.NET route. Always heuristic. | Related (Endpoints from the call, Clients from the endpoint), Find client: |
+| **Clients** | The Related group of an endpoint or action that lists its client calls (heuristic). | Related |
 
 A reason code has exactly one phrase (`REASON_PHRASE`), used by Health (page and text), the Actions list and the Related
 tooltip, always followed by the raw code in brackets for support: for example "no solution or project found

@@ -4,11 +4,12 @@ import {
   AdapterRegistry,
   DocumentTracker,
   type EngineClient,
+  HttpLinkService,
   type LogLevel,
   ProtocolLanguageAdapter,
   RefyntraEngine,
 } from '@refyntra/application';
-import { DelegatedProviderAdapter, createVsCodeProviderBridge } from '@refyntra/adapter-vscode-providers';
+import { DelegatedProviderAdapter, PYTHON_LANGUAGE, RUST_LANGUAGE, TS_JS_ROUTE_ID, createVsCodeProviderBridge } from '@refyntra/adapter-vscode-providers';
 import type { Location } from '@refyntra/contracts';
 import type { HealthSummary } from '@refyntra/domain';
 import { type ProcessLaunch, SinkLogger, createHostTransportFactory, systemClock } from '@refyntra/infrastructure';
@@ -25,12 +26,15 @@ import { MAIN_MENU, WALKTHROUGH_ID, type WelcomeVariant, welcomeContext } from '
 import { HEALTH_SCHEME, HEALTH_TEXT_COMMAND, HealthDocument, HealthPage, StatusBar } from './health';
 import type { HealthPageModel } from './healthPageModel';
 import { HostLocator } from './host';
+import { VsCodeClientFiles, httpLinkSettings, registerClientIndexSync } from './httpClientFiles';
 import { RelatedViewProvider, runRelatedGroupPick } from './related';
 import { PREVIEW_SCHEME, PreviewContentProvider, runNativeRename, runRename } from './rename';
 import { runCreateAction, undoCreate } from './createFile';
+import { runCleanup, undoCleanup } from './cleanup';
 import { CSHARP_GENERATE_HANDLER_ACTION, CSHARP_MOVE_TYPE_ACTION } from '@refyntra/contracts';
 import { runRestore } from './restore';
 import { SolutionService } from './solution';
+import { STACK_TRACE_VIEW, StackTraceViewProvider, runOpenStackTrace } from './stackTrace';
 
 export const CSHARP_DESCRIPTOR: AdapterDescriptor = {
   adapterId: 'csharp',
@@ -63,6 +67,8 @@ export interface RefyntraTestApi {
   hostPids(): number[];
   /** Undo of an applied create-file plan (e2e: the same steps as the "Undo" button). */
   undoCreate(writeSet: readonly import('@refyntra/contracts').PlannedChange[]): Promise<string[]>;
+  /** Undo of an applied Code Cleanup (e2e: the same steps as the "Undo" button). */
+  undoCleanup(entries: readonly import('./cleanupSummary').UndoEntry[]): Promise<string[]>;
   /** Rename preview store (tests read the last preview). */
   previews: PreviewContentProvider;
   /** Title and editor command the UI uses for a capability id (catalogue checks). */
@@ -79,6 +85,8 @@ export interface RefyntraTestApi {
   healthPage: { model(): HealthPageModel; dispatch(message: unknown): Promise<void>; isOpen(): boolean; html(): string };
   /** The status bar item's screen-reader label. */
   statusBarLabel(): string;
+  /** Stack trace navigation (e2e loads a trace, opens frames and injects QuickPick choices). */
+  stackTrace: StackTraceViewProvider;
 }
 
 let engineRef: RefyntraEngine | undefined;
@@ -135,6 +143,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
   registry.registerLanguage(csharp);
   // TS/JS: delegated route over VS Code's public provider commands; no own process or provider.
   registry.registerLanguage(new DelegatedProviderAdapter({ workspaceId, tracker, logger, ...createVsCodeProviderBridge(vscode) }));
+  // Python and Rust: the same delegated route over whatever language extension is installed (none is required or bundled).
+  for (const language of [PYTHON_LANGUAGE, RUST_LANGUAGE]) registry.registerLanguage(new DelegatedProviderAdapter({ language, workspaceId, tracker, logger, ...createVsCodeProviderBridge(vscode) }));
+
+  // Frontend ↔ backend HTTP links (heuristic): TS/JS client calls matched to the C# route's ASP.NET endpoints.
+  const clientFiles = new VsCodeClientFiles();
+  const httpLinks = new HttpLinkService({ server: csharp, clientRouteIds: [TS_JS_ROUTE_ID], files: clientFiles, settings: httpLinkSettings(), documentText: (uri) => tracker.get(uri)?.text });
+  for (const fw of httpLinks.frameworks()) registry.registerFramework(fw);
+  context.subscriptions.push(registerClientIndexSync(httpLinks, clientFiles));
 
   const editApplier = new VsCodeEditApplier();
   const engine = new RefyntraEngine({
@@ -145,6 +161,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     settings: { applyRenameEnabled: () => vscode.workspace.getConfiguration('refyntra').get<boolean>('rename.apply', true) },
     logger,
     isTrusted,
+    httpLinks,
   });
   engineRef = engine;
 
@@ -163,6 +180,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
   const related = new RelatedViewProvider(engine, isTrusted);
   const relatedView = vscode.window.createTreeView('refyntra.relatedView', { treeDataProvider: related, showCollapseAll: true });
   related.attach(relatedView);
+  const stackTrace = new StackTraceViewProvider(engine);
+  const stackTraceView = vscode.window.createTreeView(STACK_TRACE_VIEW, { treeDataProvider: stackTrace, showCollapseAll: true });
+  stackTrace.attach(stackTraceView);
+  context.subscriptions.push(
+    stackTrace,
+    stackTraceView,
+    vscode.commands.registerCommand('refyntra.openStackTrace', (arg?: unknown) => runOpenStackTrace(stackTrace, arg)),
+    vscode.commands.registerCommand('refyntra.stackTrace.openFrame', (arg?: Parameters<StackTraceViewProvider['openFrame']>[0]) => stackTrace.openFrame(arg)),
+    vscode.commands.registerCommand('refyntra.stackTrace.related', (arg?: Parameters<StackTraceViewProvider['related']>[0]) => stackTrace.related(arg)),
+    vscode.commands.registerCommand('refyntra.stackTrace.clear', () => stackTrace.clear()),
+  );
   void vscode.commands.executeCommand('setContext', 'refyntra.relatedPinned', false);
   // Welcome text of the Related view follows trust / solution / backend state (package.json viewsWelcome).
   let welcome: WelcomeVariant | undefined;
@@ -207,6 +235,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     vscode.commands.registerCommand('refyntra.rename', () => runRename(engine, previews)),
     vscode.commands.registerCommand('refyntra.moveTypeToFile', () => runCreateAction(engine, previews, editApplier, CSHARP_MOVE_TYPE_ACTION)),
     vscode.commands.registerCommand('refyntra.generateHandler', () => runCreateAction(engine, previews, editApplier, CSHARP_GENERATE_HANDLER_ACTION)),
+    vscode.commands.registerCommand('refyntra.cleanup', (uri?: unknown) => runCleanup(engine, previews, editApplier, uri)),
     vscode.commands.registerCommand('refyntra.nativeRename', (uri?: unknown, position?: unknown) => runNativeRename(uri, position)),
     vscode.commands.registerCommand('refyntra.runRestore', (target: unknown) => runRestore(isTrusted, target)),
     vscode.commands.registerCommand('refyntra.showHealth', () => healthPage.show()),
@@ -250,6 +279,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     hostLaunches: () => [...launches],
     editApplier,
     undoCreate: (writeSet) => undoCreate(engine, editApplier, writeSet),
+    undoCleanup: (entries) => undoCleanup(editApplier, entries),
     previews,
     hostPids: () => [...pids],
     capabilityUi: (id) => ({ title: capabilityTitleOf(id), command: commandForCapability(id) }),
@@ -259,6 +289,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     welcomeVariant: () => welcome ?? 'ready',
     healthPage: { model: () => healthPage.model(), dispatch: (m) => healthPage.dispatch(m), isOpen: () => healthPage.isOpen(), html: () => healthPage.renderedHtml() },
     statusBarLabel: () => statusBar.accessibleLabel(),
+    stackTrace,
   };
 }
 

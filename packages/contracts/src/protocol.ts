@@ -8,7 +8,7 @@ export const PROTOCOL_MAJOR = 1;
  * 1.1: optional `LoadDiagnostic.recoveryActions` (additive). 1.2: file rename with a type. 1.3: created files
  * (`PlannedChange` kind `create`, `fileCreate`, `targetFolderUri`/`documentUri`, `workspace/didCreateFiles`).
  */
-export const PROTOCOL_MINOR = 3;
+export const PROTOCOL_MINOR = 4;
 
 /** Zero-based line, UTF-16 code unit character. */
 export interface Position {
@@ -182,7 +182,19 @@ export interface DelegatedProvenance {
   snapshotId: 'unknown';
   projectContextId: 'unknown';
 }
-export type Provenance = OwnedProvenance | DelegatedProvenance;
+/**
+ * Heuristic provenance (additive, TS side only; never sent by the host): a relation derived from recognised code
+ * patterns across routes, e.g. a literal fetch/axios URL matched to an ASP.NET route (`http.links`). `basis` says why.
+ */
+export interface HeuristicProvenance {
+  kind: 'heuristic';
+  providerRouteId: string;
+  sessionEpoch: string;
+  snapshotId: string;
+  projectContextId: 'unknown';
+  basis: string;
+}
+export type Provenance = OwnedProvenance | DelegatedProvenance | HeuristicProvenance;
 
 export interface SymbolRef {
   /** Opaque, valid only for (sessionEpoch, snapshotId). Absent for delegated results. */
@@ -256,8 +268,9 @@ export type RelationKind =
   | 'efcore.migration'
   | 'implementation' | 'reference' | 'test';
 
-export type RelationGroup = 'declarations' | 'handlers' | 'callers' | 'endpoints' | 'data' | 'registrations' | 'implementations' | 'references' | 'tests';
-export const RELATION_GROUP_ORDER: readonly RelationGroup[] = ['declarations', 'handlers', 'callers', 'endpoints', 'data', 'registrations', 'implementations', 'references', 'tests'];
+/** `clients` (additive): heuristic frontend call sites of an endpoint (TS-side HTTP linking; never sent by the host). */
+export type RelationGroup = 'declarations' | 'handlers' | 'callers' | 'clients' | 'endpoints' | 'data' | 'registrations' | 'implementations' | 'references' | 'tests';
+export const RELATION_GROUP_ORDER: readonly RelationGroup[] = ['declarations', 'handlers', 'callers', 'clients', 'endpoints', 'data', 'registrations', 'implementations', 'references', 'tests'];
 
 export interface EndpointInfo {
   /** e.g. ["GET"]; empty = any/unknown. */
@@ -397,6 +410,35 @@ export type PlannedChange = PlannedTextChange | PlannedFileRename | PlannedFileC
 export const CSHARP_MOVE_TYPE_ACTION = 'csharp.moveTypeToFile';
 export const CSHARP_GENERATE_HANDLER_ACTION = 'csharp.generateHandler';
 
+/**
+ * Code Cleanup (protocol 1.4): a text-only plan over a scope (files, folders, project files). Prepared with
+ * `actionId` = CSHARP_CLEANUP_ACTION, `symbolId` '' and `cleanup`; applied like every plan.
+ */
+export const CSHARP_CLEANUP_ACTION = 'csharp.cleanup';
+/** Fix ids, in the order they run on a file. `editorConfigCodeStyle` is known but not offered (the plan says why). */
+export const CLEANUP_FIX_IDS = ['removeUnnecessaryUsings', 'sortUsings', 'fileScopedNamespace', 'whitespace', 'editorConfigCodeStyle'] as const;
+export type CleanupFixId = (typeof CLEANUP_FIX_IDS)[number];
+/** The conservative default profile (setting refyntra.cleanup.profile). */
+export const DEFAULT_CLEANUP_PROFILE: readonly CleanupFixId[] = ['removeUnnecessaryUsings', 'sortUsings', 'whitespace'];
+
+export interface CleanupParams {
+  /** File, folder or project file URIs; every C# document of the loaded solution under them is in scope. */
+  scopeUris: string[];
+  /** Fix ids to run (empty: the default profile). Unknown ids are reported in `skipped`. */
+  fixes: string[];
+}
+
+export interface CleanupReport {
+  /** The fixes that ran (id, title). */
+  fixes: { id: string; title: string }[];
+  /** Changed files with the number of changes per fix. */
+  files: { uri: string; fixes: { fixId: string; count: number }[] }[];
+  /** Skipped files (uri), fixes in a file (uri + fixId) and fixes (fixId only), with the reason. */
+  skipped: { uri?: string; fixId?: string; reasonCode: string; message: string }[];
+  /** C# files in the scope. */
+  filesInScope: number;
+}
+
 /** A folder a generated file can be created in (Generate handler; the first is the default). */
 export interface FolderChoice {
   folderUri: string;
@@ -474,6 +516,8 @@ export interface RefactorPlanDto {
   fileRename?: FileRenameOffer;
   /** Created files (protocol 1.3): what a create-file plan creates. Required when the writeSet has a `create`. */
   fileCreate?: FileCreateOffer;
+  /** Code Cleanup (protocol 1.4): what the cleanup plan does and what it skipped. */
+  cleanup?: CleanupReport;
 }
 
 export interface PrepareParams extends WorkspaceParams {
@@ -488,6 +532,8 @@ export interface PrepareParams extends WorkspaceParams {
   targetFolderUri?: string;
   /** Move Type to File (protocol 1.3): the document of the cursor (the declaration to move). */
   documentUri?: string;
+  /** Code Cleanup (protocol 1.4, action csharp.cleanup): the scope and the fixes. */
+  cleanup?: CleanupParams;
 }
 export type PrepareResult =
   | { kind: 'prepared'; plan: RefactorPlanDto }
@@ -505,6 +551,43 @@ export interface RevalidateResult {
   limitations?: string[];
 }
 
+// ---------------------------------------------------------------- stack frames (protocol 1.4)
+
+/**
+ * code/resolveFrame: the source symbol of one .NET stack frame. The client decodes compiler names first (async state
+ * machines, lambdas, local functions) and sends the user method. Read-only; nothing is executed.
+ */
+export interface ResolveFrameParams extends WorkspaceParams {
+  snapshotId: string;
+  /** Dotted type name as the trace prints it ("Ns.Outer.Inner", "Ns.Repo`1"); nested types may use '.' or '+'. */
+  typeName: string;
+  /** The user method: "Get", ".ctor", ".cctor", "get_Name". */
+  methodName: string;
+  /** Set when the frame is a local function inside `methodName`. */
+  localFunctionName?: string;
+  /** Generic arity of the method when the trace shows it ("Get[T]" = 1). */
+  methodArity?: number;
+  /** Printed parameter type names ("Int32", "String[]", "List`1"); omitted when unknown (async, lambdas). */
+  parameterTypes?: string[];
+}
+
+/** The frame part of ResolveFrameParams (what the client fills in; the route adds trace/workspace/snapshot). */
+export type ResolveFrameRequest = Omit<ResolveFrameParams, 'traceId' | 'workspaceId' | 'snapshotId'>;
+
+export interface FrameCandidate {
+  symbol: SymbolRef;
+  /** Where to open: the method, or the local function inside it. */
+  location: Location;
+  /** proven = exact metadata type name and parameter types (one overload); likely = matched by name. */
+  confidence: 'proven' | 'likely';
+  reason: string;
+}
+
+export interface ResolveFrameResult {
+  candidates: FrameCandidate[];
+  snapshotId: string;
+}
+
 // ---------------------------------------------------------------- methods
 
 export interface MethodMap {
@@ -519,6 +602,8 @@ export interface MethodMap {
   'code/symbolAt': [SymbolAtParams, SymbolRef | null];
   'code/search': [SearchParams, SearchResult];
   'code/related': [RelatedParams, RelatedResult];
+  /** Protocol 1.4. */
+  'code/resolveFrame': [ResolveFrameParams, ResolveFrameResult];
   'code/references': [SymbolQueryParams, LocationsResult];
   'code/implementations': [SymbolQueryParams, LocationsResult];
   'refactor/prepare': [PrepareParams, PrepareResult];

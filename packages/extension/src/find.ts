@@ -57,7 +57,7 @@ export async function runFind(engine: EngineClient, initialValue = ''): Promise<
         if (empty) items.push({ label: 'Types in the solution — type to search', kind: vscode.QuickPickItemKind.Separator });
         for (const e of r.query.errors) items.push({ label: `$(error) Error: ${e}`, detail: FIND_FILTER_HINT, alwaysShow: true });
         for (const it of r.items) {
-          const icon = it.kind === 'endpoint' ? 'globe' : (it.symbolKind && ICONS[it.symbolKind]) || 'symbol-misc';
+          const icon = it.kind === 'endpoint' ? 'globe' : it.kind === 'client' ? 'link' : (it.symbolKind && ICONS[it.symbolKind]) || 'symbol-misc';
           items.push({
             label: `$(${icon}) ${it.label}`,
             description: findItemDescription(it, r.routeLabels),

@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Stack trace navigation fixture: async methods, lambdas, local functions, generics, overloads, nested types and
+       two files with the same name (Util/Helpers.cs, Shared/Helpers.cs). Never built or run by the tests. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+</Project>

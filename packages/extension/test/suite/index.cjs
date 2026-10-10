@@ -93,7 +93,7 @@ const common = [
       const fsx = require('node:fs');
       const px = require('node:path');
       const w = pkg.contributes.walkthroughs.find((x) => x.id === 'refyntra.getStarted');
-      assert.equal(w.steps.length, 5);
+      assert.equal(w.steps.length, 6);
       for (const st of w.steps) {
         assert.ok(fsx.existsSync(px.join(ext.extensionPath, st.media.markdown)), st.media.markdown);
         assert.match(st.description, /\(command:refyntra\.[A-Za-z.]+\)/, `${st.id} has a command button`);
@@ -1051,6 +1051,64 @@ scenarios['ts-absent'] = [
   ],
 ];
 
+// ---------------------------------------------------------------- delegated Python and Rust routes (no provider installed)
+const DELEGATED_ABSENT = [
+  { name: 'Python', route: 'python.vscode-providers', prefix: 'python', file: 'app/use.py', needle: 'get_order(1)', install: 'Install a Python language extension', query: 'python language server', hint: /Python language extension/ },
+  { name: 'Rust', route: 'rust.vscode-providers', prefix: 'rust', file: 'src/usage.rs', needle: 'get_order(1)', install: 'Install rust-analyzer', query: 'rust-analyzer', hint: /rust-analyzer/ },
+];
+
+scenarios['pyrust-absent'] = [
+  [
+    'the Python and Rust routes are registered as delegated routes next to C# and TS/JS',
+    async () => {
+      const a = await api();
+      const h = a.health();
+      for (const d of DELEGATED_ABSENT) {
+        const r = h.adapters.find((x) => x.providerRouteId === d.route);
+        assert.ok(r, d.route);
+        assert.equal(r.displayName, d.name);
+        for (const v of ['find', 'related', 'rename', 'frameworkRelations']) assert.notEqual(a.capabilityUi(`${d.prefix}.${v}`).title, `${d.prefix}.${v}`);
+      }
+      assert.ok(csharp(h), 'the C# route is still registered');
+      assert.ok(tsRoute(h), 'the TS/JS route is still registered');
+    },
+  ],
+  ...DELEGATED_ABSENT.map((d) => [
+    `no ${d.name} provider installed: Related, Rename, Find and Actions name the missing extension; Health offers the Extensions search`,
+    async () => {
+      const a = await api();
+      const { doc, at } = await tsPosition(d.file, d.needle, 2);
+      await vscode.window.showTextDocument(doc);
+      assert.ok(a.engine.handlesDocument(doc.uri.toString(), doc.languageId), `${d.file} is routed to ${d.name}`);
+      const rel = await a.engine.related(at);
+      assert.equal(rel.kind, 'unavailable', JSON.stringify(rel));
+      assert.equal(rel.reasonCode, 'ProviderUnavailable');
+      assert.match(rel.message, d.hint);
+      const ren = await a.engine.prepareRename(at, 'fetch_order');
+      assert.equal(ren.kind, 'unavailable', JSON.stringify(ren));
+      assert.equal(ren.reasonCode, 'ProviderUnavailable');
+      const route = await waitFor(() => a.health().adapters.find((x) => x.providerRouteId === d.route && x.reasonCode === 'ProviderMissing'), `${d.name} ProviderMissing in Health`);
+      assert.equal(route.state, 'Ready');
+      assert.deepEqual(route.recoveryActions, [{ command: 'workbench.extensions.search', title: d.install, args: [d.query] }]);
+      const find = await a.engine.find('get_order');
+      assert.equal(find.items.filter((i) => i.providerRouteId === d.route).length, 0);
+      assert.ok(find.notes.some((n) => n.startsWith(`${d.name}: `) && /never installs extensions/.test(n)), JSON.stringify(find.notes));
+      const actions = await a.engine.actions(at);
+      const rename = actions.items.find((i) => i.capabilityId === `${d.prefix}.rename`);
+      assert.equal(rename.state, 'unavailable');
+      assert.equal(rename.reasonCode, 'ProviderMissing');
+      assert.equal(actions.items.find((i) => i.capabilityId === `${d.prefix}.frameworkRelations`).reasonCode, 'NoFrameworkModule');
+      const section = await waitFor(() => a.healthPage.model().sections.find((s) => s.adapterId === d.prefix && s.primary), `${d.name} Health section`);
+      assert.match(section.headline, new RegExp(`^${d.name}: no language provider installed`));
+      assert.equal(section.icon, 'warning');
+      assert.equal(section.primary.id, 'searchExtensions');
+      assert.equal(section.primary.label, d.install);
+      assert.equal(section.primary.arg, d.query);
+      assert.match(await healthDocText(), new RegExp(d.name));
+    },
+  ]),
+];
+
 scenarios['ts-delegated'] = [
   ...tsCommon,
   [
@@ -1156,7 +1214,7 @@ scenarios['ts-delegated'] = [
 
 // ---- accessibility -----------------------------------------------------------------------------------
 // Internal commands: invoked by buttons and tree items, hidden from the Command Palette on purpose.
-const INTERNAL_COMMANDS = ['refyntra.openLocation', 'refyntra.runRestore', 'refyntra.related.open', 'refyntra.nativeRename'];
+const INTERNAL_COMMANDS = ['refyntra.openLocation', 'refyntra.runRestore', 'refyntra.related.open', 'refyntra.nativeRename', 'refyntra.stackTrace.openFrame', 'refyntra.stackTrace.related'];
 
 common.push([
   'keyboard: every user command is in the Command Palette and the status bar menu leads to the main ones',
@@ -1321,6 +1379,12 @@ scenarios.efcore = [
 scenarios['rename-file'] = require('./fileRename.cjs').cases({ api, csharp, waitFor });
 // Created files: Move Type to File and Generate handler (test/suite/createFile.cjs).
 scenarios['create-file'] = require('./createFile.cjs').cases({ api, csharp, waitFor });
+// Code Cleanup (test/suite/cleanup.cjs).
+scenarios.cleanup = require('./cleanup.cjs').cases({ api, csharp, waitFor });
+// Stack trace navigation (test/suite/stackTrace.cjs).
+scenarios['stack-trace'] = require('./stackTrace.cjs').cases({ api, csharp, waitFor });
+// Frontend ↔ backend HTTP links (test/suite/fullStack.cjs).
+scenarios['full-stack'] = require('./fullStack.cjs').cases({ api, csharp, waitFor });
 
 exports.run =async function run() {
   const name = process.env.REFYNTRA_TEST_SCENARIO;

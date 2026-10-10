@@ -409,7 +409,7 @@ describe('keyboard reachability of commands (package.json + status bar menu)', (
   const pkg = JSON.parse(readFileSync(resolve(__dirname, '../../package.json'), 'utf8')) as {
     contributes: { commands: Array<{ command: string; title: string; category?: string }>; menus: { commandPalette: Array<{ command: string; when?: string }> }; keybindings: Array<{ command: string; key: string; when: string }> };
   };
-  const INTERNAL = ['refyntra.openLocation', 'refyntra.runRestore', 'refyntra.related.open', 'refyntra.nativeRename'];
+  const INTERNAL = ['refyntra.openLocation', 'refyntra.runRestore', 'refyntra.related.open', 'refyntra.nativeRename', 'refyntra.stackTrace.openFrame', 'refyntra.stackTrace.related'];
 
   it('only internal commands are hidden from the Command Palette; every command has a title and the Refyntra category', () => {
     const hidden = pkg.contributes.menus.commandPalette.filter((m) => m.when === 'false').map((m) => m.command);
@@ -422,7 +422,7 @@ describe('keyboard reachability of commands (package.json + status bar menu)', (
 
   it('every user command is in the status bar menu, or is a Related view toolbar command that the palette offers', () => {
     const inMenu = new Set(MAIN_MENU.map((m) => m.command));
-    const viewToolbar = new Set(['refyntra.showMenu', 'refyntra.related.pin', 'refyntra.related.unpin', 'refyntra.related.refresh']);
+    const viewToolbar = new Set(['refyntra.showMenu', 'refyntra.related.pin', 'refyntra.related.unpin', 'refyntra.related.refresh', 'refyntra.stackTrace.clear']);
     for (const c of pkg.contributes.commands.map((x) => x.command)) {
       if (INTERNAL.includes(c) || viewToolbar.has(c)) continue;
       expect(inMenu.has(c), `${c} is missing from the status bar menu (MAIN_MENU)`).toBe(true);

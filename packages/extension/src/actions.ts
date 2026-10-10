@@ -37,7 +37,7 @@ interface ActionPick extends vscode.QuickPickItem {
 export async function runActions(engine: EngineClient): Promise<void> {
   const ed = vscode.window.activeTextEditor;
   if (!ed) {
-    void vscode.window.showInformationMessage('Refyntra Actions: open a C#, TypeScript or JavaScript file first.');
+    void vscode.window.showInformationMessage('Refyntra Actions: open a C#, TypeScript, JavaScript, Python or Rust file first.');
     return;
   }
   const outcome = await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: 'Refyntra: Actions', cancellable: true }, (_p, token) =>

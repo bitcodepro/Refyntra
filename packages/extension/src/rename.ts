@@ -4,7 +4,7 @@ import { type ApplyOutcome, CancelledError, type EngineClient, type RenamePrevie
 import type { Position } from '@refyntra/contracts';
 import { runRecovery } from './actions';
 import { shortPath, toPosition } from './convert';
-import { fileRenameItems, identifierPattern, previewTitle, renamePreviewSummary } from './renameSummary';
+import { delegatedProviderName, fileRenameItems, identifierPattern, previewTitle, renamePreviewSummary } from './renameSummary';
 import { type PreviewFileModel, decodeUtf8, previewFile } from './textEdits';
 
 export const PREVIEW_SCHEME = 'refyntra-preview';
@@ -60,9 +60,16 @@ export class PreviewContentProvider implements vscode.TextDocumentContentProvide
 }
 
 const isTsJs = (languageId: string) => /^(typescript|javascript)(react)?$/.test(languageId);
+/** Word under the cursor per language (Python: Unicode names; Rust: raw identifiers r#name and lifetimes 'a). */
+function wordPattern(languageId: string): RegExp {
+  if (isTsJs(languageId)) return /[A-Za-z_$][\w$]*/;
+  if (languageId === 'python') return /[\p{XID_Start}_]\p{XID_Continue}*/u;
+  if (languageId === 'rust') return /'?(?:r#)?[\p{XID_Start}_]\p{XID_Continue}*/u;
+  return /@?[A-Za-z_][A-Za-z0-9_]*/;
+}
 
 function identifierAt(doc: vscode.TextDocument, pos: vscode.Position): string {
-  const range = doc.getWordRangeAtPosition(pos, isTsJs(doc.languageId) ? /[A-Za-z_$][\w$]*/ : /@?[A-Za-z_][A-Za-z0-9_]*/);
+  const range = doc.getWordRangeAtPosition(pos, wordPattern(doc.languageId));
   return range ? doc.getText(range) : '';
 }
 
@@ -119,13 +126,13 @@ export async function runRename(engine: EngineClient, previews: PreviewContentPr
   if (!request) {
     const ed = vscode.window.activeTextEditor;
     if (!ed) {
-      void vscode.window.showInformationMessage('Refyntra Rename: place the cursor on a symbol in a C#, TypeScript or JavaScript file.');
+      void vscode.window.showInformationMessage('Refyntra Rename: place the cursor on a symbol in a C#, TypeScript, JavaScript, Python or Rust file.');
       return;
     }
     const doc = ed.document;
     const position = ed.selection.active;
     if (doc.uri.scheme !== 'file' || !engine.handlesDocument(doc.uri.toString(), doc.languageId)) {
-      void vscode.window.showInformationMessage('Refyntra Rename works on C# files of the loaded solution and on TypeScript/JavaScript files. Use the editor Rename (F2) elsewhere.');
+      void vscode.window.showInformationMessage('Refyntra Rename works on C# files of the loaded solution and on TypeScript/JavaScript, Python and Rust files. Use the editor Rename (F2) elsewhere.');
       return;
     }
     const current = identifierAt(doc, position);
@@ -217,7 +224,7 @@ export async function runRename(engine: EngineClient, previews: PreviewContentPr
       if (limited) {
         const ok = await vscode.window.showWarningMessage(
           delegated
-            ? `${outcome.plan.title}: provider-managed semantic coverage — the edits come from the installed TypeScript/JavaScript provider and are not validated semantically by Refyntra.`
+            ? `${outcome.plan.title}: provider-managed semantic coverage — the edits come from the installed ${delegatedProviderName(outcome.plan.providerRouteId)} provider and are not validated semantically by Refyntra.`
             : `${outcome.plan.title}: Refyntra could only partly validate this rename.`,
           { modal: true, detail: `Not checked:\n${outcome.plan.limitations.map((l) => `• ${l}`).join('\n')}\n\nApply anyway? Files are not saved; Undo works in the editor.` },
           'Apply anyway',

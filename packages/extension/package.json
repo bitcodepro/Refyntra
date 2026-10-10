@@ -1,7 +1,7 @@
 {
   "name": "refyntra",
   "displayName": "Refyntra",
-  "description": "A free code companion for writing, analysing and navigating code: find anything, see how code is connected (callers, implementations, tests, request handlers, endpoints, DI registrations), get focused diagnostics and rename safely with a preview. C# is analysed with Roslyn; TypeScript and JavaScript use the installed language features.",
+  "description": "A free code companion for writing, analysing and navigating code: find anything, see how code is connected (callers, implementations, tests, request handlers, endpoints, DI registrations), get focused diagnostics and rename safely with a preview. C# is analysed with Roslyn; TypeScript and JavaScript use the installed language features; Python and Rust use the language extension you install (for example a Python language server or rust-analyzer).",
   "version": "0.1.0",
   "preview": true,
   "publisher": "refyntra",
@@ -10,7 +10,7 @@
   "repository": { "type": "git", "url": "https://github.com/refyntra/refyntra.git" },
   "engines": { "vscode": "^1.90.0" },
   "categories": ["Programming Languages", "Other"],
-  "keywords": ["code navigation", "code analysis", "refactoring", "rename", "csharp", "typescript", "javascript", "dependency injection", "aspnetcore", "mediatr"],
+  "keywords": ["code navigation", "code analysis", "refactoring", "rename", "csharp", "typescript", "javascript", "python", "rust", "dependency injection", "aspnetcore", "mediatr"],
   "main": "./dist/extension.js",
   "activationEvents": ["onStartupFinished", "workspaceContains:**/*.{sln,slnx,csproj}"],
   "capabilities": {
@@ -32,6 +32,7 @@
       { "command": "refyntra.rename", "title": "Rename", "category": "Refyntra" },
       { "command": "refyntra.moveTypeToFile", "title": "Move Type to File", "category": "Refyntra" },
       { "command": "refyntra.generateHandler", "title": "Generate Handler (MediatR)", "category": "Refyntra" },
+      { "command": "refyntra.cleanup", "title": "Code Cleanup", "category": "Refyntra" },
       { "command": "refyntra.showHealth", "title": "Show Health", "category": "Refyntra" },
       { "command": "refyntra.showHealthText", "title": "Show Health (text)", "category": "Refyntra" },
       { "command": "refyntra.restartBackend", "title": "Restart Backend", "category": "Refyntra" },
@@ -49,7 +50,11 @@
       { "command": "refyntra.openLocation", "title": "Open Location", "category": "Refyntra" },
       { "command": "refyntra.runRestore", "title": "Run dotnet restore", "category": "Refyntra" },
       { "command": "refyntra.related.open", "title": "Open Related Item", "category": "Refyntra" },
-      { "command": "refyntra.nativeRename", "title": "Editor Rename (not validated by Refyntra)", "category": "Refyntra" }
+      { "command": "refyntra.nativeRename", "title": "Editor Rename (not validated by Refyntra)", "category": "Refyntra" },
+      { "command": "refyntra.openStackTrace", "title": "Open Stack Trace", "category": "Refyntra", "icon": "$(debug-stackframe)" },
+      { "command": "refyntra.stackTrace.openFrame", "title": "Open Frame", "category": "Refyntra" },
+      { "command": "refyntra.stackTrace.related", "title": "Related", "category": "Refyntra", "icon": "$(references)" },
+      { "command": "refyntra.stackTrace.clear", "title": "Clear Stack Trace", "category": "Refyntra", "icon": "$(clear-all)" }
     ],
     "taskDefinitions": [
       {
@@ -64,16 +69,30 @@
         { "command": "refyntra.runRestore", "when": "false" },
         { "command": "refyntra.related.open", "when": "false" },
         { "command": "refyntra.nativeRename", "when": "false" },
+        { "command": "refyntra.stackTrace.openFrame", "when": "false" },
+        { "command": "refyntra.stackTrace.related", "when": "false" },
+        { "command": "refyntra.stackTrace.clear", "when": "refyntra.stackTraceLoaded" },
         { "command": "refyntra.related.pin", "when": "!refyntra.relatedPinned" },
         { "command": "refyntra.related.unpin", "when": "refyntra.relatedPinned" }
       ],
       "view/title": [
         { "command": "refyntra.related.pin", "when": "view == refyntra.relatedView && !refyntra.relatedPinned", "group": "navigation@1" },
         { "command": "refyntra.related.unpin", "when": "view == refyntra.relatedView && refyntra.relatedPinned", "group": "navigation@1" },
-        { "command": "refyntra.related.refresh", "when": "view == refyntra.relatedView", "group": "navigation@2" }
+        { "command": "refyntra.related.refresh", "when": "view == refyntra.relatedView", "group": "navigation@2" },
+        { "command": "refyntra.openStackTrace", "when": "view == refyntra.stackTraceView", "group": "navigation@1" },
+        { "command": "refyntra.stackTrace.clear", "when": "view == refyntra.stackTraceView && refyntra.stackTraceLoaded", "group": "navigation@2" }
+      ],
+      "view/item/context": [
+        { "command": "refyntra.stackTrace.related", "when": "view == refyntra.stackTraceView && viewItem == refyntra.stackFrame", "group": "inline" }
+      ],
+      "terminal/context": [
+        { "command": "refyntra.openStackTrace", "when": "terminalTextSelected", "group": "9_refyntra" }
+      ],
+      "explorer/context": [
+        { "command": "refyntra.cleanup", "when": "explorerResourceIsFolder || resourceExtname == .cs || resourceExtname == .csproj", "group": "7_modification@90" }
       ],
       "editor/context": [
-        { "submenu": "refyntra.editorContext", "when": "editorLangId =~ /^(csharp|typescript|typescriptreact|javascript|javascriptreact)$/ && resourceScheme == file", "group": "navigation@90" }
+        { "submenu": "refyntra.editorContext", "when": "editorLangId =~ /^(csharp|typescript|typescriptreact|javascript|javascriptreact|python|rust)$/ && resourceScheme == file", "group": "navigation@90" }
       ],
       "refyntra.editorContext": [
         { "command": "refyntra.related", "group": "1_navigate@1" },
@@ -87,9 +106,17 @@
       "activitybar": [{ "id": "refyntra", "title": "Refyntra", "icon": "media/refyntra.svg" }]
     },
     "views": {
-      "refyntra": [{ "id": "refyntra.relatedView", "name": "Refyntra Related", "contextualTitle": "Refyntra" }]
+      "refyntra": [
+        { "id": "refyntra.relatedView", "name": "Refyntra Related", "contextualTitle": "Refyntra" },
+        { "id": "refyntra.stackTraceView", "name": "Refyntra Stack Trace", "contextualTitle": "Refyntra" }
+      ]
     },
     "viewsWelcome": [
+      {
+        "view": "refyntra.stackTraceView",
+        "when": "!refyntra.stackTraceLoaded",
+        "contents": "Paste a stack trace to open its frames in your code: .NET (including async, lambdas, Mono and Unity), JavaScript/TypeScript, Python and Rust. Files are matched by path; .NET frames without a usable file are looked up by symbol. Nothing is run.\n[Open Stack Trace](command:refyntra.openStackTrace)"
+      },
       {
         "view": "refyntra.relatedView",
         "when": "refyntra.welcome == ready || !refyntra.welcome",
@@ -115,12 +142,13 @@
       {
         "id": "refyntra.getStarted",
         "title": "Get started with Refyntra",
-        "description": "Find code, see how it is connected and rename safely: five short steps.",
+        "description": "Find code, see how it is connected and rename safely: six short steps.",
         "steps": [
           {"id": "solution", "title": "Open a C# solution and check Health", "description": "Open a folder with a .sln, .slnx or .csproj. The status bar shows Refyntra: C# Ready when the solution is loaded. The Health page says in one line whether C# works and offers the fix, for example Restore packages.\n[Show Health](command:refyntra.showHealth)", "media": {"markdown": "walkthrough/1-solution.md"}},
           {"id": "related", "title": "See how code is connected (Related)", "description": "Put the cursor on a class, interface or method and open Related.\n[Show Related](command:refyntra.related)", "media": {"markdown": "walkthrough/2-related.md"}},
           {"id": "find", "title": "Find with filters", "description": "Search types, members, files and endpoints. Narrow with type:, member:, project:, route:, method:.\n[Open Find](command:refyntra.find)", "media": {"markdown": "walkthrough/3-find.md"}},
           {"id": "actions", "title": "Actions and safe Rename", "description": "See what you can do at the cursor; rename with a preview, then Apply.\n[Open Actions](command:refyntra.actions)\n[Rename](command:refyntra.rename)", "media": {"markdown": "walkthrough/4-actions-rename.md"}},
+          {"id": "stacktrace", "title": "Open a stack trace", "description": "Paste a .NET, JavaScript/TypeScript, Python or Rust stack trace; click a frame to open the file at the line, or the method found by symbol.\n[Open Stack Trace](command:refyntra.openStackTrace)", "media": {"markdown": "walkthrough/6-stack-trace.md"}},
           {"id": "keys", "title": "Keyboard presets", "description": "Use Visual Studio or ReSharper style shortcuts for Find, Related, Actions and Rename.\n[Choose a preset](command:refyntra.keyboardShortcuts)", "media": {"markdown": "walkthrough/5-keyboard.md"}}
         ]
       }
@@ -150,6 +178,18 @@
           "default": "none",
           "markdownDescription": "Opt-in keybinding preset for Find / Related / Actions / Rename. Presets override some VS Code defaults (e.g. Ctrl+T, Ctrl+.) while active."
         },
+        "refyntra.http.basePaths": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "markdownDescription": "Frontend ↔ backend links (heuristic): path prefixes that client calls add but the ASP.NET routes do not have (for example `/backend` when a dev proxy removes it). By default only exact route matches are linked; a prefix is removed from the client URL only when the exact match finds nothing."
+        },
+        "refyntra.http.origins": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "markdownDescription": "Frontend ↔ backend links (heuristic): absolute origins that are this backend, for example `https://localhost:5001`. Client calls to any other absolute URL are never linked."
+        },
         "refyntra.related.followCursor": {
           "type": "boolean",
           "default": true,
@@ -160,6 +200,13 @@
           "enum": ["debug", "info", "warn", "error"],
           "default": "info",
           "description": "Log level of the Refyntra output channel. Logs never contain source text."
+        },
+        "refyntra.cleanup.profile": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["removeUnnecessaryUsings", "sortUsings", "fileScopedNamespace", "whitespace"] },
+          "uniqueItems": true,
+          "default": ["removeUnnecessaryUsings", "sortUsings", "whitespace"],
+          "markdownDescription": "Fixes pre-selected by **Refyntra: Code Cleanup** (each run can toggle them). Every fix is applied only where Roslyn proves the code means the same; anything else is skipped with the reason in the preview. `fileScopedNamespace` and `whitespace` act only when `.editorconfig` asks for them (`csharp_style_namespace_declarations = file_scoped`, `trim_trailing_whitespace`, `insert_final_newline`). Files are never saved automatically."
         },
         "refyntra.rules.OR1001": {
           "type": "string",
@@ -176,13 +223,13 @@
     },
     "keybindings": [
       { "command": "refyntra.find", "key": "ctrl+,", "mac": "cmd+,", "when": "config.refyntra.keybindings.preset == 'visualStudio'" },
-      { "command": "refyntra.actions", "key": "ctrl+.", "mac": "cmd+.", "when": "config.refyntra.keybindings.preset == 'visualStudio' && editorTextFocus && editorLangId =~ /^(csharp|typescript|typescriptreact|javascript|javascriptreact)$/" },
-      { "command": "refyntra.rename", "key": "ctrl+r ctrl+r", "mac": "cmd+r cmd+r", "when": "config.refyntra.keybindings.preset == 'visualStudio' && editorTextFocus && editorLangId =~ /^(csharp|typescript|typescriptreact|javascript|javascriptreact)$/" },
-      { "command": "refyntra.related", "key": "ctrl+shift+alt+f12", "mac": "cmd+shift+alt+f12", "when": "config.refyntra.keybindings.preset == 'visualStudio' && editorTextFocus && editorLangId =~ /^(csharp|typescript|typescriptreact|javascript|javascriptreact)$/" },
+      { "command": "refyntra.actions", "key": "ctrl+.", "mac": "cmd+.", "when": "config.refyntra.keybindings.preset == 'visualStudio' && editorTextFocus && editorLangId =~ /^(csharp|typescript|typescriptreact|javascript|javascriptreact|python|rust)$/" },
+      { "command": "refyntra.rename", "key": "ctrl+r ctrl+r", "mac": "cmd+r cmd+r", "when": "config.refyntra.keybindings.preset == 'visualStudio' && editorTextFocus && editorLangId =~ /^(csharp|typescript|typescriptreact|javascript|javascriptreact|python|rust)$/" },
+      { "command": "refyntra.related", "key": "ctrl+shift+alt+f12", "mac": "cmd+shift+alt+f12", "when": "config.refyntra.keybindings.preset == 'visualStudio' && editorTextFocus && editorLangId =~ /^(csharp|typescript|typescriptreact|javascript|javascriptreact|python|rust)$/" },
       { "command": "refyntra.find", "key": "ctrl+t", "mac": "cmd+t", "when": "config.refyntra.keybindings.preset == 'resharper'" },
-      { "command": "refyntra.actions", "key": "alt+enter", "mac": "alt+enter", "when": "config.refyntra.keybindings.preset == 'resharper' && editorTextFocus && editorLangId =~ /^(csharp|typescript|typescriptreact|javascript|javascriptreact)$/" },
-      { "command": "refyntra.rename", "key": "ctrl+shift+r", "mac": "cmd+shift+r", "when": "config.refyntra.keybindings.preset == 'resharper' && editorTextFocus && editorLangId =~ /^(csharp|typescript|typescriptreact|javascript|javascriptreact)$/" },
-      { "command": "refyntra.related", "key": "ctrl+shift+g", "mac": "cmd+shift+g", "when": "config.refyntra.keybindings.preset == 'resharper' && editorTextFocus && editorLangId =~ /^(csharp|typescript|typescriptreact|javascript|javascriptreact)$/" }
+      { "command": "refyntra.actions", "key": "alt+enter", "mac": "alt+enter", "when": "config.refyntra.keybindings.preset == 'resharper' && editorTextFocus && editorLangId =~ /^(csharp|typescript|typescriptreact|javascript|javascriptreact|python|rust)$/" },
+      { "command": "refyntra.rename", "key": "ctrl+shift+r", "mac": "cmd+shift+r", "when": "config.refyntra.keybindings.preset == 'resharper' && editorTextFocus && editorLangId =~ /^(csharp|typescript|typescriptreact|javascript|javascriptreact|python|rust)$/" },
+      { "command": "refyntra.related", "key": "ctrl+shift+g", "mac": "cmd+shift+g", "when": "config.refyntra.keybindings.preset == 'resharper' && editorTextFocus && editorLangId =~ /^(csharp|typescript|typescriptreact|javascript|javascriptreact|python|rust)$/" }
     ]
   },
   "scripts": {

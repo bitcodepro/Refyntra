@@ -69,6 +69,8 @@ export interface PrepareRequest {
   targetFolderUri?: string;
   /** Move Type to File: the document of the cursor. */
   documentUri?: string;
+  /** Code Cleanup: the scope and the fixes. */
+  cleanup?: import('@refyntra/contracts').CleanupParams;
 }
 
 export interface DelegatedRenameRequest {
@@ -129,6 +131,8 @@ export interface LanguageAdapter {
   dispose(): Promise<void>;
   /** Present on delegated routes (descriptor.ownership 'delegated') that offer rename. */
   readonly delegatedRename?: DelegatedRenamePort;
+  /** Optional (protocol 1.4): the source symbol of a .NET stack frame (stack trace navigation). */
+  resolveFrame?(req: import('@refyntra/contracts').ResolveFrameRequest, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').ResolveFrameResult>>;
   /** Optional: rule analysis (`analysis/run`, e.g. OR1001) on the current snapshot. */
   analyze?(params: { uri?: string }, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').AnalysisRunResult>>;
 }
@@ -145,6 +149,8 @@ export interface FrameworkRelatedInput {
   languageResult: RouteResult<RelatedResult>;
   language: LanguageAdapter;
   token?: CancellationToken;
+  /** The document position Related was asked for (additive; absent when Related ran on a symbol id). */
+  target?: { uri: string; position: Position };
 }
 
 /**
@@ -154,6 +160,11 @@ export interface FrameworkRelatedInput {
 export interface FrameworkAdapter {
   readonly descriptor: FrameworkDescriptor;
   related(input: FrameworkRelatedInput): Promise<AnyRelation[]>;
+  /**
+   * Optional: relations at a document position when the language route gave no result there (e.g. the cursor is in a
+   * URL string, where the language provider knows no symbol). Only text-pattern modules (HTTP links) offer it.
+   */
+  relatedWithoutLanguage?(target: { uri: string; position: Position }, token?: CancellationToken): Promise<AnyRelation[]>;
 }
 
 function extensionOf(uri: string): string {

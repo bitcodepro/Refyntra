@@ -69,6 +69,47 @@ function tsProject(name) {
   return { workspace: root, cleanup: () => fs.rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }) };
 }
 
+/**
+ * A temp Python + Rust mini-project for the delegated Python and Rust routes (generic code; nothing in the repository
+ * is modified). No Python or Rust language extension is installed in the test profile.
+ */
+function pyRustProject(name) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `refyntra-${name}-`));
+  fs.mkdirSync(path.join(root, 'app'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'app', '__init__.py'), '');
+  fs.writeFileSync(path.join(root, 'app', 'orders.py'), `def get_order(order_id):
+    return order_id
+
+
+class OrderService:
+    def load(self):
+        return get_order(1)
+`);
+  fs.writeFileSync(path.join(root, 'app', 'use.py'), `from app.orders import get_order
+
+first = get_order(1)
+`);
+  fs.writeFileSync(path.join(root, 'Cargo.toml'), `[package]
+name = "orders"
+version = "0.1.0"
+edition = "2021"
+`);
+  fs.writeFileSync(path.join(root, 'src', 'lib.rs'), `mod usage;
+
+pub fn get_order(id: u32) -> u32 {
+    id
+}
+`);
+  fs.writeFileSync(path.join(root, 'src', 'usage.rs'), `use crate::get_order;
+
+pub fn first() -> u32 {
+    get_order(1)
+}
+`);
+  return { workspace: root, cleanup: () => fs.rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }) };
+}
+
 /** Copies tests/fixtures/<fixture> (+ the shielding Directory.* files) into a fresh temp folder and restores it. */
 function fixtureCopy(name, fixture, sln) {
   const fixtures = path.join(repo, 'tests', 'fixtures');
@@ -164,6 +205,30 @@ const scenarios = e2e
         trusted: true,
         env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' },
       },
+      // Code Cleanup on a temp copy of the Cleanup fixture: clean up a folder, apply (not saved), Undo; stale plan.
+      {
+        name: 'cleanup',
+        fixtureCopy: ['Cleanup', 'Cleanup.sln'],
+        trusted: true,
+        settings: { 'refyntra.rename.apply': true, 'files.autoSave': 'off' },
+        env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' },
+      },
+      // Stack trace navigation on a temp copy of the StackTraces fixture (path-suffix matching, ambiguity, by symbol).
+      {
+        name: 'stack-trace',
+        fixtureCopy: ['StackTraces', 'StackTraces.csproj'],
+        trusted: true,
+        env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' },
+      },
+      // Frontend ↔ backend HTTP links (heuristic) on a temp copy of the FullStack fixture (Minimal API + MVC + a TS
+      // frontend), with the built-in TypeScript extension enabled.
+      {
+        name: 'full-stack',
+        fixtureCopy: ['FullStack', 'FullStack.sln'],
+        builtinExtensions: true,
+        trusted: true,
+        env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' },
+      },
       // A target saved in Windows-1251 (not UTF-8): the apply must be refused and no file may change.
       {
         name: 'rename-nonutf8',
@@ -197,6 +262,9 @@ const scenarios = e2e
       // TS/JS provider absent for a document: a .ts file (routed to the TS/JS route by its extension) whose language
       // mode is Plain Text, so no TypeScript provider answers for it.
       { name: 'ts-absent', tsProject: true, trusted: true, env: { REFYNTRA_HOST_PATH: '' } },
+      // Python and Rust with no language extension installed (empty extensions dir, --disable-extensions): every
+      // feature names the missing provider and Health offers the Extensions view search (never an install).
+      { name: 'pyrust-absent', pyRustProject: true, trusted: true, env: { REFYNTRA_HOST_PATH: '' } },
       // Accessibility: the same flows under the built-in high contrast theme.
       { name: 'high-contrast', workspace: path.join(here, 'workspaces', 'tiny'), trusted: true, settings: { 'workbench.colorTheme': 'Default High Contrast' }, env: { REFYNTRA_HOST_PATH: '' } },
     ];
@@ -221,6 +289,9 @@ for (const s of scenarios.filter((x) => only.length === 0 || only.includes(x.nam
     s.workspace = copy.workspace;
   } else if (s.tsProject) {
     copy = tsProject(s.name);
+    s.workspace = copy.workspace;
+  } else if (s.pyRustProject) {
+    copy = pyRustProject(s.name);
     s.workspace = copy.workspace;
   }
   // builtinExtensions: keep VS Code's built-in extensions (TypeScript language features); the extensions dir stays

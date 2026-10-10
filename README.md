@@ -211,6 +211,38 @@ write the target in the very last moment (VS Code refuses to overwrite; reported
 or computed imports are not inspected (computed imports refuse the action); between the create and a save of the
 original file the type exists twice on disk, so a command-line build in that moment reports a duplicate.
 
+## Code Cleanup
+
+**Refyntra: Code Cleanup** (Command Palette, the status bar menu, or right-click a folder, `.cs` or `.csproj` file in the
+Explorer) runs a small, explicit set of fixes over the current file, a folder, a project or the whole workspace, and
+shows **one preview** for all files before anything changes. The fixes pre-selected come from
+`refyntra.cleanup.profile`; each run lets you toggle them.
+
+| Fix | What it does | When it acts |
+|---|---|---|
+| Remove unnecessary usings | Removes the usings the C# compiler reports as unnecessary (CS8019) in every project context of the file. The same result as VS Code's *Organize Imports*, but across many files with one preview | Always; global usings are never removed; a using needed only by a `<see cref>` stays |
+| Sort usings | Only the order: global, then namespaces, `using static`, aliases; System first | `dotnet_sort_system_directives_first` (default true) from `.editorconfig`; groups separated by blank lines are sorted on their own |
+| File-scoped namespace | `namespace N { … }` → `namespace N;`, body dedented one level | Only when `.editorconfig` sets `csharp_style_namespace_declarations = file_scoped`, the project compiles with C# 10 or later and the file has exactly one namespace and no code outside it |
+| Trailing whitespace and final newline | Text only | Only what `.editorconfig` asks for: `trim_trailing_whitespace = true`, `insert_final_newline = true` (never inside a string or code disabled by `#if`). VS Code's `files.*` settings are not read |
+
+**Guarantees.** Each change is kept only when Roslyn proves that the code means the same: for every loaded project
+context of the file, every name, expression and type binds to the same symbol with the same type, every declaration
+declares the same symbol, every literal (strings included) has the same value and no diagnostic appears (doc comments
+are bound too). Every fix is idempotent: running Code Cleanup on its own result changes nothing. The plan goes through
+the same pipeline as Rename: read set, revalidation after you confirm, one EditApplier, per-file reconciliation. Files
+are edited in the editor and **never saved**; **Undo** (offered after the apply) restores every file that still has the
+applied text.
+
+**Skipped, with the reason in the preview:** generated files and build output, read-only files, files not saved as
+UTF-8, files with mixed line endings, files over 512 KB, files of projects that are not completely loaded; usings and
+namespaces of files that use `#if` (other build configurations cannot be checked); any change the semantic proof does
+not accept. A scope of more than 2000 C# files is refused (choose a folder or a project).
+
+**Not offered:** the IDE code-style fixes that `.editorconfig` can configure (IDExxxx, for example `var` preferences or
+expression bodies). Their analyzers and code fixes live in Roslyn's IDE layers as internal types that are reachable only
+through MEF; Refyntra uses public Roslyn APIs only. Use VS Code's code actions or `dotnet format` for these. Formatting is
+not changed either (use Format Document).
+
 ## TypeScript and JavaScript (delegated)
 
 For `.ts`, `.tsx`, `.js`, `.jsx` (and `.mts`, `.cts`, `.mjs`, `.cjs`) files, Find, Related, Actions and Rename are
@@ -231,6 +263,116 @@ rename provider of its own.
 - When no TypeScript/JavaScript provider answers (the built-in extension is disabled, still starting, or the file is
   not in a TS/JS language mode) features say so instead of showing an empty result.
 
+## Python and Rust (delegated)
+
+Python (`.py`, `.pyi`) and Rust (`.rs`) files use the same delegated route as TypeScript/JavaScript: Find, Related,
+Actions and Rename call only VS Code's public provider commands and are answered by the language extension **you**
+install. Refyntra bundles none and never installs one.
+
+- **Python** needs a Python language extension with a language server, for example the open-source Python extension
+  with Pyright, basedpyright or Jedi. No particular (or proprietary) language server is required.
+- **Rust** needs the rust-analyzer extension (and a Cargo project for the file).
+- When no provider answers for a Python or Rust file, the Health page says *Python: no language provider installed*
+  (or *Rust: …*) with one button, **Install a Python language extension** / **Install rust-analyzer**, which only
+  opens the Extensions view with a search. Find, Related, Actions and Rename give the same reason instead of an empty
+  result.
+- **Find** items are labelled `Python (delegated)` / `Rust (delegated)`; never a complete index. **Related** shows
+  declarations and references; there are no framework relations for Python or Rust.
+- **Rename** follows the TS/JS rules: provider-managed semantic coverage, always *limited*, the provider is asked again
+  before the apply and must return the identical edit on unchanged files, resource and other non-text edits are
+  refused, and the editor's own Rename is offered as *not validated by Refyntra* when safety cannot be confirmed. The
+  new name is checked first: Python identifiers (Unicode letters allowed, hard keywords refused); Rust identifiers and
+  raw identifiers (`r#match`; a keyword needs `r#`), and a lifetime (`'a`) only for a lifetime.
+- **Python limits**: dynamic attribute access (`getattr`/`setattr`/`__getattr__`), names inside strings (such as
+  `__all__` entries) and other runtime lookups are not covered; a rename that touches a module path in an `import`
+  is refused, because the provider may rename or move the module file and the public API cannot show that.
+- **Rust limits**: edits inside a `macro_rules!` definition are refused (Refyntra cannot check what the macro expands
+  to); names used inside macro invocations are renamed only as far as rust-analyzer resolves the expansion; code
+  disabled by `cfg` or Cargo features the provider does not analyse may keep the old name; a rename that touches a
+  `mod name;` declaration is refused (the module file would be renamed).
+
+## Frontend ↔ backend (heuristic)
+
+In a workspace with an ASP.NET Core backend and a TypeScript/JavaScript frontend, Refyntra links a client call to the
+endpoint it calls. Every such link is **heuristic**: it comes from the literal URL text and the route template, never
+from running anything, and it says so (confidence "heuristic", a "Heuristic" limitation, provenance `http.links`).
+
+- **From a call** (cursor on the `fetch`/`axios` line, also inside the URL string): Related shows the endpoint under
+  **Endpoints** ("Client call GET /api/Orders/{id:int}") and its action or Minimal API handler under **Handlers**.
+- **From an endpoint** (an MVC action, a Minimal API handler method, or a controller): Related shows the group
+  **Clients** with the call sites.
+- **Find `client:`** lists the client calls that are not linked, with the reason (no matching route, another host,
+  URL not resolvable, ambiguous); `client:all` lists every recognised call; text after `client:` filters by URL or file.
+
+Recognised calls: `fetch(url[, { method }])` (also `window.`/`globalThis.`/`self.fetch`); `axios.get/post/put/delete/
+patch/head/options(url)`, `axios(url[, { method }])`, `axios({ url, method })`, `axios.request({ url, method })`, and
+instances made in the same file with `axios.create({ baseURL })`; Angular `HttpClient` (`this.http.get<T>(url)`, a
+receiver named `http`, `httpClient` or `_http`) and AngularJS `$http.get(url)`/`$http({ url, method })`; `ky.get(url)`/
+`ky(url[, { method }])`; `superagent.get(url)` (also a same-file default import of `axios`, `ky` or `superagent` under
+another name). The URL may be a string literal, a template literal (each `${…}` is a route parameter), a `+`
+concatenation of those with variables (`'/api' + '/orders/' + id`), or a `const` of the same file. Anything else
+(a base URL from another file or from configuration, a URL built in a helper, a computed method) is not linked.
+
+Matching: leading and trailing slashes are ignored, literal segments compare case-insensitively, `{id}`, `{id:int}`,
+`{id?}`, `{id=1}` and `{*rest}` are route parameters (simple constraints such as `int`, `guid`, `bool` are checked
+against literal client segments), a client parameter (`${id}`, `+ id`, `:id`) matches only a route parameter, query
+strings are ignored, and the HTTP method must match when the call states it. Where several routes fit, the most
+specific wins as in ASP.NET routing (a literal segment beats a parameter); routes that fit equally well are all shown,
+marked "ambiguous". Routes marked dynamic are never matched. Absolute URLs (`https://host/...`) are linked only when
+their origin is listed in `refyntra.http.origins`. By default only exact routes match; `refyntra.http.basePaths` names
+prefixes that the client adds but the backend does not see (for example a dev proxy), tried only when the exact match
+finds nothing.
+
+The workspace scan reads `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.mts` and `.cts` files once, when the Clients
+group or `client:` is first needed, and then follows saves and file changes. It applies `files.exclude` and
+`search.exclude`, skips `node_modules`, `bower_components`, `dist`, `build`, `out`, `bin`, `obj`, `coverage`, `.git` and
+framework output folders, `.d.ts` and minified files, files over 512 KB and anything past 5000 files. Not modelled:
+`.gitignore` itself, proxies, rewrites, API gateways, API versioning by header, OpenAPI-generated clients, GraphQL,
+SignalR, and calls whose URL comes from another file.
+
+## Stack traces
+
+**Refyntra: Open Stack Trace** reads a stack trace you paste and lists its frames in the **Refyntra Stack Trace** view,
+grouped by exception (with the message; inner exceptions nested). Take the trace from the clipboard, the editor
+selection, the terminal selection (also from the terminal's context menu) or a new editor to paste into; from the Debug
+Console, copy it first and choose *Clipboard*. Log prefixes (timestamps, levels, ANSI colours) are ignored.
+
+Recognised formats:
+
+- **.NET**: `at Ns.Type.Method(Int32 id) in C:\src\File.cs:line 42` (Windows and Linux paths), frames without file
+  information, async state machines (`<Method>d__5.MoveNext()`), lambdas (`<>c__DisplayClass…`, `<Method>b__0`), local
+  functions (`<Method>g__Local|0_0`), generic types and methods (`` Repo`1.Get[T] ``), constructors (`..ctor`), inner
+  exceptions (`--->`, `--- End of inner exception stack trace ---`), `--- End of stack trace from previous location ---`
+  (shown as *after await*), Mono (`[0x0001c] in /path/File.cs:42`, `<filename unknown>`), Unity
+  (`Type.Method () (at Assets/File.cs:42)`, `Type:Method (object)`), ASP.NET logs, and German/French-style localised
+  `at`/`line` words when the file part is present.
+- **JavaScript/TypeScript**: V8 (`at fn (file:line:col)`, `at async fn`, `at new C`, `file://` and `webpack://` paths)
+  and Firefox/Safari (`fn@file:line:col`).
+- **Python**: `File "x.py", line N, in fn` tracebacks, including chained exceptions.
+- **Rust**: panics (`thread 'main' panicked at src/main.rs:10:5:`, and the older `'msg', file:line:col` form) and
+  `RUST_BACKTRACE` backtraces (`N: crate::fn` + `at file:line:col`).
+
+Each frame says in words whether it is **your code**, **external** (System.*, Microsoft.*, node_modules, site-packages,
+std::…; runs of external frames are collapsed), matches **several files**, will be found **by symbol**, or its **file
+is not in the workspace**. Click a frame (or press Enter) to open it; the **Related** button of a frame opens it and
+shows Related there.
+
+- **Files**: the printed path is used when it exists; otherwise it is matched to workspace files by the longest path
+  suffix (`D:\agent\_work\1\s\src\App\Orders.cs` → `src/App/Orders.cs`). `\` and `/` are equal; Windows and macOS
+  compare case-insensitively, Linux case-sensitively. When several files match equally, you choose.
+- **Line may have moved**: when the frame's line is past the end of the file, Refyntra says so (it compares with the
+  file's current line count only; there is no history lookup) and, for .NET, finds the method by symbol instead.
+- **By symbol (.NET)**: a frame without a usable file is looked up in the loaded solution by type, method, generic
+  arity and parameter types. **Proven** = exact metadata type name and parameter types of one overload; **likely** =
+  matched by name (async, lambda and local-function frames do not show the user method's parameters). Several
+  candidates are offered in a list with the reason.
+
+Limits: this is navigation, not debugging. Nothing is executed and nothing is sent anywhere. A symbol that is not in
+the loaded code (removed, renamed, generated or from a package) is reported as not found; Refyntra does not recover
+it, and does not use PDBs, source link or decompilation. Symbol lookup needs the C# backend (trusted workspace,
+solution loaded); JavaScript/TypeScript, Python and Rust frames are opened by file path only. Lambdas open at their
+enclosing method, not the lambda itself.
+
 ## Commands
 
 | Command | Purpose |
@@ -241,6 +383,7 @@ rename provider of its own.
 | `refyntra.rename` | Rename with preview, then apply |
 | `refyntra.moveTypeToFile` | Move the type at the cursor into its own file (preview, then apply) |
 | `refyntra.generateHandler` | Create a MediatR handler for the request at the cursor (preview, then apply) |
+| `refyntra.cleanup` | Code Cleanup of a file, folder, project or the workspace (one preview, then apply, Undo) |
 | `refyntra.showHealth` | The Health page: is Refyntra working, what it means, the fix, projects by state |
 | `refyntra.showHealthText` | The same report as a Markdown document, technical details included |
 | `refyntra.restartBackend` | Restart the .NET host |
@@ -249,6 +392,7 @@ rename provider of its own.
 | `refyntra.showMenu` | The menu of main commands (also a click on the status bar item) |
 | `refyntra.getStarted` | Open the *Get started with Refyntra* walkthrough |
 | `refyntra.keyboardShortcuts` | Open the `refyntra.keybindings.preset` setting |
+| `refyntra.openStackTrace` | Read a pasted stack trace (.NET, JavaScript/TypeScript, Python, Rust) and open its frames |
 | `refyntra.findHandler` / `refyntra.findEndpoint` / `refyntra.findRegistration` | Find, narrowed to handlers, endpoints or DI registrations (the same search as Find, with a preset filter) |
 | `refyntra.nativeRename` | (not in the palette) The editor's own Rename, offered when a TS/JS rename cannot be confirmed safe; not validated by Refyntra |
 
@@ -259,7 +403,10 @@ rename provider of its own.
 | `refyntra.hostPath` | path, machine scope | Use a host build from this location instead of the packaged one (development use). Only user or machine settings, never workspace settings, so a project cannot choose the executable |
 | `refyntra.keybindings.preset` | `none` (default), `visualStudio`, `resharper` | Optional keybinding preset |
 | `refyntra.rename.apply` | boolean, default on | Offer **Apply rename** after the preview (revalidated after you confirm, not saved). Off = preview-only |
+| `refyntra.cleanup.profile` | list of fix ids, default `removeUnnecessaryUsings`, `sortUsings`, `whitespace` | Fixes pre-selected by Code Cleanup (`fileScopedNamespace` is opt-in) |
 | `refyntra.related.followCursor` | boolean, default on | The Related view follows the cursor unless it is pinned |
+| `refyntra.http.basePaths` | list of path prefixes, default empty | Frontend ↔ backend links: prefixes that client URLs add but the routes do not have (tried only when the exact match finds nothing) |
+| `refyntra.http.origins` | list of origins, default empty | Frontend ↔ backend links: absolute origins (`https://localhost:5001`) that are this backend; other absolute URLs are never linked |
 | `refyntra.rules.OR1001` | `off`, `information`, `warning` (default) | Severity of the experimental OR1001 rule in the Problems view |
 | `refyntra.trace.level` | `info` (default) and other levels | Detail of the Refyntra output log. Source text is never logged |
 

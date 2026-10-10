@@ -268,6 +268,25 @@ export class VsCodeEditApplier implements EditApplier {
     }
   }
 
+  /**
+   * Undo of applied text edits (Code Cleanup): replaces each open document's text with `text` only while its current
+   * text still hashes to `fromHash` (checked synchronously right before the edit starts). One workspace edit, not saved.
+   * Returns false when a document is not open or changed (nothing is edited then).
+   */
+  async restoreTexts(items: readonly { uri: string; fromHash: string; text: string }[]): Promise<boolean> {
+    const edit = new vscode.WorkspaceEdit();
+    for (const item of items) {
+      const doc = openDocument(vscode.Uri.parse(item.uri, true));
+      if (!doc || sha256(doc.getText()) !== item.fromHash) return false;
+      edit.replace(doc.uri, new vscode.Range(doc.positionAt(0), doc.positionAt(doc.getText().length)), item.text);
+    }
+    try {
+      return await vscode.workspace.applyEdit(edit);
+    } catch {
+      return false;
+    }
+  }
+
   /** confirmed = the file exists with exactly the planned text (editor buffer or disk); failed = it does not exist. */
   private reconcileCreate(c: CreateTarget, accepted: boolean): { status: ApplyResourceReport['status']; detail?: string } {
     const doc = openDocument(c.uri);

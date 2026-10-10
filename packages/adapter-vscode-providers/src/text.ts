@@ -84,19 +84,28 @@ export function textInRange(text: string, start: Position, end: Position): strin
   }
 }
 
-/** The JS/TS identifier around a position (`$` and `_` allowed). */
-export function identifierAt(text: string, p: Position): string | undefined {
+/** The identifier around a position: JS/TS by default (`$` and `_` allowed) (`pattern` is matched globally on the line). */
+export function identifierAt(text: string, p: Position, pattern: RegExp = /[A-Za-z_$][\w$]*/g): string | undefined {
   const starts = lineStarts(text);
   const s = starts[p.line];
   if (s === undefined) return undefined;
   const end = p.line + 1 < starts.length ? starts[p.line + 1]! : text.length;
   const line = text.slice(s, end);
-  const re = /[A-Za-z_$][\w$]*/g;
+  const re = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`);
   for (const m of line.matchAll(re)) {
     const a = m.index ?? 0;
     if (a <= p.character && p.character <= a + m[0].length) return m[0];
   }
   return undefined;
+}
+
+/** Offset of a position in the text, or undefined when it does not fit. */
+export function offsetAt(text: string, p: Position): number | undefined {
+  try {
+    return offsetOf(text, lineStarts(text), p);
+  } catch {
+    return undefined;
+  }
 }
 
 export function basename(uri: string): string {

@@ -55,6 +55,8 @@ public sealed class RenamePlan
     public string ActionId { get; init; } = "csharp.rename";
     /// <summary>Generate handler: the folders the handler can be created in (first = default), with the chosen one.</summary>
     public CreateFileOffer? CreateFileOffer { get; init; }
+    /// <summary>Code Cleanup (csharp.cleanup): the fixes, per file per fix counts and the skipped files with reasons.</summary>
+    public Cleanup.CleanupReport? Cleanup { get; init; }
 }
 
 public sealed record RenameOutcome(RenamePlan? Plan, string? ReasonCode, string? Message)

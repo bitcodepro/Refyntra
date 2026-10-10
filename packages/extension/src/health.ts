@@ -166,6 +166,10 @@ export class HealthPage implements vscode.Disposable {
         await vscode.env.clipboard.writeText(renderHealth(this.engine.health(), { solution: this.solution() }));
         void vscode.window.showInformationMessage('Refyntra: the health report was copied to the clipboard.');
         return;
+      case 'searchExtensions':
+        // Opens the Extensions view with the query from the adapter's own recovery (never installs anything).
+        if (a.arg && /^[\w @:".-]{1,80}$/.test(a.arg)) await vscode.commands.executeCommand('workbench.extensions.search', a.arg);
+        return;
       case 'showText':
         await vscode.commands.executeCommand(HEALTH_TEXT_COMMAND);
         return;

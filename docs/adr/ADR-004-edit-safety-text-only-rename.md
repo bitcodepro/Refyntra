@@ -96,3 +96,26 @@ The same revisit criterion is met for a second resource operation: creating one 
 - Residual risks: no transaction across file and text operations; a last-moment external write to the target (the
   editor refuses to overwrite; reported); MSBuild items from packages/SDK not inspected; the created file is on disk while
   the original edit is unsaved, so a build from disk in between sees the type twice.
+
+## Amendment 3: Code Cleanup (many files, text only)
+
+Code Cleanup (`csharp.cleanup`, protocol 1.4) uses the plan pipeline of this ADR unchanged: a text-only `writeSet`
+(possibly many files), the read set of the edited projects and their dependencies, revalidation after the confirmation,
+the single EditApplier with its synchronous hash checks, per-file reconciliation, no save, no automatic rollback. What
+is new is only around it:
+
+- The plan has no symbol: `refactor/prepare` takes `cleanup: {scopeUris, fixes}` and the plan carries
+  `cleanup: {fixes, files, skipped, filesInScope}` (per file per fix counts, skipped files and fixes with reasons) for the
+  preview. The client refuses a cleanup plan with anything but text changes.
+- The safety proof is per change, not a compilation delta: each fix returns a text only when the semantic fingerprint of
+  the file (symbol of every name/expression/type with its type and converted type, declared symbols, literal values,
+  diagnostics; doc comments parsed) equals the original in every project context; otherwise the fix is skipped in that
+  file with the reason. This is sufficient because the fixes never change what other files see (no global usings, no
+  declarations). Each fix is idempotent.
+- Files the EditApplier could not edit exactly (generated, read-only, not UTF-8, mixed line endings, too large) are
+  skipped with a reason instead of refusing the whole plan.
+- Undo restores the previewed original of every file that still has exactly the applied text, through the EditApplier
+  (one workspace edit, not saved); a file changed meanwhile is left alone and reported. The editor's own multi-file undo
+  is not used because it asks a modal question per file group.
+- IDE code-style fixes (IDExxxx) are not offered: their analyzers and code fix providers are internal Roslyn types reached
+  through MEF, and Refyntra uses public APIs only.

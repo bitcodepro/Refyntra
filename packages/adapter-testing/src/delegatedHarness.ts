@@ -1,8 +1,8 @@
 import { DelegatedProviderAdapter } from '@refyntra/adapter-vscode-providers';
-import type { CommandExecutor } from '@refyntra/adapter-vscode-providers';
+import type { CommandExecutor, DelegatedLanguage } from '@refyntra/adapter-vscode-providers';
 import { AdapterRegistry, DocumentTracker, ProtocolLanguageAdapter, RefyntraEngine } from '@refyntra/application';
 import { FakeClock, FixtureWiringFramework, MemoryLogger, WorldEditApplier } from './fakes';
-import { FakeProviderWorld } from './fakeProviders';
+import { type FakeSyntax, FakeProviderWorld } from './fakeProviders';
 import { sha256 } from './fixtureEngine';
 import { FixtureRoute, fixtureDescriptor } from './harness';
 import { FixtureWorld } from './fixtureEngine';
@@ -24,6 +24,11 @@ export interface DelegatedWorkspaceOptions {
   fixtureFiles?: Record<string, string>;
   /** Wraps the fake command executor (e.g. to duplicate or corrupt results). */
   wrapCommands?: (inner: CommandExecutor) => CommandExecutor;
+  /** The delegated language family (default: TypeScript/JavaScript) and the fake provider's syntax for it. */
+  language?: DelegatedLanguage;
+  syntax?: FakeSyntax;
+  /** Provider probe delays after a document opens (languages that report a missing provider). */
+  probeDelaysMs?: readonly number[];
 }
 
 export interface DelegatedWorkspace {
@@ -41,14 +46,14 @@ export interface DelegatedWorkspace {
   dispose(): Promise<void>;
 }
 
-const languageOf = (uri: string) => (uri.endsWith('.tsx') ? 'typescriptreact' : uri.endsWith('.jsx') ? 'javascriptreact' : /\.[cm]?js$/.test(uri) ? 'javascript' : 'typescript');
+const languageOf = (uri: string) => (uri.endsWith('.py') || uri.endsWith('.pyi') ? 'python' : uri.endsWith('.rs') ? 'rust' : uri.endsWith('.tsx') ? 'typescriptreact' : uri.endsWith('.jsx') ? 'javascriptreact' : /\.[cm]?js$/.test(uri) ? 'javascript' : 'typescript');
 
 /**
  * Composition root for delegated-route tests: the same RefyntraEngine and registry as production, the real
  * DelegatedProviderAdapter, and a fake of VS Code's public provider commands instead of the editor.
  */
 export function createDelegatedWorkspace(o: DelegatedWorkspaceOptions = {}): DelegatedWorkspace {
-  const world = new FakeProviderWorld(o.files ?? TS_FILES);
+  const world = new FakeProviderWorld(o.files ?? TS_FILES, o.syntax);
   const tracker = new DocumentTracker();
   const registry = new AdapterRegistry();
   const logger = new MemoryLogger();
@@ -77,6 +82,8 @@ export function createDelegatedWorkspace(o: DelegatedWorkspaceOptions = {}): Del
   }
 
   const adapter = new DelegatedProviderAdapter({
+    ...(o.language ? { language: o.language } : {}),
+    ...(o.probeDelaysMs ? { probeDelaysMs: o.probeDelaysMs } : {}),
     workspaceId,
     commands: o.wrapCommands ? o.wrapCommands(world.commands) : world.commands,
     values: world.values,

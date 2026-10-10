@@ -9,6 +9,8 @@ import type {
   RecoveryAction,
   RefactorPlanDto,
   RelatedResult,
+  ResolveFrameRequest,
+  ResolveFrameResult,
   RevalidateResult,
   ScopeDetails,
   SearchResult,
@@ -607,7 +609,7 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
 
   prepare(req: PrepareRequest, token?: CancellationToken): Promise<RouteResult<PrepareResult>> {
     return this.semantic('refactor/prepare', token, (s, snapshotId, traceId) =>
-      s.transport.request('refactor/prepare', { traceId, workspaceId: this.opts.workspaceId, snapshotId, actionId: req.actionId, symbolId: req.symbolId, newName: req.newName, ...(req.renameFile ? { renameFile: true } : {}), ...(req.targetFolderUri ? { targetFolderUri: req.targetFolderUri } : {}), ...(req.documentUri ? { documentUri: req.documentUri } : {}) }, token),
+      s.transport.request('refactor/prepare', { traceId, workspaceId: this.opts.workspaceId, snapshotId, actionId: req.actionId, symbolId: req.symbolId, newName: req.newName, ...(req.renameFile ? { renameFile: true } : {}), ...(req.targetFolderUri ? { targetFolderUri: req.targetFolderUri } : {}), ...(req.documentUri ? { documentUri: req.documentUri } : {}), ...(req.cleanup ? { cleanup: req.cleanup } : {}) }, token),
     );
   }
 
@@ -641,6 +643,23 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
             : [],
           abstentions: Array.isArray(r?.abstentions) ? r.abstentions.filter((a) => a && typeof a.reason === 'string') : [],
           completeness: r?.completeness ?? 'unknown',
+          snapshotId: r?.snapshotId ?? snapshotId,
+        };
+      },
+      (v) => v.snapshotId,
+    );
+  }
+
+  /** Stack trace navigation (protocol 1.4): candidate source symbols of a .NET frame. */
+  resolveFrame(req: ResolveFrameRequest, token?: CancellationToken): Promise<RouteResult<ResolveFrameResult>> {
+    return this.semantic(
+      'code/resolveFrame',
+      token,
+      async (s, snapshotId, traceId) => {
+        if (s.protocolMinor < 4) return { candidates: [], snapshotId };
+        const r = await s.transport.request('code/resolveFrame', { traceId, workspaceId: this.opts.workspaceId, snapshotId, ...req }, token);
+        return {
+          candidates: Array.isArray(r?.candidates) ? r.candidates.filter((c) => c && c.symbol && c.location && typeof c.location.uri === 'string') : [],
           snapshotId: r?.snapshotId ?? snapshotId,
         };
       },

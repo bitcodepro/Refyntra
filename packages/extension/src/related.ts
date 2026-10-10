@@ -67,7 +67,7 @@ export class RelatedViewProvider implements vscode.TreeDataProvider<Node>, vscod
   async showForActiveEditor(): Promise<void> {
     const ed = vscode.window.activeTextEditor;
     if (!ed) {
-      void vscode.window.showInformationMessage('Refyntra Related: open a C#, TypeScript or JavaScript file and place the cursor on a symbol.');
+      void vscode.window.showInformationMessage('Refyntra Related: open a C#, TypeScript, JavaScript, Python or Rust file and place the cursor on a symbol.');
       return;
     }
     await this.load(ed.document.uri.toString(), ed.selection.active);

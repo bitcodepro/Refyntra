@@ -19,8 +19,9 @@ public sealed class Engine : IRpcHandler, IDisposable
     /// 1.2: refactor/prepare renameFile, PlannedChange kind "rename", fileRename offer, workspace/didRenameFiles.
     /// 1.3: actions csharp.moveTypeToFile / csharp.generateHandler, PlannedChange kind "create", fileCreate offer,
     /// PrepareParams.documentUri / targetFolderUri, workspace/didCreateFiles.
+    /// 1.4: code/resolveFrame (stack trace navigation); action csharp.cleanup (PrepareParams.cleanup, plan.cleanup).
     /// </summary>
-    public const int ProtocolMinor = 3;
+    public const int ProtocolMinor = 4;
     /// <summary>How long workspace/snapshotBarrier waits for a missing document sequence (tests shorten it).</summary>
     public TimeSpan BarrierTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
@@ -98,6 +99,8 @@ public sealed class Engine : IRpcHandler, IDisposable
                 return await PrepareAsync(Params<PrepareParams>(p), ct).ConfigureAwait(false);
             case "refactor/revalidate":
                 return Revalidate(Params<RevalidateParams>(p), ct);
+            case "code/resolveFrame":
+                return await ResolveFrameAsync(Params<ResolveFrameParams>(p), ct).ConfigureAwait(false);
             case "analysis/run":
                 return await AnalysisRunAsync(Params<AnalysisRunParams>(p), ct).ConfigureAwait(false);
             default:
@@ -316,6 +319,16 @@ public sealed class Engine : IRpcHandler, IDisposable
                 Score = h.Score,
             });
         }
+        return result;
+    }
+
+    private async Task<ResolveFrameResultDto> ResolveFrameAsync(ResolveFrameParams p, CancellationToken ct)
+    {
+        var snap = RequireSnapshot(p.WorkspaceId, p.SnapshotId);
+        var found = await StackFrameResolver.ResolveAsync(snap, new FrameQuery(p.TypeName, p.MethodName, p.LocalFunctionName, p.MethodArity, p.ParameterTypes), ct).ConfigureAwait(false);
+        var result = new ResolveFrameResultDto { SnapshotId = snap.Id };
+        foreach (var c in found)
+            result.Candidates.Add(new FrameCandidateDto { Symbol = new Mapper(snap, c.Project, ct).Symbol(c.Symbol), Location = Mapper.Location(c.Location)!, Confidence = c.Confidence, Reason = c.Reason });
         return result;
     }
 
@@ -538,15 +551,24 @@ public sealed class Engine : IRpcHandler, IDisposable
     private async Task<PrepareResultDto> PrepareAsync(PrepareParams p, CancellationToken ct)
     {
         var snap = RequireSnapshot(p.WorkspaceId, p.SnapshotId);
-        if (p.ActionId is not ("csharp.rename" or MoveTypePlanner.ActionId or GenerateHandlerPlanner.ActionId))
+        if (p.ActionId is not ("csharp.rename" or MoveTypePlanner.ActionId or GenerateHandlerPlanner.ActionId or Refactorings.Cleanup.CleanupPlanner.ActionId))
             return new PrepareResultDto { Kind = "unavailable", ReasonCode = "UnsupportedAction", Message = $"Action {p.ActionId} is not supported." };
-        var (symbol, project) = await SymbolIds.ResolveAsync(snap, p.SymbolId, ct).ConfigureAwait(false);
-        var outcome = p.ActionId switch
+        RenameOutcome outcome;
+        if (p.ActionId == Refactorings.Cleanup.CleanupPlanner.ActionId)
         {
-            MoveTypePlanner.ActionId => await MoveTypePlanner.PrepareAsync(snap, symbol, p.DocumentUri != null ? PathOf(p.DocumentUri) : null, ct).ConfigureAwait(false),
-            GenerateHandlerPlanner.ActionId => await GenerateHandlerPlanner.PrepareAsync(snap, symbol, p.TargetFolderUri != null ? PathOf(p.TargetFolderUri) : null, ct).ConfigureAwait(false),
-            _ => await RenamePlanner.PrepareAsync(snap, symbol, p.NewName ?? "", ct, p.RenameFile).ConfigureAwait(false),
-        };
+            // Code Cleanup (1.4): no symbol; the scope (files, folders, projects) and the fix ids come in params.cleanup.
+            outcome = await Refactorings.Cleanup.CleanupPlanner.PrepareAsync(snap, (p.Cleanup?.ScopeUris ?? new()).Select(PathOf).ToList(), p.Cleanup?.Fixes, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            var (symbol, _) = await SymbolIds.ResolveAsync(snap, p.SymbolId, ct).ConfigureAwait(false);
+            outcome = p.ActionId switch
+            {
+                MoveTypePlanner.ActionId => await MoveTypePlanner.PrepareAsync(snap, symbol, p.DocumentUri != null ? PathOf(p.DocumentUri) : null, ct).ConfigureAwait(false),
+                GenerateHandlerPlanner.ActionId => await GenerateHandlerPlanner.PrepareAsync(snap, symbol, p.TargetFolderUri != null ? PathOf(p.TargetFolderUri) : null, ct).ConfigureAwait(false),
+                _ => await RenamePlanner.PrepareAsync(snap, symbol, p.NewName ?? "", ct, p.RenameFile).ConfigureAwait(false),
+            };
+        }
         if (outcome.Plan == null)
             return new PrepareResultDto { Kind = "unavailable", ReasonCode = outcome.ReasonCode, Message = outcome.Message };
         ct.ThrowIfCancellationRequested();
@@ -560,7 +582,6 @@ public sealed class Engine : IRpcHandler, IDisposable
             _plans.Remove(plan.PlanId);
             return new PrepareResultDto { Kind = "unavailable", ReasonCode = "WorkspaceReloaded", Message = "The workspace was reloaded while the plan was prepared. Prepare it again." };
         }
-        var mapper = new Mapper(snap, project, ct);
         return new PrepareResultDto
         {
             Kind = "prepared",
@@ -616,6 +637,7 @@ public sealed class Engine : IRpcHandler, IDisposable
                     CompilationDelta = plan.CompilationDelta,
                 },
                 Title = plan.Title,
+                Cleanup = plan.Cleanup is { } cr ? CleanupReportDto.From(cr) : null,
             },
         };
     }
