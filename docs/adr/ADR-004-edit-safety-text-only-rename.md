@@ -119,3 +119,25 @@ is new is only around it:
   is not used because it asks a modal question per file group.
 - IDE code-style fixes (IDExxxx) are not offered: their analyzers and code fix providers are internal Roslyn types reached
   through MEF, and Refyntra uses public APIs only.
+
+## Amendment 4: EF Core migrations in a rename
+
+Status: Accepted
+
+Renaming a DbContext (or a type referenced from migrations) used to be refused as `GeneratedCode`, because EF Core's
+migration, `.Designer.cs` and model snapshot files reference it in `[DbContext(typeof(X))]`. The user now chooses
+(protocol 1.5, `PrepareParams.generatedEdits`, `RefactorPlanDto.efMigrations {mode, files}`):
+
+- `efMigrations` (default): edits in a generated file are allowed only when the file is proven to be an EF Core
+  migration or model snapshot (every top-level type carries the verified `Microsoft.EntityFrameworkCore.Infrastructure.DbContextAttribute`
+  naming a DbContext declared in source, and is a `Migration` with the verified `MigrationAttribute` or a
+  `ModelSnapshot`; metadata name and declaring assembly checked) **and** every Roslyn edit in it replaces exactly one
+  identifier token spelled like the symbol that binds to the symbol, by the new name (the expected text is rebuilt and
+  compared). Otherwise the rename is refused. Strings are never edited.
+- `none`: the edits in those files are dropped before the compilation delta; new errors in exactly those files are
+  expected and reported (`compilationDelta: failed`), errors anywhere else still refuse. The plan is `limited` with
+  "The project will not build until the migrations are updated", so it is applied only after the second confirmation.
+
+Unchanged: read set (migration files are source files of the closure), revalidation, the single EditApplier, Undo. Other
+generated code is still refused. Residual risk, stated in the preview: the model snapshot keeps the old CLR name as a
+string, so the next migration may show a difference for the renamed type.

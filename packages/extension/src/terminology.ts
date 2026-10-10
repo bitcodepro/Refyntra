@@ -174,6 +174,11 @@ export const GLOSSARY: ReadonlyArray<{ term: string; meaning: string; where: str
   { term: 'preview', meaning: 'Rename shows files, edits, project contexts and limits first. Nothing changes until Apply rename.', where: 'Rename preview, walkthrough' },
   { term: 'Client call', meaning: 'A fetch/axios/HttpClient call in TypeScript or JavaScript whose literal URL matches an ASP.NET route. Always heuristic.', where: 'Related (Endpoints from the call, Clients from the endpoint), Find client:' },
   { term: 'Clients', meaning: 'The Related group of an endpoint or action that lists its client calls (heuristic).', where: 'Related' },
+  { term: 'resolved', meaning: 'A task context item was found again where it was stored (or followed a rename made in Refyntra).', where: 'Task Context' },
+  { term: 'moved', meaning: 'A task context item was found again at a new place by its name; the stored place is updated.', where: 'Task Context' },
+  { term: 'ambiguous', meaning: 'Several symbols could be the task context item (or one with another kind or container); you choose, Refyntra never picks one silently.', where: 'Task Context ("Choose Symbol")' },
+  { term: 'missing', meaning: 'A task context item was not found (deleted, or renamed outside Refyntra). It is kept with the reason.', where: 'Task Context' },
+  { term: 'not checked yet', meaning: 'A task context item waits for its language support to be ready (loading or Restricted Mode).', where: 'Task Context' },
 ];
 
 /** The Actions QuickPick row of a feature that cannot run: always starts with the word "Unavailable" (the icon is only decoration). */

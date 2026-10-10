@@ -7,8 +7,9 @@ export const PROTOCOL_MAJOR = 1;
 /**
  * 1.1: optional `LoadDiagnostic.recoveryActions` (additive). 1.2: file rename with a type. 1.3: created files
  * (`PlannedChange` kind `create`, `fileCreate`, `targetFolderUri`/`documentUri`, `workspace/didCreateFiles`).
+ * 1.4: stack frames, Code Cleanup. 1.5: EF Core migrations in a rename (`PrepareParams.generatedEdits`, `efMigrations`).
  */
-export const PROTOCOL_MINOR = 4;
+export const PROTOCOL_MINOR = 5;
 
 /** Zero-based line, UTF-16 code unit character. */
 export interface Position {
@@ -518,6 +519,22 @@ export interface RefactorPlanDto {
   fileCreate?: FileCreateOffer;
   /** Code Cleanup (protocol 1.4): what the cleanup plan does and what it skipped. */
   cleanup?: CleanupReport;
+  /** Rename (protocol 1.5): EF Core migrations that reference the symbol, and whether this plan edits them. */
+  efMigrations?: EfMigrationsOffer;
+}
+
+/**
+ * What to do with generated EF Core migrations that reference a renamed symbol (protocol 1.5):
+ * `efMigrations` renames the references in proven migration/model snapshot files too (never strings; the default),
+ * `none` leaves them unchanged (the plan is `limited`: the project does not build until the migrations are updated).
+ */
+export type GeneratedEditsMode = 'efMigrations' | 'none';
+
+export interface EfMigrationsOffer {
+  /** The mode this plan was prepared with. */
+  mode: GeneratedEditsMode;
+  /** The proven EF Core migration/model snapshot files that reference the symbol (edited only in mode `efMigrations`). */
+  files: string[];
 }
 
 export interface PrepareParams extends WorkspaceParams {
@@ -534,6 +551,8 @@ export interface PrepareParams extends WorkspaceParams {
   documentUri?: string;
   /** Code Cleanup (protocol 1.4, action csharp.cleanup): the scope and the fixes. */
   cleanup?: CleanupParams;
+  /** Rename (protocol 1.5): what to do with EF Core migrations that reference the symbol (absent: `efMigrations`). */
+  generatedEdits?: GeneratedEditsMode;
 }
 export type PrepareResult =
   | { kind: 'prepared'; plan: RefactorPlanDto }

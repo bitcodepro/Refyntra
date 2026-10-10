@@ -202,6 +202,122 @@
         "title": "Clear Stack Trace",
         "category": "Refyntra",
         "icon": "$(clear-all)"
+      },
+      {
+        "command": "refyntra.taskContext.new",
+        "title": "New Task Context",
+        "category": "Refyntra",
+        "icon": "$(add)"
+      },
+      {
+        "command": "refyntra.taskContext.switch",
+        "title": "Switch Task Context",
+        "category": "Refyntra",
+        "icon": "$(list-selection)"
+      },
+      {
+        "command": "refyntra.taskContext.rename",
+        "title": "Rename Task Context",
+        "category": "Refyntra",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "refyntra.taskContext.delete",
+        "title": "Delete Task Context",
+        "category": "Refyntra",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "refyntra.taskContext.clear",
+        "title": "Clear Task Context",
+        "category": "Refyntra",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "refyntra.taskContext.addSymbol",
+        "title": "Add Symbol at Cursor to Task Context",
+        "category": "Refyntra",
+        "icon": "$(symbol-class)"
+      },
+      {
+        "command": "refyntra.taskContext.addFile",
+        "title": "Add File to Task Context",
+        "category": "Refyntra",
+        "icon": "$(new-file)"
+      },
+      {
+        "command": "refyntra.taskContext.addFindItem",
+        "title": "Add Find Result to Task Context",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.taskContext.addFromRelated",
+        "title": "Add to Task Context",
+        "category": "Refyntra",
+        "icon": "$(add)"
+      },
+      {
+        "command": "refyntra.taskContext.open",
+        "title": "Open Task Context Item",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.taskContext.showRelated",
+        "title": "Show Related for Task Context Item",
+        "category": "Refyntra",
+        "icon": "$(references)"
+      },
+      {
+        "command": "refyntra.taskContext.moveUp",
+        "title": "Move Task Context Item Up",
+        "category": "Refyntra",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "refyntra.taskContext.moveDown",
+        "title": "Move Task Context Item Down",
+        "category": "Refyntra",
+        "icon": "$(arrow-down)"
+      },
+      {
+        "command": "refyntra.taskContext.remove",
+        "title": "Remove from Task Context",
+        "category": "Refyntra",
+        "icon": "$(close)"
+      },
+      {
+        "command": "refyntra.taskContext.editNote",
+        "title": "Edit Note of Task Context Item",
+        "category": "Refyntra",
+        "icon": "$(note)"
+      },
+      {
+        "command": "refyntra.taskContext.choose",
+        "title": "Choose Symbol for Ambiguous Item",
+        "category": "Refyntra",
+        "icon": "$(question)"
+      },
+      {
+        "command": "refyntra.taskContext.copyMarkdown",
+        "title": "Copy Task Context as Markdown",
+        "category": "Refyntra",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "refyntra.taskContext.export",
+        "title": "Export Task Context to File",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.taskContext.import",
+        "title": "Import Task Context from File",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.taskContext.refresh",
+        "title": "Resolve Task Context Again",
+        "category": "Refyntra",
+        "icon": "$(refresh)"
       }
     ],
     "taskDefinitions": [
@@ -255,6 +371,66 @@
         {
           "command": "refyntra.related.unpin",
           "when": "refyntra.relatedPinned"
+        },
+        {
+          "command": "refyntra.taskContext.addFindItem",
+          "when": "false"
+        },
+        {
+          "command": "refyntra.taskContext.addFromRelated",
+          "when": "false"
+        },
+        {
+          "command": "refyntra.taskContext.open",
+          "when": "focusedView == refyntra.taskContextView"
+        },
+        {
+          "command": "refyntra.taskContext.showRelated",
+          "when": "focusedView == refyntra.taskContextView"
+        },
+        {
+          "command": "refyntra.taskContext.moveUp",
+          "when": "focusedView == refyntra.taskContextView"
+        },
+        {
+          "command": "refyntra.taskContext.moveDown",
+          "when": "focusedView == refyntra.taskContextView"
+        },
+        {
+          "command": "refyntra.taskContext.remove",
+          "when": "focusedView == refyntra.taskContextView"
+        },
+        {
+          "command": "refyntra.taskContext.editNote",
+          "when": "focusedView == refyntra.taskContextView"
+        },
+        {
+          "command": "refyntra.taskContext.choose",
+          "when": "focusedView == refyntra.taskContextView"
+        },
+        {
+          "command": "refyntra.taskContext.rename",
+          "when": "refyntra.taskContextActive"
+        },
+        {
+          "command": "refyntra.taskContext.delete",
+          "when": "refyntra.taskContextActive"
+        },
+        {
+          "command": "refyntra.taskContext.clear",
+          "when": "refyntra.taskContextActive"
+        },
+        {
+          "command": "refyntra.taskContext.copyMarkdown",
+          "when": "refyntra.taskContextActive"
+        },
+        {
+          "command": "refyntra.taskContext.export",
+          "when": "refyntra.taskContextActive"
+        },
+        {
+          "command": "refyntra.taskContext.refresh",
+          "when": "refyntra.taskContextActive"
         }
       ],
       "view/title": [
@@ -282,12 +458,122 @@
           "command": "refyntra.stackTrace.clear",
           "when": "view == refyntra.stackTraceView && refyntra.stackTraceLoaded",
           "group": "navigation@2"
+        },
+        {
+          "command": "refyntra.taskContext.addSymbol",
+          "when": "view == refyntra.taskContextView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "refyntra.taskContext.switch",
+          "when": "view == refyntra.taskContextView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "refyntra.taskContext.refresh",
+          "when": "view == refyntra.taskContextView && refyntra.taskContextActive",
+          "group": "navigation@3"
+        },
+        {
+          "command": "refyntra.taskContext.new",
+          "when": "view == refyntra.taskContextView",
+          "group": "1_context@1"
+        },
+        {
+          "command": "refyntra.taskContext.rename",
+          "when": "view == refyntra.taskContextView && refyntra.taskContextActive",
+          "group": "1_context@2"
+        },
+        {
+          "command": "refyntra.taskContext.delete",
+          "when": "view == refyntra.taskContextView && refyntra.taskContextActive",
+          "group": "1_context@3"
+        },
+        {
+          "command": "refyntra.taskContext.addFile",
+          "when": "view == refyntra.taskContextView",
+          "group": "2_add@1"
+        },
+        {
+          "command": "refyntra.taskContext.copyMarkdown",
+          "when": "view == refyntra.taskContextView && refyntra.taskContextActive",
+          "group": "3_share@1"
+        },
+        {
+          "command": "refyntra.taskContext.export",
+          "when": "view == refyntra.taskContextView && refyntra.taskContextActive",
+          "group": "3_share@2"
+        },
+        {
+          "command": "refyntra.taskContext.import",
+          "when": "view == refyntra.taskContextView",
+          "group": "3_share@3"
+        },
+        {
+          "command": "refyntra.taskContext.clear",
+          "when": "view == refyntra.taskContextView && refyntra.taskContextActive",
+          "group": "4_clear@1"
+        },
+        {
+          "command": "refyntra.taskContext.addFromRelated",
+          "when": "view == refyntra.relatedView",
+          "group": "navigation@3"
         }
       ],
       "view/item/context": [
         {
           "command": "refyntra.stackTrace.related",
           "when": "view == refyntra.stackTraceView && viewItem == refyntra.stackFrame",
+          "group": "inline"
+        },
+        {
+          "command": "refyntra.taskContext.choose",
+          "when": "view == refyntra.taskContextView && viewItem == refyntra.taskItem.ambiguous",
+          "group": "inline@0"
+        },
+        {
+          "command": "refyntra.taskContext.showRelated",
+          "when": "view == refyntra.taskContextView && viewItem =~ /^refyntra\\.taskItem\\./",
+          "group": "inline@1"
+        },
+        {
+          "command": "refyntra.taskContext.open",
+          "when": "view == refyntra.taskContextView && viewItem =~ /^refyntra\\.taskItem\\./",
+          "group": "1_open@1"
+        },
+        {
+          "command": "refyntra.taskContext.showRelated",
+          "when": "view == refyntra.taskContextView && viewItem =~ /^refyntra\\.taskItem\\./",
+          "group": "1_open@2"
+        },
+        {
+          "command": "refyntra.taskContext.choose",
+          "when": "view == refyntra.taskContextView && viewItem == refyntra.taskItem.ambiguous",
+          "group": "1_open@3"
+        },
+        {
+          "command": "refyntra.taskContext.editNote",
+          "when": "view == refyntra.taskContextView && viewItem =~ /^refyntra\\.taskItem\\./",
+          "group": "2_edit@1"
+        },
+        {
+          "command": "refyntra.taskContext.moveUp",
+          "when": "view == refyntra.taskContextView && viewItem =~ /^refyntra\\.taskItem\\./",
+          "group": "3_order@1"
+        },
+        {
+          "command": "refyntra.taskContext.moveDown",
+          "when": "view == refyntra.taskContextView && viewItem =~ /^refyntra\\.taskItem\\./",
+          "group": "3_order@2"
+        },
+        {
+          "command": "refyntra.taskContext.remove",
+          "when": "view == refyntra.taskContextView && viewItem =~ /^refyntra\\.taskItem\\./",
+          "group": "4_remove@1"
+        },
+        {
+          "command": "refyntra.taskContext.addFromRelated",
+          "when": "view == refyntra.relatedView && viewItem == refyntra.relatedRelation",
           "group": "inline"
         }
       ],
@@ -303,6 +589,11 @@
           "command": "refyntra.cleanup",
           "when": "explorerResourceIsFolder || resourceExtname == .cs || resourceExtname == .csproj",
           "group": "7_modification@90"
+        },
+        {
+          "command": "refyntra.taskContext.addFile",
+          "when": "!explorerResourceIsFolder && resourceScheme == file",
+          "group": "7_modification@91"
         }
       ],
       "editor/context": [
@@ -328,6 +619,14 @@
         {
           "command": "refyntra.rename",
           "group": "2_refactor@1"
+        },
+        {
+          "command": "refyntra.taskContext.addSymbol",
+          "group": "3_context@1"
+        },
+        {
+          "command": "refyntra.taskContext.addFile",
+          "group": "3_context@2"
         }
       ]
     },
@@ -357,6 +656,11 @@
           "id": "refyntra.stackTraceView",
           "name": "Refyntra Stack Trace",
           "contextualTitle": "Refyntra"
+        },
+        {
+          "id": "refyntra.taskContextView",
+          "name": "Refyntra Task Context",
+          "contextualTitle": "Refyntra"
         }
       ]
     },
@@ -385,13 +689,18 @@
         "view": "refyntra.relatedView",
         "when": "refyntra.welcome == hostFailed",
         "contents": "The Refyntra C# backend could not start, so C# features are unavailable. The Health page shows the reason and how to fix it (for example a missing .NET SDK).\n[Health](command:refyntra.showHealth)\n[Restart Backend](command:refyntra.restartBackend)\n[Export Debug Bundle](command:refyntra.exportDebugBundle)\n[Get started](command:refyntra.getStarted)"
+      },
+      {
+        "view": "refyntra.taskContextView",
+        "when": "!refyntra.taskContextActive",
+        "contents": "Collect the symbols, files, endpoints and relations you work on for a task. Items are stored locally for this workspace and found again after code changes (resolved, moved, ambiguous or missing).\n[New Task Context](command:refyntra.taskContext.new)\n[Add Symbol at Cursor](command:refyntra.taskContext.addSymbol)\n[Import from File](command:refyntra.taskContext.import)"
       }
     ],
     "walkthroughs": [
       {
         "id": "refyntra.getStarted",
         "title": "Get started with Refyntra",
-        "description": "Find code, see how it is connected and rename safely: six short steps.",
+        "description": "Find code, see how it is connected and rename safely: seven short steps.",
         "steps": [
           {
             "id": "solution",
@@ -431,6 +740,14 @@
             "description": "Paste a .NET, JavaScript/TypeScript, Python or Rust stack trace; click a frame to open the file at the line, or the method found by symbol.\n[Open Stack Trace](command:refyntra.openStackTrace)",
             "media": {
               "markdown": "walkthrough/6-stack-trace.md"
+            }
+          },
+          {
+            "id": "taskcontext",
+            "title": "Keep a task context",
+            "description": "Collect the symbols, files and relations of your current task. Items are stored locally and found again after edits.\n[Add Symbol at Cursor](command:refyntra.taskContext.addSymbol)",
+            "media": {
+              "markdown": "walkthrough/7-task-context.md"
             }
           },
           {

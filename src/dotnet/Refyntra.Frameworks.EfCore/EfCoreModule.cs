@@ -165,6 +165,39 @@ public sealed class EfCoreModule : IFrameworkModule
         return facts;
     }
 
+    public static readonly KnownType MigrationAttribute = new("Microsoft.EntityFrameworkCore.Migrations.MigrationAttribute", Relational, Core);
+
+    /// <summary>
+    /// The DbContext of an EF Core migration or model snapshot file, or null when the file is not proven to be one.
+    /// Proven only when every top-level type of the file (a) carries the verified
+    /// <c>Microsoft.EntityFrameworkCore.Infrastructure.DbContextAttribute</c> naming a DbContext declared in source,
+    /// and (b) is either a migration (derives from <c>Migration</c> and carries the verified <c>MigrationAttribute</c>,
+    /// attributes merged over the partial parts) or a model snapshot (derives from <c>ModelSnapshot</c>).
+    /// Attributes and base types are checked by metadata name and declaring assembly, so look-alikes never match.
+    /// </summary>
+    public static INamedTypeSymbol? MigrationFileContext(SemanticModel model, SyntaxNode root, CancellationToken ct)
+    {
+        var topLevel = root.DescendantNodes(n => n is CompilationUnitSyntax or BaseNamespaceDeclarationSyntax).ToList();
+        if (topLevel.Any(n => n is GlobalStatementSyntax or DelegateDeclarationSyntax)) return null;
+        var types = topLevel.OfType<BaseTypeDeclarationSyntax>().ToList();
+        if (types.Count == 0) return null;
+        INamedTypeSymbol? context = null;
+        foreach (var decl in types)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (model.GetDeclaredSymbol(decl, ct) is not INamedTypeSymbol type) return null;
+            var attrs = type.GetAttributes();
+            var ctxAttr = attrs.FirstOrDefault(a => DbContextAttribute.Matches(a.AttributeClass));
+            if (ctxAttr is not { ConstructorArguments.Length: 1 } || ctxAttr.ConstructorArguments[0].Value is not INamedTypeSymbol ctx) return null;
+            if (!DerivesFrom(ctx, DbContext) || !ctx.Locations.Any(l => l.IsInSource)) return null;
+            var isMigration = DerivesFrom(type, Migration) && attrs.Any(a => MigrationAttribute.Matches(a.AttributeClass));
+            if (!isMigration && !DerivesFrom(type, ModelSnapshot)) return null;
+            if (context != null && !SymbolEqualityComparer.Default.Equals(context, ctx)) return null;
+            context = ctx;
+        }
+        return context;
+    }
+
     private static bool DerivesFrom(INamedTypeSymbol type, KnownType known)
     {
         for (var t = type.BaseType; t != null; t = t.BaseType)

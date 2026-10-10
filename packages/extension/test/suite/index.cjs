@@ -93,12 +93,12 @@ const common = [
       const fsx = require('node:fs');
       const px = require('node:path');
       const w = pkg.contributes.walkthroughs.find((x) => x.id === 'refyntra.getStarted');
-      assert.equal(w.steps.length, 6);
+      assert.equal(w.steps.length, 7);
       for (const st of w.steps) {
         assert.ok(fsx.existsSync(px.join(ext.extensionPath, st.media.markdown)), st.media.markdown);
         assert.match(st.description, /\(command:refyntra\.[A-Za-z.]+\)/, `${st.id} has a command button`);
       }
-      assert.deepEqual(pkg.contributes.menus['refyntra.editorContext'].map((m) => m.command), ['refyntra.related', 'refyntra.actions', 'refyntra.find', 'refyntra.rename']);
+      assert.deepEqual(pkg.contributes.menus['refyntra.editorContext'].map((m) => m.command), ['refyntra.related', 'refyntra.actions', 'refyntra.find', 'refyntra.rename', 'refyntra.taskContext.addSymbol', 'refyntra.taskContext.addFile']);
       assert.match(pkg.contributes.menus['editor/context'][0].when, /csharp\|typescript/);
       const whens = pkg.contributes.viewsWelcome.map((v) => v.when);
       for (const v of ['ready', 'untrusted', 'noSolution', 'hostFailed']) assert.equal(whens.filter((x) => x.includes(`refyntra.welcome == ${v}`)).length, 1, v);
@@ -1346,7 +1346,7 @@ scenarios['ts-delegated'] = [
 
 // ---- accessibility -----------------------------------------------------------------------------------
 // Internal commands: invoked by buttons and tree items, hidden from the Command Palette on purpose.
-const INTERNAL_COMMANDS = ['refyntra.openLocation', 'refyntra.runRestore', 'refyntra.related.open', 'refyntra.nativeRename', 'refyntra.stackTrace.openFrame', 'refyntra.stackTrace.related'];
+const INTERNAL_COMMANDS = ['refyntra.openLocation', 'refyntra.runRestore', 'refyntra.related.open', 'refyntra.nativeRename', 'refyntra.stackTrace.openFrame', 'refyntra.stackTrace.related', 'refyntra.taskContext.addFindItem', 'refyntra.taskContext.addFromRelated'];
 
 common.push([
   'keyboard: every user command is in the Command Palette and the status bar menu leads to the main ones',
@@ -1511,12 +1511,16 @@ scenarios.efcore = [
 scenarios['rename-file'] = require('./fileRename.cjs').cases({ api, csharp, waitFor });
 // Created files: Move Type to File and Generate handler (test/suite/createFile.cjs).
 scenarios['create-file'] = require('./createFile.cjs').cases({ api, csharp, waitFor });
+// EF Core migrations in a rename (test/suite/efMigrationRename.cjs).
+scenarios['rename-efcore'] = require('./efMigrationRename.cjs').cases({ api, csharp, waitFor });
 // Code Cleanup (test/suite/cleanup.cjs).
 scenarios.cleanup = require('./cleanup.cjs').cases({ api, csharp, waitFor });
 // Stack trace navigation (test/suite/stackTrace.cjs).
 scenarios['stack-trace'] = require('./stackTrace.cjs').cases({ api, csharp, waitFor });
 // Frontend ↔ backend HTTP links (test/suite/fullStack.cjs).
 scenarios['full-stack'] = require('./fullStack.cjs').cases({ api, csharp, waitFor });
+// Task context (test/suite/taskContext.cjs).
+scenarios['task-context'] = require('./taskContext.cjs').cases({ api, csharp, waitFor });
 
 exports.run =async function run() {
   const name = process.env.REFYNTRA_TEST_SCENARIO;

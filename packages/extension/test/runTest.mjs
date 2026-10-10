@@ -211,6 +211,15 @@ const scenarios = e2e
         trusted: true,
         env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' },
       },
+      // Rename of a DbContext referenced from EF Core migrations, on a temp copy of the EfCore fixture: update the
+      // migrations (apply + Undo) or rename only the class (limited, "will not build").
+      {
+        name: 'rename-efcore',
+        fixtureCopy: ['EfCore', 'EfCore.sln'],
+        trusted: true,
+        settings: { 'refyntra.rename.apply': true, 'files.autoSave': 'off' },
+        env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' },
+      },
       // Code Cleanup on a temp copy of the Cleanup fixture: clean up a folder, apply (not saved), Undo; stale plan.
       {
         name: 'cleanup',
@@ -233,6 +242,14 @@ const scenarios = e2e
         fixtureCopy: ['FullStack', 'FullStack.sln'],
         builtinExtensions: true,
         trusted: true,
+        env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' },
+      },
+      // Task context on a temp copy of Shop: add, move by an edit, reload, rename through Refyntra, delete.
+      {
+        name: 'task-context',
+        copy: 'task-context',
+        trusted: true,
+        settings: { 'refyntra.rename.apply': true, 'files.autoSave': 'off' },
         env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' },
       },
       // A target saved in Windows-1251 (not UTF-8): the apply must be refused and no file may change.

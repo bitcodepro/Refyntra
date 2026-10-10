@@ -37,6 +37,7 @@ import { CSHARP_GENERATE_HANDLER_ACTION, CSHARP_MOVE_TYPE_ACTION } from '@refynt
 import { runRestore } from './restore';
 import { SolutionService } from './solution';
 import { STACK_TRACE_VIEW, StackTraceViewProvider, runOpenStackTrace } from './stackTrace';
+import { type TaskContextViewProvider, registerTaskContext } from './taskContext';
 
 export const CSHARP_DESCRIPTOR: AdapterDescriptor = {
   adapterId: 'csharp',
@@ -91,6 +92,8 @@ export interface RefyntraTestApi {
   statusBarLabel(): string;
   /** Stack trace navigation (e2e loads a trace, opens frames and injects QuickPick choices). */
   stackTrace: StackTraceViewProvider;
+  /** Task context view (e2e adds items, edits code and checks the resolution states). */
+  taskContext: TaskContextViewProvider;
 }
 
 let engineRef: RefyntraEngine | undefined;
@@ -237,6 +240,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     vscode.commands.registerCommand('refyntra.stackTrace.related', (arg?: Parameters<StackTraceViewProvider['related']>[0]) => stackTrace.related(arg)),
     vscode.commands.registerCommand('refyntra.stackTrace.clear', () => stackTrace.clear()),
   );
+  // Task context: named lists of symbols, files and pinned relations, stored locally in workspaceState (taskContext.ts).
+  const taskContext = registerTaskContext(engine, context.workspaceState, related);
+  context.subscriptions.push(taskContext.disposable);
   void vscode.commands.executeCommand('setContext', 'refyntra.relatedPinned', false);
   // Welcome text of the Related view follows trust / solution / backend state (package.json viewsWelcome).
   let welcome: WelcomeVariant | undefined;
@@ -337,6 +343,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     healthPage: { model: () => healthPage.model(), dispatch: (m) => healthPage.dispatch(m), isOpen: () => healthPage.isOpen(), html: () => healthPage.renderedHtml() },
     statusBarLabel: () => statusBar.accessibleLabel(),
     stackTrace,
+    taskContext: taskContext.provider,
   };
 }
 

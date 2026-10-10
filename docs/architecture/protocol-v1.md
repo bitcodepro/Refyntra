@@ -132,6 +132,15 @@ a test class. It is not part of `initialize.capabilities`.
   are normalised); everything else is `likely`. Only source symbols are returned (metadata-only symbols have nothing
   to open); a method that no longer exists on a found type yields the type, `likely`. Read-only, no document sequence.
   A client sends it only to a host that reported minor ≥ 4 (an older host would answer `MethodNotFound`).
+- 1.5 (additive, EF Core migrations in a rename): `PrepareParams.generatedEdits?: "efMigrations" | "none"` (absent =
+  `"efMigrations"`) and `RefactorPlanDto.efMigrations?: {mode, files}` (present when proven EF Core migration/model
+  snapshot files reference the symbol). `efMigrations`: the edits in those files are allowed only when each one renames
+  an identifier that binds to the symbol (never a string). `none`: the files are not edited, new compiler errors in
+  them are expected (`compilationDelta` `"failed"`), the plan is `limited` with the limitation "The project will not
+  build until the migrations are updated: …". Files are proven by the verified `DbContextAttribute`
+  (Microsoft.EntityFrameworkCore), `MigrationAttribute` + `Migration` base type or `ModelSnapshot` base type, naming a
+  DbContext declared in source. Other generated code is still refused (`GeneratedCode`). A host before 1.5 ignores
+  `generatedEdits` and refuses such renames as generated code.
 - Additive (EF Core): relation kinds `efcore.*` and group `data` (above); `SearchFilters.entity?: boolean` ("entity:")
   and `SearchFilters.table?: string` ("table:NAME") return EF Core entities as symbol items. Older hosts ignore the
   filters (they return a normal symbol search); older clients render the kinds and the group generically. The

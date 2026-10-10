@@ -609,7 +609,7 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
 
   prepare(req: PrepareRequest, token?: CancellationToken): Promise<RouteResult<PrepareResult>> {
     return this.semantic('refactor/prepare', token, (s, snapshotId, traceId) =>
-      s.transport.request('refactor/prepare', { traceId, workspaceId: this.opts.workspaceId, snapshotId, actionId: req.actionId, symbolId: req.symbolId, newName: req.newName, ...(req.renameFile ? { renameFile: true } : {}), ...(req.targetFolderUri ? { targetFolderUri: req.targetFolderUri } : {}), ...(req.documentUri ? { documentUri: req.documentUri } : {}), ...(req.cleanup ? { cleanup: req.cleanup } : {}) }, token),
+      s.transport.request('refactor/prepare', { traceId, workspaceId: this.opts.workspaceId, snapshotId, actionId: req.actionId, symbolId: req.symbolId, newName: req.newName, ...(req.renameFile ? { renameFile: true } : {}), ...(req.targetFolderUri ? { targetFolderUri: req.targetFolderUri } : {}), ...(req.documentUri ? { documentUri: req.documentUri } : {}), ...(req.cleanup ? { cleanup: req.cleanup } : {}), ...(req.generatedEdits ? { generatedEdits: req.generatedEdits } : {}) }, token),
     );
   }
 

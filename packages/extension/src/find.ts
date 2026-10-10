@@ -26,6 +26,8 @@ interface FindPickItem extends vscode.QuickPickItem {
 
 export const FIND_DEBOUNCE_MS = 200;
 
+const ADD_TO_TASK_CONTEXT: vscode.QuickInputButton = { iconPath: new vscode.ThemeIcon('add'), tooltip: 'Add to Task Context' };
+
 /** Find QuickPick: debounced, each new query cancels the previous one; results keep backend order. */
 export async function runFind(engine: EngineClient, initialValue = ''): Promise<void> {
   const qp = vscode.window.createQuickPick<FindPickItem>();
@@ -64,6 +66,7 @@ export async function runFind(engine: EngineClient, initialValue = ''): Promise<
             detail: [it.detail, it.location ? shortPath(it.location.uri) : undefined, it.provenances.length > 1 ? `${it.provenances.length} providers` : undefined].filter(Boolean).join(' · '),
             alwaysShow: true,
             item: it,
+            ...(it.location ? { buttons: [ADD_TO_TASK_CONTEXT] } : {}),
           });
         }
         if (r.truncated) items.push({ label: '$(ellipsis) More results — refine the query', alwaysShow: true });
@@ -96,6 +99,9 @@ export async function runFind(engine: EngineClient, initialValue = ''): Promise<
     if (!picked?.location) return;
     qp.hide();
     void openLocation(picked.location);
+  });
+  qp.onDidTriggerItemButton((e) => {
+    if (e.item.item) void vscode.commands.executeCommand('refyntra.taskContext.addFindItem', e.item.item);
   });
   qp.onDidHide(() => {
     if (timer) clearTimeout(timer);

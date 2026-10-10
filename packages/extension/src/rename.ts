@@ -4,7 +4,7 @@ import { type ApplyOutcome, CancelledError, type EngineClient, type RenamePrevie
 import type { Position } from '@refyntra/contracts';
 import { runRecovery } from './actions';
 import { shortPath, toPosition } from './convert';
-import { delegatedSource, fileRenameItems, identifierPattern, previewTitle, renamePreviewSummary } from './renameSummary';
+import { delegatedSource, efMigrationItems, fileRenameItems, identifierPattern, previewTitle, renamePreviewSummary } from './renameSummary';
 import { type PreviewFileModel, decodeUtf8, previewFile } from './textEdits';
 
 export const PREVIEW_SCHEME = 'refyntra-preview';
@@ -118,6 +118,8 @@ export interface RenameRequest {
   newName: string;
   /** File rename: also rename the file named after the type (default on; included only when proven safe). */
   renameFile?: boolean;
+  /** EF Core migrations that reference the symbol: update them too (default) or leave them unchanged. */
+  generatedEdits?: 'efMigrations' | 'none';
 }
 
 /** Rename: prepare → preview (summary + diffs) → confirm → revalidate → apply → reconcile. */
@@ -153,7 +155,7 @@ export async function runRename(engine: EngineClient, previews: PreviewContentPr
   try {
     outcome = await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'Refyntra: preparing rename preview', cancellable: true },
-      (_p, token) => engine.prepareRename({ uri: req.uri, position: req.position }, req.newName, token, { renameFile: req.renameFile ?? true }),
+      (_p, token) => engine.prepareRename({ uri: req.uri, position: req.position }, req.newName, token, { renameFile: req.renameFile ?? true, generatedEdits: req.generatedEdits ?? 'efMigrations' }),
     );
   } catch (e) {
     if (e instanceof CancelledError) return;
@@ -179,7 +181,7 @@ export async function runRename(engine: EngineClient, previews: PreviewContentPr
   await vscode.languages.setTextDocumentLanguage(summaryDoc, 'markdown');
   await vscode.window.showTextDocument(summaryDoc, { preview: true, preserveFocus: true });
 
-  type Pick = vscode.QuickPickItem & { action: 'diff' | 'apply' | 'disabled' | 'toggleFile' | 'fileInfo'; index?: number };
+  type Pick = vscode.QuickPickItem & { action: 'diff' | 'apply' | 'disabled' | 'toggleFile' | 'fileInfo' | 'efMode' | 'efInfo'; index?: number; mode?: 'efMigrations' | 'none' };
   const items: Pick[] = [];
   const limited = outcome.plan.validation.status === 'limited';
   const canApply = outcome.applyEnabled && !stored.invalid;
@@ -187,6 +189,7 @@ export async function runRename(engine: EngineClient, previews: PreviewContentPr
   if (canApply) items.push({ label: '$(check) Apply rename', description: delegated ? 'provider-managed semantic coverage: asks the provider again and for confirmation; files are not saved' : limited ? 'validation is limited: asks for confirmation; files are not saved' : 'revalidates first; files are not saved', action: 'apply' });
   else if (stored.invalid) items.push({ label: '$(error) Preview invalid — cannot be applied', detail: 'The planned edits do not match the current text (see the summary). Run Rename again.', action: 'disabled' });
   else items.push({ label: '$(lock) Preview only — applying is off', detail: outcome.issues.length ? 'The plan has problems (see the summary).' : 'Turn on refyntra.rename.apply to apply renames.', action: 'disabled' });
+  items.push(...efMigrationItems(outcome.plan));
   items.push(...fileRenameItems(outcome.plan));
   items.push(...stored.files.map((f, index): Pick => ({ label: `$(diff) ${shortPath(f.uri)}`, description: `open diff · ${f.editCount} edit(s)`, action: 'diff', index })));
 
@@ -209,6 +212,16 @@ export async function runRename(engine: EngineClient, previews: PreviewContentPr
         // A different plan (with or without the file rename): this one is discarded, a new preview is prepared.
         qp.hide();
         await runRename(engine, previews, { ...req, renameFile: !(outcome.plan.kind === 'owned-semantic' && outcome.plan.fileRename?.included) });
+        return;
+      }
+      if (pick.action === 'efMode' && pick.mode) {
+        // The other EF Core migrations choice is a different plan: this one is discarded, a new preview is prepared.
+        qp.hide();
+        await runRename(engine, previews, { ...req, generatedEdits: pick.mode });
+        return;
+      }
+      if (pick.action === 'efInfo') {
+        void vscode.window.showInformationMessage(`Refyntra: ${pick.label.replace(/^\$\([^)]*\)\s*/, '')} is the current choice${pick.detail ? `: ${pick.detail}` : ''}.`);
         return;
       }
       if (pick.action === 'fileInfo') {

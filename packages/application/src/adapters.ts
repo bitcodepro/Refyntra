@@ -71,6 +71,8 @@ export interface PrepareRequest {
   documentUri?: string;
   /** Code Cleanup: the scope and the fixes. */
   cleanup?: import('@refyntra/contracts').CleanupParams;
+  /** Rename: what to do with EF Core migrations that reference the symbol (protocol 1.5). */
+  generatedEdits?: import('@refyntra/contracts').GeneratedEditsMode;
 }
 
 export interface DelegatedRenameRequest {

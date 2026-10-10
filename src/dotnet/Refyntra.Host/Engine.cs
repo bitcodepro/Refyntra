@@ -20,8 +20,9 @@ public sealed class Engine : IRpcHandler, IDisposable
     /// 1.3: actions csharp.moveTypeToFile / csharp.generateHandler, PlannedChange kind "create", fileCreate offer,
     /// PrepareParams.documentUri / targetFolderUri, workspace/didCreateFiles.
     /// 1.4: code/resolveFrame (stack trace navigation); action csharp.cleanup (PrepareParams.cleanup, plan.cleanup).
+    /// 1.5: PrepareParams.generatedEdits ("efMigrations" | "none") and plan.efMigrations (EF Core migrations in a rename).
     /// </summary>
-    public const int ProtocolMinor = 4;
+    public const int ProtocolMinor = 5;
     /// <summary>How long workspace/snapshotBarrier waits for a missing document sequence (tests shorten it).</summary>
     public TimeSpan BarrierTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
@@ -566,7 +567,7 @@ public sealed class Engine : IRpcHandler, IDisposable
             {
                 MoveTypePlanner.ActionId => await MoveTypePlanner.PrepareAsync(snap, symbol, p.DocumentUri != null ? PathOf(p.DocumentUri) : null, ct).ConfigureAwait(false),
                 GenerateHandlerPlanner.ActionId => await GenerateHandlerPlanner.PrepareAsync(snap, symbol, p.TargetFolderUri != null ? PathOf(p.TargetFolderUri) : null, ct).ConfigureAwait(false),
-                _ => await RenamePlanner.PrepareAsync(snap, symbol, p.NewName ?? "", ct, p.RenameFile).ConfigureAwait(false),
+                _ => await RenamePlanner.PrepareAsync(snap, symbol, p.NewName ?? "", ct, p.RenameFile, p.GeneratedEdits).ConfigureAwait(false),
             };
         }
         if (outcome.Plan == null)
@@ -638,6 +639,7 @@ public sealed class Engine : IRpcHandler, IDisposable
                 },
                 Title = plan.Title,
                 Cleanup = plan.Cleanup is { } cr ? CleanupReportDto.From(cr) : null,
+                EfMigrations = plan.EfMigrations is { } ef ? new EfMigrationsOfferDto { Mode = ef.Mode, Files = ef.Files.Select(UriPaths.ToUri).ToList() } : null,
             },
         };
     }

@@ -175,6 +175,7 @@ export class RelatedViewProvider implements vscode.TreeDataProvider<Node>, vscod
         item.accessibilityInformation = { label: relationAccessibleLabel(r, place) };
         item.iconPath = r.confidence === 'proven' ? new vscode.ThemeIcon('arrow-right') : new vscode.ThemeIcon('question', new vscode.ThemeColor('list.warningForeground'));
         if (loc) item.command = { command: 'refyntra.related.open', title: 'Open', arguments: [r] };
+        item.contextValue = 'refyntra.relatedRelation';
         return item;
       }
       case 'message': {

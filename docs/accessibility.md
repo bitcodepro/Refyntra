@@ -82,6 +82,11 @@ Defined once in `packages/extension/src/terminology.ts` (`GLOSSARY`, `STATE_PHRA
 | **preview** | Rename shows files, edits, project contexts and limits first. Nothing changes until Apply rename. | Rename preview, walkthrough |
 | **Client call** | A fetch/axios/HttpClient call in TypeScript or JavaScript whose literal URL matches an ASP.NET route. Always heuristic. | Related (Endpoints from the call, Clients from the endpoint), Find client: |
 | **Clients** | The Related group of an endpoint or action that lists its client calls (heuristic). | Related |
+| **resolved** | A task context item was found again where it was stored (or followed a rename made in Refyntra). | Task Context |
+| **moved** | A task context item was found again at a new place by its name; the stored place is updated. | Task Context |
+| **ambiguous** | Several symbols could be the task context item (or one with another kind or container); you choose, Refyntra never picks one silently. | Task Context ("Choose Symbol") |
+| **missing** | A task context item was not found (deleted, or renamed outside Refyntra). It is kept with the reason. | Task Context |
+| **not checked yet** | A task context item waits for its language support to be ready (loading or Restricted Mode). | Task Context |
 
 A reason code has exactly one phrase (`REASON_PHRASE`), used by Health (page and text), the Actions list and the Related
 tooltip, always followed by the raw code in brackets for support: for example "no solution or project found
@@ -143,6 +148,11 @@ extension, the repository fixture `tests/fixtures/Shop` opened. NVDA 2024.x or l
    words "proven" and "not checked".
 8. **Zoom.** Ctrl+= five times (200 %) with the Health page open: no horizontal page scroll; the project table scrolls
    by itself and is reachable with Tab.
+9. **Task Context view.** Put the cursor on `OrderService` in `Shop.Api/Services/OrderServices.cs` and run "Refyntra: Add
+   Symbol at Cursor to Task Context". Focus the Refyntra Task Context view and arrow to the item. Expected: "OrderService,
+   class, resolved, in Shop.Api/Services/OrderServices.cs line N". Shift+F10 opens the menu with Open, Show Related,
+   Edit Note, Move Up, Move Down and Remove (no drag needed). Add three lines at the top of the file and wait a moment:
+   the item reads "moved". The view's description (read with the view title) names the active context.
 
 Write down anything that is spoken twice, not spoken, or spoken with a raw id or a codicon name; each of these is a bug
 in `terminology.ts` or `healthPageHtml.ts`.

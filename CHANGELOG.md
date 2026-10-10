@@ -4,6 +4,27 @@ All notable changes are listed here. The project is alpha; nothing has been rele
 
 ## Unreleased
 
+### Added (Task context)
+
+- **Refyntra Task Context** view: named contexts per workspace (create, rename, delete, switch; the active one is shown
+  in the view description) holding symbols of any route (C#, TS/JS, Python, Rust), files, endpoints, places and pinned
+  relations (subject + relation + target), each with an optional note. Added from the editor (*Add Symbol at Cursor*,
+  *Add File*), the Explorer, Find results (item button) and Related (relation items and the subject).
+- Items are stored as descriptors, not symbol ids: route, kind, name, container/qualified name, workspace-relative file,
+  last position, an FNV-1a hash of the declaration line (not the text) and the file's line count. Schema version 1 in
+  `workspaceState` (local, never synced, no telemetry), with a migration table; a store from a newer version is left
+  untouched. Limits: 50 contexts, 500 items, 2,000-character notes, ~1 MB total, 2 MB imports.
+- Resolution on view open, after edits (debounced), on backend restarts and before opening an item: **resolved**,
+  **moved** (place updated), **ambiguous** (you choose; same name with another kind or container is never taken
+  silently), **missing** (kept, with the reason), **not checked yet** (route not ready). A rename made through Refyntra
+  is followed by name (only the name changed on the stored line and the line count is unchanged).
+- Open, Show Related, reorder (drag and drop, Move Up/Down), remove, Copy as Markdown (names, relative paths, notes;
+  no source text), Export/Import JSON to a file you choose, Clear. States are words in the description and the
+  screen-reader label (glossary in `docs/accessibility.md`). Walkthrough step "Keep a task context".
+- Tests: vitest for the model, schema, decision table and Markdown; e2e scenario `task-context` on a temp copy of Shop
+  (add symbol + relation, move by an edit → moved and opens the new place, reload, rename through Refyntra → resolved
+  by name, delete → missing, export/import).
+
 ### Fixed (tests)
 
 - Host test helper `Fixtures.RunAsync` waited without a bound for the output pipes of `dotnet sln add`/`dotnet restore`; an MSBuild worker node that inherited them kept a whole `dotnet test` run hanging at 0 % CPU (seen in `ReviewFindingsTests.S2_AProjectOutsideTheClosureThatStartsReferencingTheOwnerMakesThePlanStale`). It now waits for process exit (not end of output), kills the process tree on timeout, and disables MSBuild node reuse/server for these tool runs; covered by `FixturesRunTests`.

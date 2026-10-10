@@ -135,6 +135,8 @@ export type AnalysisOutcome = AnalysisView | (Unavailable & { providerRouteId: s
 
 export interface PrepareOptions {
   renameFile?: boolean;
+  /** EF Core migrations that reference the symbol: rename the references in them (`efMigrations`) or leave them (`none`). */
+  generatedEdits?: import('@refyntra/contracts').GeneratedEditsMode;
 }
 
 /** Options of a create-file action (Move Type to File, Generate handler). */
@@ -511,7 +513,7 @@ export class RefyntraEngine implements EngineClient {
       const prepared = await this.withStaleRetry(async () => {
         const sym = await adapter.symbolAt(target.uri, target.position, token);
         if (!sym.value || !sym.value.symbolId) return undefined;
-        const p = await adapter.prepare({ symbolId: sym.value.symbolId, newName, actionId, ...(options.renameFile ? { renameFile: true } : {}) }, token);
+        const p = await adapter.prepare({ symbolId: sym.value.symbolId, newName, actionId, ...(options.renameFile ? { renameFile: true } : {}), ...(options.generatedEdits ? { generatedEdits: options.generatedEdits } : {}) }, token);
         if (p.sessionEpoch !== sym.sessionEpoch) throw new StaleResultError('epoch');
         return p;
       }, token);

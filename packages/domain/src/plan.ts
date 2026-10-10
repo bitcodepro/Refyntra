@@ -199,6 +199,24 @@ export function validatePlanStructure(plan: AnyRefactorPlan): PlanValidationIssu
   }
   issues.push(...validateFileRenames(plan, renames, texts));
   issues.push(...validateFileCreates(plan, creates, texts, renames));
+  issues.push(...validateEfMigrations(plan, texts));
+  return issues;
+}
+
+/**
+ * EF Core migrations (protocol 1.5): file: URIs; a plan that leaves them unchanged (`none`) never edits them and is
+ * never `valid` (the project does not build until the migrations are updated).
+ */
+function validateEfMigrations(plan: AnyRefactorPlan, texts: ReadonlyMap<string, string>): PlanValidationIssue[] {
+  if (plan.kind !== 'owned-semantic' || !plan.efMigrations) return [];
+  const ef = plan.efMigrations;
+  const issues: PlanValidationIssue[] = [];
+  if ((ef.mode !== 'efMigrations' && ef.mode !== 'none') || !Array.isArray(ef.files)) return [{ code: 'wrong-kind', message: 'Unknown EF Core migrations mode' }];
+  for (const f of ef.files) {
+    if (typeof f !== 'string' || !f.startsWith('file:')) issues.push({ code: 'non-file-uri', message: 'An EF Core migration is not a local file', uri: String(f) });
+    else if (ef.mode === 'none' && texts.has(f)) issues.push({ code: 'wrong-kind', message: 'The plan edits an EF Core migration it says it leaves unchanged', uri: f });
+  }
+  if (ef.mode === 'none' && ef.files.length > 0 && plan.validation.status === 'valid') issues.push({ code: 'wrong-kind', message: 'A rename that leaves EF Core migrations unchanged cannot be valid' });
   return issues;
 }
 
