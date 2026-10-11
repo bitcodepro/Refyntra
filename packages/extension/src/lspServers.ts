@@ -34,7 +34,9 @@ export class LspServerLocator {
   }
 
   async pyright(): Promise<ProcessLaunch> {
-    const entry = this.pyrightCandidates().find(exists);
+    // A candidate counts only with the server bundle its entry requires (a partial copy, for example a staging folder
+    // copied without its dist/ folder, would start and exit at once with MODULE_NOT_FOUND).
+    const entry = this.pyrightCandidates().find((e) => exists(e) && exists(path.join(path.dirname(e), 'dist', 'pyright-langserver.js')));
     if (!entry) throw new StartupError('ServerNotFound', 'The bundled Pyright language server is missing from this installation of Refyntra. Reinstall the extension.');
     return { command: process.execPath, args: [entry, '--stdio'], cwd: path.dirname(entry), env: { ELECTRON_RUN_AS_NODE: '1' } };
   }
@@ -119,5 +121,5 @@ export function findCargo(): string | undefined {
 export const CARGO_NOT_FOUND: EnvironmentNote = {
   reasonCode: 'CargoNotFound',
   message:
-    'cargo (the Rust toolchain) was not found. rust-analyzer still lists the symbols of open files and finds definitions and references inside them, but it cannot load the Cargo project: results across files and crates, the standard library and dependencies are missing or incomplete. Install Rust from https://rustup.rs and restart the backend. Refyntra never installs anything itself.',
+    'cargo (the Rust toolchain) was not found. Without it rust-analyzer cannot load the Cargo project, so Rust Related, Rename and Find return no results for the files of that project (verified on Linux with the bundled rust-analyzer). Install Rust from https://rustup.rs and restart the backend. Refyntra never installs anything itself.',
 };

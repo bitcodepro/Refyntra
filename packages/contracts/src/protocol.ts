@@ -270,8 +270,12 @@ export type RelationKind =
   | 'implementation' | 'reference' | 'test';
 
 /** `clients` (additive): heuristic frontend call sites of an endpoint (TS-side HTTP linking; never sent by the host). */
-export type RelationGroup = 'declarations' | 'handlers' | 'callers' | 'clients' | 'endpoints' | 'data' | 'registrations' | 'implementations' | 'references' | 'tests';
-export const RELATION_GROUP_ORDER: readonly RelationGroup[] = ['declarations', 'handlers', 'callers', 'clients', 'endpoints', 'data', 'registrations', 'implementations', 'references', 'tests'];
+/**
+ * `styles`, `usedBy`, `unused` (additive): HTML/CSS links (TS side; never sent by the host): the rules of a class, the
+ * uses of a rule, and selectors without a static use (information only).
+ */
+export type RelationGroup = 'declarations' | 'handlers' | 'callers' | 'clients' | 'endpoints' | 'data' | 'styles' | 'usedBy' | 'registrations' | 'implementations' | 'references' | 'tests' | 'unused';
+export const RELATION_GROUP_ORDER: readonly RelationGroup[] = ['declarations', 'handlers', 'callers', 'clients', 'endpoints', 'data', 'styles', 'usedBy', 'registrations', 'implementations', 'references', 'tests', 'unused'];
 
 export interface EndpointInfo {
   /** e.g. ["GET"]; empty = any/unknown. */
@@ -282,7 +286,8 @@ export interface EndpointInfo {
   location: Location;
   /** Handler method/lambda symbol when resolvable. */
   handler?: SymbolRef;
-  kind: 'minimal-api' | 'mvc';
+  /** `next-*` / `angular-route` (additive, TS side only; never sent by the host): web framework routes of the web worker. */
+  kind: 'minimal-api' | 'mvc' | 'next-page' | 'next-route-handler' | 'next-api' | 'angular-route';
 }
 
 export interface DiRegistrationInfo {

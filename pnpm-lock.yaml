@@ -245,6 +245,31 @@ importers:
         specifier: 3.2.4
         version: 3.2.4(@types/node@22.18.6)(supports-color@7.2.0)
 
+  packages/adapter-web-styles:
+    dependencies:
+      '@refyntra/application':
+        specifier: workspace:*
+        version: link:../application
+      '@refyntra/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@refyntra/domain':
+        specifier: workspace:*
+        version: link:../domain
+      vscode-css-languageservice:
+        specifier: 6.3.10
+        version: 6.3.10
+      vscode-html-languageservice:
+        specifier: 5.6.2
+        version: 5.6.2
+      vscode-languageserver-textdocument:
+        specifier: 1.0.12
+        version: 1.0.12
+    devDependencies:
+      vitest:
+        specifier: 3.2.4
+        version: 3.2.4(@types/node@22.18.6)(supports-color@7.2.0)
+
   packages/application:
     dependencies:
       '@refyntra/contracts':
@@ -270,6 +295,9 @@ importers:
       '@refyntra/adapter-vscode-providers':
         specifier: workspace:*
         version: link:../adapter-vscode-providers
+      '@refyntra/adapter-web-styles':
+        specifier: workspace:*
+        version: link:../adapter-web-styles
       '@refyntra/application':
         specifier: workspace:*
         version: link:../application
@@ -282,6 +310,9 @@ importers:
       '@refyntra/infrastructure':
         specifier: workspace:*
         version: link:../infrastructure
+      '@refyntra/web-frameworks':
+        specifier: workspace:*
+        version: link:../web-frameworks
       '@types/node':
         specifier: 22.18.6
         version: 22.18.6
@@ -317,7 +348,36 @@ importers:
         specifier: 22.18.6
         version: 22.18.6
 
+  packages/web-frameworks:
+    dependencies:
+      '@refyntra/application':
+        specifier: workspace:*
+        version: link:../application
+      '@refyntra/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@refyntra/domain':
+        specifier: workspace:*
+        version: link:../domain
+    devDependencies:
+      '@angular/language-service':
+        specifier: 22.2.1
+        version: 22.2.1
+      '@types/node':
+        specifier: 22.18.6
+        version: 22.18.6
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: 3.2.4
+        version: 3.2.4(@types/node@22.18.6)(supports-color@7.2.0)
+
 packages:
+
+  '@angular/language-service@22.2.1':
+    resolution: {integrity: sha512-rLn5cEIZxcMu64USrAWpp/mQnq5UF443QsJNjvYJBi96BepLUtdneyKMsr9MtjBXkwOO7A0IlblX7xCVnRb1ag==}
+    engines: {node: ^22.22.3 || ^24.15.0 || >=26.0.0}
 
   '@azu/format-text@1.0.2':
     resolution: {integrity: sha512-Swi4N7Edy1Eqq82GxgEECXSSLyn6GOb5htRFPzBDdUkECGXtlf12ynO5oJSpWKPwCaUssOu7NfhDcCWpIC6Ywg==}
@@ -982,6 +1042,9 @@ packages:
 
   '@vitest/utils@3.2.4':
     resolution: {integrity: sha512-fB2V0JFrQSMsCo9HiSq3Ezpdv4iYaXRG1Sx8edX3MwxfyNn83mKiGzOcH+Fkxt4MHxr3y42fQi1oeAInqgX2QA==}
+
+  '@vscode/l10n@0.0.18':
+    resolution: {integrity: sha512-KYSIHVmslkaCDyw013pphY+d7x1qV8IZupYfeIfzNA+nsaWHbn5uPuQRvdRFsa9zFzGeudPuoGoZ1Op4jrJXIQ==}
 
   '@vscode/test-electron@2.5.2':
     resolution: {integrity: sha512-8ukpxv4wYe0iWMRQU18jhzJOHkeGKbnw7xWRX3Zw1WJA4cEKbHcmmLPdPrPtL6rhDcrlCZN+xKRpv09n4gRHYg==}
@@ -2110,6 +2173,11 @@ packages:
     engines: {node: '>=14.17'}
     hasBin: true
 
+  typescript@6.0.3:
+    resolution: {integrity: sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw==}
+    engines: {node: '>=14.17'}
+    hasBin: true
+
   uc.micro@2.1.0:
     resolution: {integrity: sha512-ARDJmphmdvUk6Glw7y9DQ2bFkKBHwQHLi2lsaH6PPmz/Ka9sFOBsBluozhDltWmnv9u/cF6Rt87znRTPV+yp/A==}
 
@@ -2221,6 +2289,24 @@ packages:
       jsdom:
         optional: true
 
+  vscode-css-languageservice@6.3.10:
+    resolution: {integrity: sha512-eq5N9Er3fC4vA9zd9EFhyBG90wtCCuXgRSpAndaOgXMh1Wgep5lBgRIeDgjZBW9pa+332yC9+49cZMW8jcL3MA==}
+
+  vscode-html-languageservice@5.6.2:
+    resolution: {integrity: sha512-ulCrSnFnfQ16YzvwnYUgEbUEl/ZG7u2eV27YhvLObSHKkb8fw1Z9cgsnUwjTEeDIdJDoTDTDpxuhQwoenoLNMg==}
+
+  vscode-languageserver-textdocument@1.0.12:
+    resolution: {integrity: sha512-cxWNPesCnQCcMPeenjKKsOCKQZ/L6Tv19DTRIGuLWe32lyzWhihGVJ/rcckZXJxfdKCFvRLS3fpBIsV/ZGX4zA==}
+
+  vscode-languageserver-types@3.17.5:
+    resolution: {integrity: sha512-Ld1VelNuX9pdF39h2Hgaeb5hEZM2Z3jUrrMgWQAu82jMtZp7p3vJT3BzToKtZI7NgQssZje5o0zryOrhQvzQAg==}
+
+  vscode-languageserver-types@3.18.4:
+    resolution: {integrity: sha512-nQsacoiijvl0fRf2q28uFDrAVwRhdCa3QveiF7/CX0r18mLR5FU/1WskSsCKOjmEbtteKUnY8x8Yzxop+k0zwg==}
+
+  vscode-uri@3.2.0:
+    resolution: {integrity: sha512-m2gXo3bn0G1kT9InzMf07fTbqMbGtyckj3bH5ktLO+1Ssv+yiATZ4dhwaQv9UZWxJh6E9IFGnQyjgWVDWVBDrg==}
+
   whatwg-encoding@3.1.1:
     resolution: {integrity: sha512-6qN4hJdMwfYBtE3YBTTHhoeuUrDBPZmbQaxWAqSALV/MeEnR5z1xd8UKud2RAkFoPkmB+hli1TZSnyi84xz1vQ==}
     engines: {node: '>=18'}
@@ -2265,6 +2351,8 @@ packages:
     resolution: {integrity: sha512-phENi2PLiHnHb6QBVot+dJnaAZ0xosj7p3fWl+znIjBDlnMI2PsZCJZ306BPTFOaHf5qdDEI8x5qFrSOBN5vrw==}
 
 snapshots:
+
+  '@angular/language-service@22.2.1': {}
 
   '@azu/format-text@1.0.2': {}
 
@@ -2793,6 +2881,8 @@ snapshots:
       '@vitest/pretty-format': 3.2.4
       loupe: 3.2.1
       tinyrainbow: 2.0.0
+
+  '@vscode/l10n@0.0.18': {}
 
   '@vscode/test-electron@2.5.2(supports-color@7.2.0)':
     dependencies:
@@ -4062,6 +4152,8 @@ snapshots:
 
   typescript@5.9.3: {}
 
+  typescript@6.0.3: {}
+
   uc.micro@2.1.0: {}
 
   underscore@1.13.8: {}
@@ -4160,6 +4252,28 @@ snapshots:
       - terser
       - tsx
       - yaml
+
+  vscode-css-languageservice@6.3.10:
+    dependencies:
+      '@vscode/l10n': 0.0.18
+      vscode-languageserver-textdocument: 1.0.12
+      vscode-languageserver-types: 3.17.5
+      vscode-uri: 3.2.0
+
+  vscode-html-languageservice@5.6.2:
+    dependencies:
+      '@vscode/l10n': 0.0.18
+      vscode-languageserver-textdocument: 1.0.12
+      vscode-languageserver-types: 3.18.4
+      vscode-uri: 3.2.0
+
+  vscode-languageserver-textdocument@1.0.12: {}
+
+  vscode-languageserver-types@3.17.5: {}
+
+  vscode-languageserver-types@3.18.4: {}
+
+  vscode-uri@3.2.0: {}
 
   whatwg-encoding@3.1.1:
     dependencies:

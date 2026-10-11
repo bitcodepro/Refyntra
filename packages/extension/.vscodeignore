@@ -3,6 +3,7 @@
 !LICENSE
 !README.md
 !dist/extension.js
+!dist/webWorker.js
 !media/**
 !walkthrough/**
 !host/**

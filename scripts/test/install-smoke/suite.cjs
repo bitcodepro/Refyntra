@@ -150,11 +150,15 @@ scenarios.pyrust = [
       await vscode.window.showTextDocument(doc);
       await waitFor(() => ['Ready', 'Partial', 'Failed'].includes(route('rust.rust-analyzer').state), 'rust-analyzer started', 180000);
       assert.notEqual(route('rust.rust-analyzer').state, 'Failed', JSON.stringify(route('rust.rust-analyzer')));
-      const r = await waitFor(async () => {
-        const x = await api.engine.related(pos);
-        return x.kind === 'related' && x.groups.some((g) => g.group === 'declarations') ? x : undefined;
-      }, 'rust-analyzer Related', 120000);
-      assert.match(r.groups[0].relations[0].target.location.uri, /lib\.rs$/);
+      // Without cargo (Health: CargoNotFound) rust-analyzer loads no crate, so there is nothing to relate; the launch of
+      // the bundled binary is still checked below. With cargo, Related resolves the use in usage.rs to lib.rs.
+      if (route('rust.rust-analyzer').reasonCode !== 'CargoNotFound') {
+        const r = await waitFor(async () => {
+          const x = await api.engine.related(pos);
+          return x.kind === 'related' && x.groups.some((g) => g.group === 'declarations') ? x : undefined;
+        }, 'rust-analyzer Related', 120000);
+        assert.match(r.groups[0].relations[0].target.location.uri, /lib\.rs$/);
+      }
       const l = api.lspLaunches().find((x) => /rust-analyzer(\.exe)?$/.test(x.command));
       assert.ok(l, JSON.stringify(api.lspLaunches()));
       assert.equal(lc(path.dirname(l.command)), lc(path.join(ext.extensionPath, 'servers', 'rust-analyzer')));

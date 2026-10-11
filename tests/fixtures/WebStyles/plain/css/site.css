@@ -1,0 +1,19 @@
+@import 'base.css';
+
+/* .commented-out { } */
+.card {
+  padding: 1rem;
+}
+
+.card > .highlight:hover,
+.highlight {
+  background: url(img/bg.png);
+}
+
+#main {
+  margin: 0;
+}
+
+.unused-thing a[href$=".pdf"] {
+  color: blue;
+}

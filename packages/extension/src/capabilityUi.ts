@@ -28,6 +28,9 @@ export const CAPABILITY_TITLES: Readonly<Record<string, string>> = {
   'rust.references': 'Show references (delegated)',
   'rust.rename': 'Rename with preview (provider-managed semantic coverage)',
   'rust.frameworkRelations': 'Framework relations (handlers, endpoints, registrations)',
+  // HTML/CSS route (bundled CSS/HTML language services, in-process).
+  'css.related': 'Show styles and uses (HTML/CSS)',
+  'css.renameClass': 'Rename CSS class',
 };
 
 /** Which command runs an available capability: matched on the capability's last segment. */

@@ -1,0 +1,5 @@
+{
+  "name": "web-angular-old-fixture",
+  "private": true,
+  "dependencies": { "@angular/core": "~12.2.0" }
+}

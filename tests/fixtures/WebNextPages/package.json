@@ -1,0 +1,5 @@
+{
+  "name": "web-next-pages-fixture",
+  "private": true,
+  "dependencies": { "next": "~12.3.0", "react": "^18.2.0" }
+}

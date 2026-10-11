@@ -17,7 +17,7 @@ if [ "${1:-}" != "--inside" ]; then
   docker build -q -t refyntra-linux-e2e - <<'DOCKERFILE' || exit 1
 FROM refyntra-linux-smoke
 RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
-      xvfb xauth dbus dbus-x11 procps \
+      xvfb xauth dbus dbus-x11 procps libglib2.0-bin \
       libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libgtk-3-0t64 libgbm1 libasound2t64 libxkbfile1 libsecret-1-0 \
       libxss1 libdrm2 libxcomposite1 libxdamage1 libxrandr2 libxshmfence1 libcups2t64 >/dev/null \
  && rm -rf /var/lib/apt/lists/*
@@ -32,7 +32,10 @@ step() { printf '\n==== %s ====\n' "$*"; }
 step "environment"
 uname -a; grep PRETTY_NAME /etc/os-release; node --version; dotnet --version; echo "VS Code $REFYNTRA_TEST_VSCODE_VERSION"
 mkdir -p /work
-rsync -a --exclude node_modules --exclude bin --exclude obj --exclude dist --exclude out --exclude '*.tsbuildinfo' --exclude .git --exclude .vscode-test /src/ /work/
+rsync -a --exclude node_modules --exclude bin --exclude obj --exclude dist --exclude out --exclude '*.tsbuildinfo' --exclude .git --exclude .vscode-test \
+  --exclude /packages/extension/servers/ --exclude /packages/extension/host/ /src/ /work/
+# The staging folders of a local package:vsix (servers/, host/) are left out: the container builds its own, and the
+# '--exclude dist' above would leave a partial copy (servers/pyright without its dist/ folder).
 ln -sfn /cache/vscode-test /work/.vscode-test
 cd /work
 corepack enable

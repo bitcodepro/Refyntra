@@ -918,6 +918,8 @@
   "devDependencies": {
     "@refyntra/adapter-vscode-providers": "workspace:*",
     "@refyntra/adapter-lsp": "workspace:*",
+    "@refyntra/adapter-web-styles": "workspace:*",
+    "@refyntra/web-frameworks": "workspace:*",
     "@refyntra/application": "workspace:*",
     "@refyntra/contracts": "workspace:*",
     "@refyntra/domain": "workspace:*",

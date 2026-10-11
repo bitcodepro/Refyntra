@@ -1,0 +1,6 @@
+@import 'vars';
+
+.legacy {
+  color: $primary;
+  @include card(4px);
+}

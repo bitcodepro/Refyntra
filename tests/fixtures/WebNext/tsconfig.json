@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "preserve",
+    "strict": true,
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": { "react": ["stubs/react/index.d.ts"], "next/link": ["stubs/next/link.d.ts"], "next/navigation": ["stubs/next/navigation.d.ts"] }
+  },
+  "include": ["app/**/*.ts", "app/**/*.tsx", "middleware.ts", "stubs/**/*.d.ts"]
+}

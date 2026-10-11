@@ -117,6 +117,46 @@ export function stagePyright(dest) {
   return JSON.parse(fs.readFileSync(path.join(src, 'package.json'), 'utf8')).version;
 }
 
+// ---- Web worker (React / Next.js / Angular, ADR-007): pinned npm packages of packages/web-frameworks, copied from
+// node_modules at packaging time. TypeScript (Apache-2.0): the compiler API file and its default lib .d.ts files
+// (needed by the checker; no tsc/tsserver executables). @angular/language-service (MIT): its self-contained bundle.
+export function webFrameworksModules() {
+  return path.join(repo, 'packages', 'web-frameworks', 'node_modules');
+}
+export const TYPESCRIPT_FILES = ['typescript.js', 'LICENSE.txt', 'ThirdPartyNoticeText.txt', 'package.json'];
+/** lib.*.d.ts default library files of the pinned TypeScript, copied next to typescript.js (where the compiler looks). */
+export const TYPESCRIPT_LIB = /^lib(\.[\w-]+)*\.d\.ts$/;
+export const ANGULAR_LS_FILES = ['bundles/language-service.js', 'package.json', 'LICENSE.txt'];
+
+const stripMap = (buf) => Buffer.from(buf.toString('utf8').replace(/\n?\/\/# sourceMappingURL=\S+\s*$/, '\n'), 'utf8');
+const trimManifest = (buf) => {
+  const pj = JSON.parse(buf.toString('utf8'));
+  return Buffer.from(JSON.stringify({ name: pj.name, version: pj.version, license: pj.license, author: pj.author, repository: pj.repository }, null, 2) + '\n');
+};
+
+/** Copies the pinned TypeScript and Angular language service into <dest>/typescript and <dest>/angular-language-service. */
+export function stageWebWorker(dest) {
+  const mods = webFrameworksModules();
+  const tsSrc = path.join(mods, 'typescript');
+  const ngSrc = path.join(mods, '@angular', 'language-service');
+  if (!fs.existsSync(path.join(tsSrc, 'lib', 'typescript.js')) || !fs.existsSync(path.join(ngSrc, 'bundles', 'language-service.js'))) throw new Error('typescript / @angular/language-service are not installed for packages/web-frameworks (pnpm install)');
+  const tsDest = path.join(dest, 'typescript');
+  const ngDest = path.join(dest, 'angular-language-service');
+  fs.rmSync(tsDest, { recursive: true, force: true });
+  fs.rmSync(ngDest, { recursive: true, force: true });
+  fs.mkdirSync(tsDest, { recursive: true });
+  fs.writeFileSync(path.join(tsDest, 'typescript.js'), stripMap(fs.readFileSync(path.join(tsSrc, 'lib', 'typescript.js'))));
+  fs.copyFileSync(path.join(tsSrc, 'LICENSE.txt'), path.join(tsDest, 'LICENSE.txt'));
+  fs.copyFileSync(path.join(tsSrc, 'ThirdPartyNoticeText.txt'), path.join(tsDest, 'ThirdPartyNoticeText.txt'));
+  fs.writeFileSync(path.join(tsDest, 'package.json'), trimManifest(fs.readFileSync(path.join(tsSrc, 'package.json'))));
+  for (const f of fs.readdirSync(path.join(tsSrc, 'lib'))) if (TYPESCRIPT_LIB.test(f)) fs.copyFileSync(path.join(tsSrc, 'lib', f), path.join(tsDest, f));
+  fs.mkdirSync(path.join(ngDest, 'bundles'), { recursive: true });
+  fs.writeFileSync(path.join(ngDest, 'bundles', 'language-service.js'), stripMap(fs.readFileSync(path.join(ngSrc, 'bundles', 'language-service.js'))));
+  fs.writeFileSync(path.join(ngDest, 'package.json'), trimManifest(fs.readFileSync(path.join(ngSrc, 'package.json'))));
+  fs.copyFileSync(path.join(LICENSES_DIR, 'angular-language-service-LICENSE.txt'), path.join(ngDest, 'LICENSE.txt'));
+  return { typescript: JSON.parse(fs.readFileSync(path.join(tsSrc, 'package.json'), 'utf8')).version, angular: JSON.parse(fs.readFileSync(path.join(ngSrc, 'package.json'), 'utf8')).version };
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const i = process.argv.indexOf('--target');
   const target = i >= 0 ? process.argv[i + 1] : currentTarget();

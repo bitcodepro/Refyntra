@@ -1,0 +1,33 @@
+{
+  "name": "@refyntra/web-frameworks",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "out/index.js",
+  "types": "out/index.d.ts",
+  "scripts": {
+    "build": "node ../../node_modules/typescript/bin/tsc -b"
+  },
+  "dependencies": {
+    "@refyntra/contracts": "workspace:*",
+    "@refyntra/domain": "workspace:*",
+    "@refyntra/application": "workspace:*"
+  },
+  "devDependencies": {
+    "@angular/language-service": "22.2.1",
+    "@types/node": "22.18.6",
+    "typescript": "6.0.3",
+    "vitest": "3.2.4"
+  },
+  "exports": {
+    ".": {
+      "types": "./out/index.d.ts",
+      "default": "./out/index.js"
+    },
+    "./node": {
+      "types": "./out/node.d.ts",
+      "default": "./out/node.js"
+    }
+  }
+}

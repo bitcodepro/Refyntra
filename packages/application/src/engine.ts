@@ -201,6 +201,10 @@ export interface EngineOptions {
   staleRetries?: number;
   /** Frontend ↔ backend HTTP linking (heuristic): answers Find `client:`. Its framework modules are registered separately. */
   httpLinks?: Pick<HttpLinkService, 'find'>;
+  /** HTML/CSS links: answers Find `css:` (class and id selectors). Its route and framework module are registered separately. */
+  webStyles?: { find(text: string, limit: number, token?: CancellationToken): Promise<{ items: FindItem[]; truncated: boolean }> };
+  /** React / Next.js / Angular (web worker): answers Find `component:` and `page:`. Its framework module is registered separately. */
+  webFrameworks?: { find(kind: 'component' | 'page', text: string, limit: number, token?: CancellationToken): Promise<{ items: FindItem[]; truncated: boolean; notes: string[] }> };
 }
 
 interface PlanEntry {
@@ -321,6 +325,8 @@ export class RefyntraEngine implements EngineClient {
     const outcome: FindOutcome = { query: parsed, items: [], truncated: false, notes: [], routeLabels: {} };
     if (parsed.errors.length > 0) return outcome;
     if (parsed.client) return this.findClientCalls(parsed, outcome, token, limit);
+    if (parsed.css) return this.findStyles(parsed, outcome, token, limit);
+    if (parsed.web) return this.findWeb(parsed.web, parsed, outcome, token, limit);
     if (parsed.text.length === 0 && !hasAnyFilter(parsed.filters)) return outcome;
     const lists: FindItem[][] = [];
     await Promise.all(
@@ -367,6 +373,48 @@ export class RefyntraEngine implements EngineClient {
     } catch (e) {
       if (e instanceof CancelledError) throw e;
       outcome.notes.push(`HTTP links: ${describeErrorWithRecovery(e)}`);
+    }
+    return outcome;
+  }
+
+  /** Find `css:`: class and id selectors of the workspace stylesheets and <style> blocks. */
+  private async findStyles(parsed: ParsedFindQuery, outcome: FindOutcome, token: CancellationToken | undefined, limit: number): Promise<FindOutcome> {
+    if (!this.o.webStyles) {
+      outcome.notes.push('HTML/CSS: not available in this host.');
+      return outcome;
+    }
+    if (!this.o.isTrusted()) {
+      outcome.notes.push('HTML/CSS: Restricted Mode — trust the workspace to search stylesheets.');
+      return outcome;
+    }
+    try {
+      const r = await this.o.webStyles.find(parsed.text, limit, token);
+      outcome.items = r.items;
+      outcome.truncated = r.truncated;
+      outcome.routeLabels!['web.styles'] = 'HTML/CSS';
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      outcome.notes.push(`HTML/CSS: ${describeErrorWithRecovery(e)}`);
+    }
+    return outcome;
+  }
+
+  /** Find `component:` / `page:`: React and Angular components, Next.js and Angular routes (web worker). */
+  private async findWeb(kind: 'component' | 'page', parsed: ParsedFindQuery, outcome: FindOutcome, token: CancellationToken | undefined, limit: number): Promise<FindOutcome> {
+    if (!this.o.webFrameworks) {
+      outcome.notes.push('React / Next.js / Angular: not available in this host.');
+      return outcome;
+    }
+    try {
+      const r = await this.o.webFrameworks.find(kind, parsed.text, limit, token);
+      outcome.items = r.items;
+      outcome.truncated = r.truncated;
+      outcome.notes.push(...r.notes.map((n) => `React / Next.js / Angular: ${n}`));
+      if (kind === 'page') outcome.notes.push('Routes: file-system and route-definition conventions only; middleware, rewrites, redirects and guards are not resolved.');
+      outcome.routeLabels!['web.frameworks'] = 'React / Next.js / Angular';
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      outcome.notes.push(`React / Next.js / Angular: ${describeErrorWithRecovery(e)}`);
     }
     return outcome;
   }

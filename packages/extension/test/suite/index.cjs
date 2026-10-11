@@ -1226,6 +1226,16 @@ scenarios['pyrust-lsp'] = [
         const section = a.healthPage.model().sections.find((s) => s.adapterId === 'rust');
         assert.equal(section.primary.id, 'installRust');
         assert.equal(section.primary.arg, 'https://rustup.rs/');
+        assert.match(JSON.stringify(a.health()), /cannot load the Cargo project/);
+        // Without cargo rust-analyzer loads no crate (observed on Linux: not even the declaring file answers), which is
+        // what Health says. Related must still answer honestly (no relations, no error) instead of hanging.
+        const lib = await tsPosition('src/lib.rs', 'get_order', 7);
+        const own = await a.engine.related(lib.at);
+        assert.ok(own.kind !== 'related' || !own.groups.some((g) => g.relations.length > 0 && g.group === 'references'), JSON.stringify(own));
+        // Rename is refused, not guessed: rust-analyzer cannot resolve the symbol without the crate (NotRenameable).
+        const ren = await a.engine.prepareRename(lib.at, 'fetch_order');
+        assert.equal(ren.kind, 'unavailable', JSON.stringify(ren));
+        return;
       }
       const r = await waitForRelated(a, at, 'rust-analyzer references');
       assert.equal(r.subject.name, 'get_order');
@@ -1519,6 +1529,11 @@ scenarios.cleanup = require('./cleanup.cjs').cases({ api, csharp, waitFor });
 scenarios['stack-trace'] = require('./stackTrace.cjs').cases({ api, csharp, waitFor });
 // Frontend ↔ backend HTTP links (test/suite/fullStack.cjs).
 scenarios['full-stack'] = require('./fullStack.cjs').cases({ api, csharp, waitFor });
+// HTML/CSS/SCSS/LESS ↔ code links with every other extension disabled (test/suite/webStyles.cjs).
+scenarios['web-styles'] = require('./webStyles.cjs').cases({ api, waitFor });
+// React / Next.js / Angular through the web worker (test/suite/webFrameworks.cjs).
+scenarios['web-frameworks'] = require('./webFrameworks.cjs').cases({ api, waitFor });
+scenarios['web-frameworks-restricted'] = require('./webFrameworks.cjs').restricted({ api, waitFor });
 // Task context (test/suite/taskContext.cjs).
 scenarios['task-context'] = require('./taskContext.cjs').cases({ api, csharp, waitFor });
 

@@ -5,8 +5,8 @@ import { compareLocations, compareStrings, locationKey } from './location';
 export interface FindItem {
   /** Stable key used for dedupe and selection. */
   key: string;
-  /** `client`: a heuristic HTTP client call site (Find `client:`). */
-  kind: 'symbol' | 'endpoint' | 'client';
+  /** `client`: a heuristic HTTP client call site (Find `client:`). `style`: a CSS class/id selector (Find `css:`). */
+  kind: 'symbol' | 'endpoint' | 'client' | 'style';
   label: string;
   /** Project, origin, endpoint style. */
   description: string;
@@ -19,6 +19,9 @@ export interface FindItem {
   providerRouteId: string;
   provenances: Provenance[];
 }
+
+/** Find description of an endpoint by its kind (web framework routes are TS-side only). */
+export const ENDPOINT_KIND_LABEL: Readonly<Record<string, string>> = { 'minimal-api': 'Minimal API', mvc: 'MVC', 'next-page': 'Next.js page', 'next-route-handler': 'Next.js route handler', 'next-api': 'Next.js API route', 'angular-route': 'Angular route' };
 
 export function endpointLabel(e: EndpointInfo): string {
   const methods = e.httpMethods.length > 0 ? e.httpMethods.join(',') : 'ANY';
@@ -51,7 +54,7 @@ export function toFindItem(item: SearchItem, providerRouteId: string): FindItem 
       key: `endpoint|${locationKey(e.location)}|${e.route}|${(e.httpMethods ?? []).join(',')}`,
       kind: 'endpoint',
       label: endpointLabel({ ...e, httpMethods: e.httpMethods ?? [] }),
-      description: e.kind === 'mvc' ? 'MVC' : 'Minimal API',
+      description: ENDPOINT_KIND_LABEL[e.kind] ?? 'Minimal API',
       detail: e.handler?.displayName ?? '',
       location: e.location,
       endpoint: e,

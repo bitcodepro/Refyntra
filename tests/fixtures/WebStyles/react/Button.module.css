@@ -1,0 +1,11 @@
+.root {
+  display: inline-block;
+}
+
+.primary {
+  color: white;
+}
+
+.unusedModule {
+  color: gray;
+}

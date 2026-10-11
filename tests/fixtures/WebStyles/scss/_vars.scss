@@ -1,0 +1,5 @@
+$primary: #336699;
+
+@mixin card($padding) {
+  padding: $padding;
+}

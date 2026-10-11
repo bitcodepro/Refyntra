@@ -6,12 +6,16 @@ export interface ParsedFindQuery {
   filters: SearchFilters;
   /** `client:` (unlinked HTTP client calls) or `client:all`; answered by HTTP linking, never sent to a route. */
   client?: 'unlinked' | 'all';
+  /** `css:` (CSS class and id selectors, `css:card` filters by name); answered by HTML/CSS links, never sent to a route. */
+  css?: boolean;
+  /** `component:` (React/Angular components) or `page:` (Next.js and Angular routes); answered by the web worker. */
+  web?: 'component' | 'page';
   /** User-facing problems (e.g. "type: and member: cannot be combined"). */
   errors: string[];
 }
 
 /** Only filters that are actually implemented. Shown as the QuickPick hint. */
-export const FIND_FILTER_HINT = 'Filters: type:  member:  project:NAME  route:/path  method:GET  entity:  table:NAME  client:';
+export const FIND_FILTER_HINT = 'Filters: type:  member:  project:NAME  route:/path  method:GET  entity:  table:NAME  client:  css:  component:  page:';
 
 const HTTP_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']);
 
@@ -37,8 +41,10 @@ export function parseFindQuery(input: string): ParsedFindQuery {
   const errors: string[] = [];
   const text: string[] = [];
   let client: 'unlinked' | 'all' | undefined;
+  let css = false;
+  let web: 'component' | 'page' | undefined;
   for (const token of tokenize(input)) {
-    const m = /^(type|member|project|route|method|entity|table|client):(.*)$/i.exec(token);
+    const m = /^(type|member|project|route|method|entity|table|client|css|component|page):(.*)$/i.exec(token);
     if (!m) {
       text.push(unquote(token));
       continue;
@@ -75,6 +81,15 @@ export function parseFindQuery(input: string): ParsedFindQuery {
           if (value) text.push(value);
         }
         break;
+      case 'component':
+      case 'page':
+        web = key as 'component' | 'page';
+        if (value) text.push(value);
+        break;
+      case 'css':
+        css = true;
+        if (value) text.push(value);
+        break;
       case 'method': {
         const verb = value.toUpperCase();
         if (!verb) errors.push('method: needs an HTTP method, e.g. method:GET');
@@ -88,7 +103,9 @@ export function parseFindQuery(input: string): ParsedFindQuery {
   if ((filters.route !== undefined || filters.method) && (filters.type || filters.member)) errors.push('route:/method: search endpoints and cannot be combined with type:/member:');
   if ((filters.entity || filters.table !== undefined) && (filters.member || filters.route !== undefined || filters.method)) errors.push('entity:/table: search EF Core entities and cannot be combined with member:/route:/method:');
   if (client && hasAnyFilter(filters)) errors.push('client: lists HTTP client calls and cannot be combined with other filters');
-  return { text: text.join(' ').trim(), filters, ...(client ? { client } : {}), errors };
+  if (css && (client || hasAnyFilter(filters))) errors.push('css: lists CSS selectors and cannot be combined with other filters');
+  if (web && (css || client || hasAnyFilter(filters))) errors.push(`${web}: lists web framework ${web === 'page' ? 'routes' : 'components'} and cannot be combined with other filters`);
+  return { text: text.join(' ').trim(), filters, ...(client ? { client } : {}), ...(css ? { css } : {}), ...(web ? { web } : {}), errors };
 }
 
 export function hasAnyFilter(f: SearchFilters): boolean {

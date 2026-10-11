@@ -28,7 +28,10 @@ step() { printf '\n==== %s ====\n' "$*"; }
 step "environment"
 uname -a; node --version; dotnet --version
 mkdir -p /work
-rsync -a --exclude node_modules --exclude bin --exclude obj --exclude dist --exclude out --exclude '*.tsbuildinfo' --exclude .git --exclude .vscode-test /src/ /work/
+rsync -a --exclude node_modules --exclude bin --exclude obj --exclude dist --exclude out --exclude '*.tsbuildinfo' --exclude .git --exclude .vscode-test \
+  --exclude /packages/extension/servers/ --exclude /packages/extension/host/ /src/ /work/
+# The staging folders of a local package:vsix (servers/, host/) are left out: the container builds its own, and the
+# '--exclude dist' above would leave a partial copy (servers/pyright without its dist/ folder).
 cd /work
 corepack enable
 corepack prepare "$(node -p "require('./package.json').packageManager")" --activate

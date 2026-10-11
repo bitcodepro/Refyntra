@@ -13,7 +13,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import path from 'node:path';
-import { RA_TARGETS, currentTarget, stagePyright, stageRustAnalyzer } from '../../../scripts/package/servers.mjs';
+import { RA_TARGETS, currentTarget, stagePyright, stageRustAnalyzer, stageWebWorker } from '../../../scripts/package/servers.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
@@ -70,6 +70,9 @@ fs.copyFileSync(path.join(repo, 'THIRD_PARTY_NOTICES.md'), notices);
 // 4. Pyright: the same files in every package.
 const pyrightVersion = stagePyright(path.join(serversDir, 'pyright'));
 console.log(`Pyright ${pyrightVersion}: staged into servers/pyright`);
+// 4b. Web worker runtime (React / Next.js / Angular): pinned TypeScript and Angular language service.
+const webVersions = stageWebWorker(serversDir);
+console.log(`TypeScript ${webVersions.typescript} and Angular language service ${webVersions.angular}: staged into servers/typescript and servers/angular-language-service`);
 
 const require = createRequire(import.meta.url);
 const vsce = path.join(path.dirname(require.resolve('@vscode/vsce/package.json')), 'vsce');

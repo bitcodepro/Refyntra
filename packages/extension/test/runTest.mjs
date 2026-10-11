@@ -244,6 +244,13 @@ const scenarios = e2e
         trusted: true,
         env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' },
       },
+      // HTML/CSS/SCSS/LESS ↔ code links on a temp copy of the WebStyles fixture, with every other extension disabled
+      // (also VS Code's built-in language features): Refyntra's bundled CSS/HTML language services answer alone.
+      { name: 'web-styles', plainCopy: 'WebStyles', trusted: true, env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' } },
+      // React / Next.js / Angular through Refyntra's web worker on temp copies of the Web* fixtures, every other
+      // extension disabled (also VS Code's built-in TypeScript features).
+      { name: 'web-frameworks', webCopy: ['WebReact', 'WebNext', 'WebAngular', 'WebAngularOld'], trusted: true, env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' } },
+      { name: 'web-frameworks-restricted', webCopy: ['WebReact'], trusted: false, env: { REFYNTRA_HOST_PATH: '', REFYNTRA_TEST_FORCE_RESTRICTED: '1' } },
       // Task context on a temp copy of Shop: add, move by an edit, reload, rename through Refyntra, delete.
       {
         name: 'task-context',
@@ -321,7 +328,17 @@ for (const s of scenarios.filter((x) => only.length === 0 || only.includes(x.nam
     copy = shopCopy(s.copy, s.copyOpts);
     s.workspace = copy.workspace;
   }
-  if (s.fixtureCopy) {
+  if (s.webCopy) {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `refyntra-${s.name}-`));
+    for (const f of s.webCopy) fs.cpSync(path.join(repo, 'tests', 'fixtures', f), path.join(tmp, f), { recursive: true });
+    copy = { workspace: tmp, cleanup: () => fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }) };
+    s.workspace = tmp;
+  } else   if (s.plainCopy) {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `refyntra-${s.name}-`));
+    fs.cpSync(path.join(repo, 'tests', 'fixtures', s.plainCopy), tmp, { recursive: true });
+    copy = { workspace: tmp, cleanup: () => fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }) };
+    s.workspace = tmp;
+  } else if (s.fixtureCopy) {
     copy = fixtureCopy(s.name, ...s.fixtureCopy);
     s.workspace = copy.workspace;
   } else if (s.tsProject) {

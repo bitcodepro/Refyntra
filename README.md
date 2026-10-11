@@ -306,9 +306,9 @@ like its C# host. It never registers editor providers for them and never uses an
   are not bundled (standard-library stubs are), so packages without their own type information resolve only through
   the environment.
 - **Rust without cargo**: Health says *Rust works partially: cargo (the Rust toolchain) was not found* with an
-  **Install Rust** button (opens rustup.rs; Refyntra installs nothing). rust-analyzer still lists the symbols of open
-  files and resolves code inside the crate as far as it can without the Cargo project model; the standard library,
-  dependencies, build-script output and proc-macros are missing, so results across crates are incomplete.
+  **Install Rust** button (opens rustup.rs; Refyntra installs nothing). Without cargo rust-analyzer cannot load the
+  Cargo project, so Rust Related, Rename and Find return no results for the files of that project until Rust is
+  installed and the backend restarted.
 - **Platforms**: rust-analyzer ships in the packages for Windows x64/arm64, Linux x64/arm64, Alpine x64 and macOS
   x64/arm64. On any other platform Health says *Rust is not available* (Python still works).
 - **Python limits**: dynamic attribute access (`getattr`/`setattr`/`__getattr__`), names inside strings (such as
@@ -358,6 +358,69 @@ group or `client:` is first needed, and then follows saves and file changes. It 
 framework output folders, `.d.ts` and minified files, files over 512 KB and anything past 5000 files. Not modelled:
 `.gitignore` itself, proxies, rewrites, API gateways, API versioning by header, OpenAPI-generated clients, GraphQL,
 SignalR, and calls whose URL comes from another file.
+
+## HTML and CSS (SCSS, LESS)
+
+Refyntra links stylesheets to the HTML and code that use them. It parses `.css`, `.scss`, `.less`, `.html` and `.htm`
+files with Microsoft's `vscode-css-languageservice` and `vscode-html-languageservice` (MIT), bundled inside Refyntra and
+run in-process: no language server, no download, and no other extension (it works with every other extension
+disabled, including VS Code's own CSS/HTML language features). TS/JS files are read with the same pattern scanner
+approach as the HTTP links (nothing is evaluated).
+
+- **From a use** (cursor on `styles.foo`, a class in `class="…"`/`className="…"`, an id, a `$variable`, an
+  `@include`, an `@import`/`@use`/`<link href>`): Related shows the rule or definition under **Styles**.
+- **From a rule** (cursor on `.foo` or `#main` in a stylesheet or a `<style>` block, on a variable or mixin
+  definition): Related shows **Used by** with the uses in HTML, code and other stylesheets.
+- **From a stylesheet** (cursor outside any selector): **Used by** lists the files that import or link it, and
+  **Possibly unused** lists classes without a static use — information only, never a problem, and labelled "may be
+  used dynamically".
+- **Find `css:`** lists class and id selectors (`css:card` filters by name).
+
+How sure each link is:
+
+| Link | Confidence |
+|---|---|
+| CSS Modules: `import styles from './x.module.css'` (also `import * as`, `require`) and `styles.foo`, `styles?.foo`, `styles['foo']` ↔ `.foo` in that file | proven (the import path resolves to the file and the member is static) |
+| SCSS/LESS variables, SCSS mixins ↔ their definition in the same file or a file reached through resolved `@use`/`@forward`/`@import` (`@use … as ns` namespaces respected) | proven; likely and "ambiguous" when several definitions are visible |
+| `@import`/`@use`/`<link rel="stylesheet">`/`import './x.css'` ↔ the stylesheet | proven when the path resolves to a workspace file |
+| Global classes: `class="a b"` (HTML, JSX), `className="…"`/`className={'…'}`, `el.className = '…'`, `classList.add/remove/toggle/contains/replace('a')`, `clsx`/`classnames`/`classNames`/`cx`/`cn`/`twMerge` string arguments and object keys, `querySelector('.a')`, Angular `[class.a]` ↔ `.a` rules | heuristic: first in the stylesheets linked from that page or component (`<link>`, `<style>`, `import './x.css'`, Angular `styleUrl(s)`), else in any global stylesheet of the workspace (with a limitation saying so); "ambiguous" when several files define it |
+| Ids: `id="x"`, `getElementById('x')`, `querySelector('#x')` ↔ `#x` rules | heuristic |
+| Template literals, `styles[name]`, expressions, `{{ }}`/`${ }` in attributes | unknown: never linked |
+
+**Rename of CSS classes is not offered in this version.** Actions on a class shows "Rename CSS class: unavailable —
+class names in strings can't be proven": class names are plain text in HTML, templates, string building and other
+libraries, so no rename could prove that it found every use. A CSS Module class is reached only through the imported
+object, but renaming it would mean editing TypeScript/JavaScript members (and any `styles[name]` access) from a
+stylesheet; this version does not edit across languages, and Actions says so.
+
+The workspace scan is bounded like the HTTP client scan: stylesheets and pages first, at most 5000 files of at most
+512 KB, `files.exclude`/`search.exclude`, dependency and output folders and `*.min.css` skipped; then it follows edits,
+saves and file changes. In Restricted Mode the links are not computed. Not modelled: `.sass` (indented syntax), Vue
+and Svelte single-file components, CSS-in-JS, Tailwind `@apply`, `:global(...)` in CSS Modules, SCSS placeholder
+selectors and `@extend`, LESS mixins, `node_modules` and `~` imports, bundler aliases, and stylesheets injected at run
+time.
+
+## React, Next.js and Angular
+
+Refyntra understands React, Next.js and Angular with its own **web worker**: a separate process on VS Code's Node
+runtime that runs the TypeScript compiler (TypeScript 6.0.3, Apache-2.0) and the Angular language service (22.2.1,
+MIT), both bundled inside Refyntra. No other extension and no download; the project's own `tsconfig.json`/`jsconfig.json`
+is used, project code is never run. It starts only in a trusted workspace with a `react`, `next` or `@angular/core`
+dependency, on the first Related or Find that needs it (see [ADR-007](docs/adr/ADR-007-web-worker.md)).
+
+- **React** (proven by the checker): a component's JSX usages and props, the props an attribute sets, the attributes
+  that set a prop, custom hooks and their calls; context providers and consumers (likely). Required props a usage does
+  not pass and props no usage passes are shown as information on the relation, never as problems.
+- **Next.js** (conventions by Next.js version): the route of `page`/`layout`/`route` files in the app and pages
+  routers (route groups, `[id]`, `[...slug]`, `[[...slug]]`, `@slot`, `(.)` interception, `pages/api`), route handler
+  methods, `'use client'`/`'use server'` boundaries, and literal `<Link href>`/`router.push`/`redirect`/`fetch('/api/…')`
+  paths linked to routes (heuristic). Middleware, rewrites, redirects, basePath and i18n are listed as limitations:
+  Refyntra never claims a full routing graph.
+- **Angular 17–22** (proven by the Angular language service): component ↔ template, template elements and bindings ↔
+  components, inputs and outputs, selector usages across templates, DI (`providedIn`, `providers`, constructor and
+  `inject()` injection), NgModule declarations/imports/exports, and route definitions (likely). Other majors are
+  refused with a reason. Stylesheets of components are linked by the HTML/CSS support above.
+- **Find**: `component:Name` (React and Angular components), `page:/path` (Next.js and Angular routes).
 
 ## Stack traces
 

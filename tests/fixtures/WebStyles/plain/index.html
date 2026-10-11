@@ -1,0 +1,19 @@
+<!doctype html>
+<html>
+<head>
+  <link rel="stylesheet" href="css/site.css">
+  <link rel="icon" href="favicon.ico">
+  <style>
+    .inline-only { color: red; }
+  </style>
+</head>
+<body>
+  <main id="main" class="card highlight inline-only">
+    <p class="{{ dynamicClass }}">dynamic</p>
+    <span class="base">base</span>
+  </main>
+  <script>
+    document.getElementById('main').classList.add('highlight');
+  </script>
+</body>
+</html>

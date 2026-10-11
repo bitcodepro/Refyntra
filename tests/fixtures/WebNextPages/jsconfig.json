@@ -1,0 +1,1 @@
+{ "compilerOptions": { "jsx": "preserve", "checkJs": false }, "include": ["pages/**/*", "app/**/*"] }

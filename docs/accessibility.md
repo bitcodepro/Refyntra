@@ -82,6 +82,9 @@ Defined once in `packages/extension/src/terminology.ts` (`GLOSSARY`, `STATE_PHRA
 | **preview** | Rename shows files, edits, project contexts and limits first. Nothing changes until Apply rename. | Rename preview, walkthrough |
 | **Client call** | A fetch/axios/HttpClient call in TypeScript or JavaScript whose literal URL matches an ASP.NET route. Always heuristic. | Related (Endpoints from the call, Clients from the endpoint), Find client: |
 | **Clients** | The Related group of an endpoint or action that lists its client calls (heuristic). | Related |
+| **Styles** | The Related group of a class, id, CSS Module member, variable or mixin that lists the rules or definitions it uses. Global classes are heuristic; CSS Modules and SCSS/LESS imports are proven. | Related, Find css: |
+| **Used by** | The Related group of a CSS rule, variable, mixin or stylesheet that lists its uses in HTML, code and other stylesheets. | Related |
+| **Possibly unused** | Selectors of a stylesheet without a static use. Information only (never a problem): the class may be used dynamically. | Related |
 | **resolved** | A task context item was found again where it was stored (or followed a rename made in Refyntra). | Task Context |
 | **moved** | A task context item was found again at a new place by its name; the stored place is updated. | Task Context |
 | **ambiguous** | Several symbols could be the task context item (or one with another kind or container); you choose, Refyntra never picks one silently. | Task Context ("Choose Symbol") |

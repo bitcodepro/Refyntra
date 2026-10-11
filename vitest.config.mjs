@@ -13,6 +13,9 @@ export default defineConfig({
       '@refyntra/adapter-testing': src('adapter-testing'),
       '@refyntra/adapter-vscode-providers': src('adapter-vscode-providers'),
       '@refyntra/adapter-lsp': src('adapter-lsp'),
+      '@refyntra/web-frameworks/node': fileURLToPath(new URL('./packages/web-frameworks/src/node.ts', import.meta.url)),
+      '@refyntra/web-frameworks': src('web-frameworks'),
+      '@refyntra/adapter-web-styles': src('adapter-web-styles'),
     },
   },
   test: {

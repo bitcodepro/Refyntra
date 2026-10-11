@@ -92,6 +92,9 @@ export function groupRelations(relations: readonly MergedRelation[]): RelationGr
   return groups;
 }
 
+const GROUP_TITLES: Readonly<Record<string, string>> = { usedBy: 'Used by', unused: 'Possibly unused' };
+
 export function relationGroupTitle(group: string): string {
+  if (GROUP_TITLES[group]) return GROUP_TITLES[group]!;
   return group.length > 0 ? group[0]!.toUpperCase() + group.slice(1) : group;
 }

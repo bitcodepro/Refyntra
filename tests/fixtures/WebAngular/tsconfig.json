@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "experimentalDecorators": true,
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": { "@angular/core": ["stubs/core/index.d.ts"], "@angular/router": ["stubs/router/index.d.ts"] }
+  },
+  "include": ["src/**/*.ts", "stubs/**/*.d.ts"],
+  "angularCompilerOptions": { "strictTemplates": true }
+}

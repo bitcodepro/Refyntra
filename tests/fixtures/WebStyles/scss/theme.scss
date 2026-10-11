@@ -1,0 +1,11 @@
+@use 'vars' as v;
+
+// .not-a-rule { }
+.btn {
+  color: v.$primary;
+  @include v.card(2px);
+
+  &-large {
+    font-size: 2rem;
+  }
+}

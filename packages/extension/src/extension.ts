@@ -10,6 +10,7 @@ import {
   RefyntraEngine,
 } from '@refyntra/application';
 import { DelegatedProviderAdapter, TS_JS_ROUTE_ID, createVsCodeProviderBridge } from '@refyntra/adapter-vscode-providers';
+import { WEB_STYLES_ROUTE_ID, WebStyleService, WebStylesLanguageAdapter, webStylesScriptFramework } from '@refyntra/adapter-web-styles';
 import { type LspLanguage, LspLanguageAdapter, PYTHON_LSP_LANGUAGE, RUST_LSP_LANGUAGE } from '@refyntra/adapter-lsp';
 import type { Location } from '@refyntra/contracts';
 import type { HealthSummary } from '@refyntra/domain';
@@ -29,6 +30,8 @@ import { HEALTH_SCHEME, HEALTH_TEXT_COMMAND, HealthDocument, HealthPage, StatusB
 import type { HealthPageModel } from './healthPageModel';
 import { HostLocator } from './host';
 import { VsCodeClientFiles, httpLinkSettings, registerClientIndexSync } from './httpClientFiles';
+import { VsCodeWebFiles, registerWebStyleIndexSync } from './webStyleFiles';
+import { setupWebFrameworks } from './webWorker';
 import { RelatedViewProvider, runRelatedGroupPick } from './related';
 import { PREVIEW_SCHEME, PreviewContentProvider, runNativeRename, runRename } from './rename';
 import { runCreateAction, undoCreate } from './createFile';
@@ -94,6 +97,8 @@ export interface RefyntraTestApi {
   stackTrace: StackTraceViewProvider;
   /** Task context view (e2e adds items, edits code and checks the resolution states). */
   taskContext: TaskContextViewProvider;
+  /** React / Next.js / Angular web worker: status and process launches (e2e). */
+  webFrameworks: { status(): ReturnType<import('@refyntra/web-frameworks').WebFrameworkService['status']>; launches(): { command: string; args: string[] }[] };
 }
 
 let engineRef: RefyntraEngine | undefined;
@@ -201,6 +206,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
   for (const fw of httpLinks.frameworks()) registry.registerFramework(fw);
   context.subscriptions.push(registerClientIndexSync(httpLinks, clientFiles));
 
+  // HTML/CSS/SCSS/LESS ↔ code links: the bundled CSS and HTML language services run in-process (no server, no other
+  // extension). A route for stylesheets and HTML pages, and a module on the TS/JS route (CSS Modules, className, ids).
+  const webFiles = new VsCodeWebFiles();
+  const webStyles = new WebStyleService({ files: webFiles, documentText: (uri) => tracker.get(uri)?.text });
+  registry.registerLanguage(new WebStylesLanguageAdapter({ service: webStyles, workspaceId, isTrusted, revision: () => tracker.revision }));
+  registry.registerFramework(webStylesScriptFramework(webStyles, [TS_JS_ROUTE_ID], isTrusted));
+  context.subscriptions.push(registerWebStyleIndexSync(webStyles.index, webFiles));
+
+  // React / Next.js / Angular: Refyntra's own web worker process (bundled TypeScript + Angular language service,
+  // ADR-007). A module on the TS/JS route and, for Angular templates, on the HTML/CSS route (which owns .html).
+  const web = setupWebFrameworks({
+    extensionPath: context.extensionPath,
+    devFallback: context.extensionMode !== vscode.ExtensionMode.Production,
+    logger,
+    isTrusted,
+    openDocuments: () => tracker.openDocuments(),
+    routeIds: [TS_JS_ROUTE_ID, WEB_STYLES_ROUTE_ID],
+    revision: () => tracker.revision,
+  });
+  registry.registerFramework(web.service.framework());
+  context.subscriptions.push(web.disposable);
+
   const editApplier = new VsCodeEditApplier();
   const engine = new RefyntraEngine({
     workspaceId,
@@ -211,6 +238,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     logger,
     isTrusted,
     httpLinks,
+    webStyles,
+    webFrameworks: web.service,
   });
   engineRef = engine;
 
@@ -298,6 +327,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
         return;
       }
       await engine.restart();
+      await web.service.restart();
     }),
     vscode.commands.registerCommand('refyntra.selectSolution', async () => {
       if (await solutions.pick()) await engine.inputsChanged('solution selected');
@@ -344,6 +374,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     statusBarLabel: () => statusBar.accessibleLabel(),
     stackTrace,
     taskContext: taskContext.provider,
+    webFrameworks: { status: () => web.service.status(), launches: () => web.launches.map((l) => ({ command: l.command, args: [...l.args] })) },
   };
 }
 

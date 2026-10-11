@@ -282,8 +282,15 @@ HTTP links (TS side only, never sent by the host): `http.call` (group `endpoints
 of the C# result that listed the endpoints). The endpoint list comes from the existing `code/search` with
 `filters.route = ""` (every endpoint, with methods, route, location and handler); no new method was needed.
 
+HTML/CSS links (TS side only, never sent by the host; route `web.styles` for stylesheets and HTML pages, and a module on
+the TS/JS route): `css.rule`, `css.idRule`, `css.moduleClass`, `css.import`, `css.variable`, `css.mixin` (group `styles`),
+`css.classUse`, `css.idUse`, `css.moduleUse`, `css.importedBy`, `css.variableUse`, `css.mixinInclude` (group `usedBy`) and
+`css.unusedSelector` (group `unused`, information only). Every target is a `target.location`. Heuristic links carry
+`{ kind: "heuristic", providerRouteId: "web.styles", basis }`; proven links (CSS Modules, resolved imports, SCSS/LESS
+definitions) carry an owned provenance of route `web.styles`. `FindItem.kind` gains `style` (Find `css:`).
+
 `RelatedResult` has no groups list: every entry of `relations` carries its `group`. The UI orders groups as
-declarations, handlers, callers, clients (TS-side HTTP links), endpoints, data, registrations, implementations, references, tests; unknown groups
+declarations, handlers, callers, clients (TS-side HTTP links), endpoints, data, styles, usedBy (TS-side HTML/CSS links), registrations, implementations, references, tests, unused (HTML/CSS: possibly unused selectors, information only); unknown groups
 follow in name order.
 
 EF Core kinds (provider route `csharp.roslyn/efcore`, group `data` unless noted): `efcore.entity` (DbContext or

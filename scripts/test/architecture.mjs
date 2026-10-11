@@ -9,6 +9,13 @@
 //   adapter-lsp     contracts + domain + application + adapter-vscode-providers (shared text rules); no vscode, no node
 //                   builtins, no infrastructure: the LSP client (process, framing, JSON-RPC) lives in infrastructure and
 //                   reaches the adapter only through the application's LspConnection port
+//   adapter-web-styles  contracts + domain + application + the bundled MIT parsers (vscode-css-languageservice,
+//                   vscode-html-languageservice, vscode-languageserver-textdocument); no vscode, no node builtins, no
+//                   processes: pure in-process parsing, composed only by the extension composition root
+//   web-frameworks  contracts + domain + application (+ type-only typescript); no vscode. Node builtins only in the
+//                   Node parts (src/worker/ = the worker process, src/host/ = its process client, src/node/, src/node.ts);
+//                   the pure parts (service, protocol, conventions) never import them. src/host/workerProcess.ts is the
+//                   only file outside infrastructure that starts a process: Refyntra's own web worker (ADR-007).
 //   The LSP client (lspClient.ts) lives in infrastructure; application and domain never import it.
 //   Only the extension composition root (packages/extension/src/extension.ts) and the test-support package
 //   adapter-testing may import @refyntra/adapter-vscode-providers (application/domain never do).
@@ -30,6 +37,8 @@ const RULES = {
   'adapter-testing': { forbid: ['@refyntra/extension', 'refyntra', 'vscode'] },
   'adapter-vscode-providers': { allow: ['@refyntra/contracts', '@refyntra/domain', '@refyntra/application', 'vscode'], forbidVscodeValue: true },
   'adapter-lsp': { allow: ['@refyntra/contracts', '@refyntra/domain', '@refyntra/application', '@refyntra/adapter-vscode-providers'], forbidVscode: true, forbidBuiltins: true },
+  'web-frameworks': { allow: ['@refyntra/contracts', '@refyntra/domain', '@refyntra/application', 'typescript'], forbidVscode: true, forbidBuiltins: true, nodeParts: /^packages\/web-frameworks\/src\/(worker\/|host\/|node\/|node\.ts$)/, typeOnly: ['typescript'] },
+  'adapter-web-styles': { allow: ['@refyntra/contracts', '@refyntra/domain', '@refyntra/application', 'vscode-css-languageservice', 'vscode-html-languageservice', 'vscode-languageserver-textdocument'], forbidVscode: true, forbidBuiltins: true },
 };
 
 const PROVIDERS_PKG = '@refyntra/adapter-vscode-providers';
@@ -60,8 +69,12 @@ export function checkSource(pkg, file, text) {
   const rule = RULES[pkg];
   const out = [];
   if (!rule) return out;
+  const relFile = path.relative(repo, file).split(path.sep).join('/');
+  const nodePart = !!rule.nodeParts?.test(relFile);
   for (const m of stripComments(text).matchAll(IMPORT_RE)) {
     const spec = m[1] ?? m[2];
+    if (rule.typeOnly?.includes(spec) && !/^\s*;?\s*(import|export)\s+type\s/.test(m[0])) out.push(`${file}: ${pkg} may import ${spec} only as a type (the worker loads the bundled copy at run time)`);
+    if (rule.nodeParts && !nodePart && spec && spec.startsWith('.') && rule.nodeParts.test(path.relative(repo, path.resolve(path.dirname(file), spec)).split(path.sep).join('/') + '/')) out.push(`${file}: the pure part of ${pkg} must not import its Node parts ("${spec}")`);
     if (!spec || spec.startsWith('.')) {
       if (spec && pkg !== 'extension') {
         const resolved = path.resolve(path.dirname(file), spec);
@@ -72,8 +85,8 @@ export function checkSource(pkg, file, text) {
     }
     const bare = spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0];
     if (rule.forbidVscode && bare === 'vscode') out.push(`${file}: ${pkg} must not import vscode`);
-    else if (rule.forbidBuiltins && (BUILTINS.has(spec) || BUILTINS.has(bare))) out.push(`${file}: ${pkg} must not import node builtin "${spec}"`);
-    else if (rule.allow && !rule.allow.includes(bare) && !(rule.forbidVscodeValue && (BUILTINS.has(spec) || BUILTINS.has(bare)))) out.push(`${file}: ${pkg} may only import ${rule.allow.join(', ') || 'relative files'}, found "${spec}"`);
+    else if (rule.forbidBuiltins && !nodePart && (BUILTINS.has(spec) || BUILTINS.has(bare))) out.push(`${file}: ${pkg} must not import node builtin "${spec}"`);
+    else if (rule.allow && !rule.allow.includes(bare) && !(nodePart && (BUILTINS.has(spec) || BUILTINS.has(bare))) && !(rule.forbidVscodeValue && (BUILTINS.has(spec) || BUILTINS.has(bare)))) out.push(`${file}: ${pkg} may only import ${rule.allow.join(', ') || 'relative files'}, found "${spec}"`);
     if (bare === PROVIDERS_PKG && !mayImportProviders(path.relative(repo, file).replace(/\\/g, '/'))) out.push(`${file}: only the extension composition root (extension.ts) may import ${PROVIDERS_PKG}`);
     if (rule.forbid?.includes(bare)) out.push(`${file}: ${pkg} must not import "${spec}"`);
   }
@@ -118,7 +131,21 @@ function selfTest() {
     ['adapter-lsp', "import { spawn } from 'node:child_process';", 1],
     ['adapter-lsp', "import type * as vscode from 'vscode';", 1],
     ['application', "import { createLspConnectionFactory } from '@refyntra/infrastructure';", 1],
+    ['adapter-web-styles', "import { getCSSLanguageService } from 'vscode-css-languageservice';", 0],
+    ['adapter-web-styles', "import * as vscode from 'vscode';", 1],
+    ['adapter-web-styles', "import { readFile } from 'node:fs';", 1],
+    ['adapter-web-styles', "import { x } from '@refyntra/infrastructure';", 1],
+    ['application', "import { WebStyleService } from '@refyntra/adapter-web-styles';", 1],
+    ['web-frameworks', "import type * as TS from 'typescript';", 0],
+    ['web-frameworks', "import * as ts from 'typescript';", 1],
+    ['web-frameworks', "import { readFileSync } from 'node:fs';", 1],
+    ['web-frameworks', "import * as vscode from 'vscode';", 1],
+    ['web-frameworks', "import { WorkerProcess } from './host/workerProcess';", 1],
+    ['web-frameworks', "import { x } from '@refyntra/infrastructure';", 1],
+    ['application', "import { WebFrameworkService } from '@refyntra/web-frameworks';", 1],
   ];
+  const nodeFile = path.join(repo, 'packages', 'web-frameworks', 'src', 'worker', 'x.ts');
+  if (checkSource('web-frameworks', nodeFile, "import * as fs from 'node:fs';").length !== 0) throw new Error('architecture self-test failed: web-frameworks worker may use node builtins');
   for (const [pkg, src, expected] of cases) {
     const got = checkSource(pkg, f, src).length;
     if (got !== expected) throw new Error(`architecture self-test failed for ${pkg}: ${JSON.stringify(src)} → ${got} violations, expected ${expected}`);
@@ -151,7 +178,7 @@ for (const pkg of Object.keys(RULES)) {
     const r = path.relative(repo, file);
     if (/\blanguages\.register(Definition|Rename|Reference|Implementation|DocumentSymbol|WorkspaceSymbol|TypeDefinition|Declaration)Provider\s*\(/.test(text)) violations.push(`${r}: Refyntra must not register VS Code navigation/rename providers`);
     if (/['"]vscode-languageclient(\/[^'"]*)?['"]/.test(text)) violations.push(`${r}: vscode-languageclient must not be used (own LSP client in infrastructure)`);
-    if (pkg !== 'infrastructure' && pkg !== 'extension' && /['"](node:)?child_process['"]/.test(text)) violations.push(`${r}: only infrastructure (and the composition root's tasks) may start processes`);
+    if (pkg !== 'infrastructure' && pkg !== 'extension' && r.split(path.sep).join('/') !== 'packages/web-frameworks/src/host/workerProcess.ts' && /['"](node:)?child_process['"]/.test(text)) violations.push(`${r}: only infrastructure (and the composition root's tasks) may start processes`);
   }
 }
 if (violations.length) {

@@ -1,0 +1,5 @@
+{
+  "name": "web-angular-fixture",
+  "private": true,
+  "dependencies": { "@angular/core": "^22.0.0", "@angular/router": "^22.0.0" }
+}

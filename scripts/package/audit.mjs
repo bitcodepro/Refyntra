@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { repo, extPkg, ensureVsix, extractVsix, walk, rel } from './lib.mjs';
-import { PYRIGHT_FILES, RA, TYPESHED_FILES } from './servers.mjs';
+import { ANGULAR_LS_FILES, PYRIGHT_FILES, RA, TYPESCRIPT_FILES, TYPESCRIPT_LIB, TYPESHED_FILES } from './servers.mjs';
 
 const vsix = ensureVsix();
 const tmp = extractVsix(vsix);
@@ -37,8 +37,10 @@ try {
   for (const f of files) {
     const base = path.posix.basename(f.rel);
     const inside = f.rel.replace(/^extension\//, '');
+    // The TypeScript default library declarations the web worker's checker needs (servers/typescript/lib.*.d.ts).
+    const tsLib = /^extension\/servers\/typescript\/[^/]+$/.test(f.rel) && TYPESCRIPT_LIB.test(base);
     for (const [re, why] of forbiddenBase) {
-      if (re.test(base) && !firstParty.test(base)) fail(`${f.rel}: ${why}`);
+      if (re.test(base) && !firstParty.test(base) && !tsLib) fail(`${f.rel}: ${why}`);
     }
     for (const re of forbiddenDir) if (re.test(inside)) fail(`${f.rel}: forbidden folder (${re.source})`);
     if (/\.map$/i.test(base)) fail(`${f.rel}: source map shipped (maps reference local source paths)`);
@@ -89,10 +91,16 @@ try {
   if (target && !raBinary) fail(`VSIX target ${target} has no pinned rust-analyzer`);
   const raAllowed = new Set(raBinary ? [raBinary, 'LICENSE-MIT.txt', 'LICENSE-APACHE.txt', 'VERSION.txt'].map((f) => `extension/servers/rust-analyzer/${f}`) : []);
   for (const f of files.filter((x) => x.rel.startsWith('extension/servers/'))) {
-    if (f.rel.startsWith('extension/servers/pyright/')) {
+    if (f.rel.startsWith('extension/servers/typescript/')) {
+      const n = f.rel.slice('extension/servers/typescript/'.length);
+      if (!TYPESCRIPT_FILES.includes(n) && !TYPESCRIPT_LIB.test(n)) fail(`${f.rel}: not one of the TypeScript files the web worker uses`);
+    } else if (f.rel.startsWith('extension/servers/angular-language-service/')) {
+      if (!ANGULAR_LS_FILES.includes(f.rel.slice('extension/servers/angular-language-service/'.length))) fail(`${f.rel}: not one of the Angular language service files the web worker uses`);
+    } else if (f.rel.startsWith('extension/servers/pyright/')) {
       if (!pyrightAllowed.has(f.rel) && !typeshedStdlib.test(f.rel)) fail(`${f.rel}: not one of the Pyright language-server files Refyntra bundles`);
     } else if (!raAllowed.has(f.rel)) fail(`${f.rel}: not allowed under servers/ (${target ? `the ${target} package carries only its own rust-analyzer` : 'the universal package carries no rust-analyzer'})`);
   }
+  for (const need of [...TYPESCRIPT_FILES.map((f) => `extension/servers/typescript/${f}`), 'extension/servers/typescript/lib.d.ts', ...ANGULAR_LS_FILES.map((f) => `extension/servers/angular-language-service/${f}`), 'extension/dist/webWorker.js']) if (!files.some((f) => f.rel === need)) fail(`${need}: web worker file is missing`);
   for (const need of [...pyrightAllowed, ...raAllowed]) if (!files.some((f) => f.rel === need)) fail(`${need}: bundled language-server file is missing`);
   if (raBinary) {
     const bin = path.join(tmp, 'extension', 'servers', 'rust-analyzer', raBinary);
