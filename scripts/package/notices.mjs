@@ -166,10 +166,12 @@ try {
   const npmLicenses = [];
   for (const { name, version, dir } of npmLicenseSources) {
     const f = fs.readdirSync(dir).find((x) => /^licen[sc]e(\.(md|txt))?$/i.test(x));
-    if (!f) { flag(`npm ${name}@${version}: no LICENSE file in the package`); continue; }
     const out = `npm-${name.replace(/[^\w.-]/g, '_')}-LICENSE.txt`;
+    // Packages that ship no LICENSE file use the upstream text vendored in scripts/package/licenses/.
+    const src = f ? path.join(dir, f) : path.join(LICENSES_DIR, out);
+    if (!fs.existsSync(src)) { flag(`npm ${name}@${version}: no LICENSE file in the package`); continue; }
     fs.mkdirSync(legalDir, { recursive: true });
-    fs.copyFileSync(path.join(dir, f), path.join(legalDir, out));
+    fs.copyFileSync(src, path.join(legalDir, out));
     npmLicenses.push({ rel: `legal/${out}`, what: `${name} ${version}` });
   }
 
