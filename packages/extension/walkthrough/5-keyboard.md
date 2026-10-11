@@ -1,6 +1,6 @@
 # Keyboard presets
 
-Refyntra adds no shortcuts by default. Set **refyntra.keybindings.preset** to:
+Refyntra uses the Visual Studio preset by default. Change **refyntra.keybindings.preset** to switch, or to `none` to turn shortcuts off:
 
 | Preset | Find | Actions | Rename | Related |
 |---|---|---|---|---|

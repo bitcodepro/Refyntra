@@ -61,7 +61,7 @@ Framework relations are found by Roslyn from verified symbol identity (owned-sem
    `route:/path`, `method:GET`, `entity:` (EF Core entities), `table:NAME` (entities by mapped table).
 4. **Refyntra: Actions** shows what is available at the cursor (and why not); **Refyntra: Rename** previews every change
    before **Apply**.
-5. Optional: set `refyntra.keybindings.preset` to `visualStudio` or `resharper` (**Refyntra: Keyboard Shortcuts Preset**).
+5. Shortcuts: the Visual Studio preset is on by default; set `refyntra.keybindings.preset` to `resharper` or `none` (**Refyntra: Keyboard Shortcuts Preset**).
    A preset may conflict with another keymap extension.
 
 **Refyntra: Get Started** opens the same steps as a walkthrough. If a result says *Results may be incomplete*, some
@@ -577,7 +577,7 @@ of the file is not proven, so the item becomes ambiguous or missing instead of f
 | Setting | Values | Description |
 |---|---|---|
 | `refyntra.hostPath` | path, machine scope | Use a host build from this location instead of the packaged one (development use). Only user or machine settings, never workspace settings, so a project cannot choose the executable |
-| `refyntra.keybindings.preset` | `none` (default), `visualStudio`, `resharper` | Optional keybinding preset |
+| `refyntra.keybindings.preset` | `visualStudio` (default), `resharper`, `none` | Optional keybinding preset |
 | `refyntra.rename.apply` | boolean, default on | Offer **Apply rename** after the preview (revalidated after you confirm, not saved). Off = preview-only |
 | `refyntra.cleanup.profile` | list of fix ids, default `removeUnnecessaryUsings`, `sortUsings`, `whitespace` | Fixes pre-selected by Code Cleanup (`fileScopedNamespace` is opt-in) |
 | `refyntra.related.followCursor` | boolean, default on | The Related view follows the cursor unless it is pinned |

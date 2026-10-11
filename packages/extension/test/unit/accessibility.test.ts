@@ -435,7 +435,7 @@ describe('keyboard reachability of commands (package.json + status bar menu)', (
     for (const m of MAIN_MENU) expect(m.label.replace(/^\$\([a-z-]+\)\s*/, '').length).toBeGreaterThan(3);
   });
 
-  it('keybinding presets are opt-in (every binding is gated by the preset setting)', () => {
+  it('keybinding presets (every binding is gated by the preset setting)', () => {
     for (const k of pkg.contributes.keybindings) expect(k.when).toMatch(/config\.refyntra\.keybindings\.preset == '(visualStudio|resharper)'/);
   });
 });
