@@ -116,8 +116,6 @@ Loading a project evaluates MSBuild, which can run project code. Therefore:
 - In a **trusted** workspace Refyntra loads the selected solution. Trust is not a sandbox.
 - Refyntra never runs `dotnet restore` or `dotnet build` on its own. When packages are missing, the Health page offers **Restore packages** (and Related offers **Run dotnet restore**); only when you click it (and only in a trusted workspace) does Refyntra run `dotnet restore <solution>` as a task in the terminal panel. The path is passed to `dotnet` as a single argument without a shell, so nothing in a file name is interpreted.
 
-See [SECURITY.md](SECURITY.md).
-
 ## Rename
 
 C# Rename changes code in existing files and never saves files. It never creates, deletes or moves files. The one file operation it can do: when you rename a top-level type whose file is named after it (`Foo.cs` for `class Foo`, partial parts `Foo.*.cs`), the preview offers **Also rename the file Foo.cs → Bar.cs**, on by default when it is proven safe (see [Renaming the file with the type](#renaming-the-file-with-the-type)). Otherwise the file keeps its name and the preview says why.

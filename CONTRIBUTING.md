@@ -35,6 +35,3 @@ dotnet test src/dotnet/Refyntra.sln -c Release
 
 Pin dependencies and commit lockfiles. Do not add dependencies with postinstall binary downloads.
 
-## Reporting security issues
-
-Do not open a public issue; see [SECURITY.md](SECURITY.md).
