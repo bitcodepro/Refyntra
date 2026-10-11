@@ -141,3 +141,24 @@ migration, `.Designer.cs` and model snapshot files reference it in `[DbContext(t
 Unchanged: read set (migration files are source files of the closure), revalidation, the single EditApplier, Undo. Other
 generated code is still refused. Residual risk, stated in the preview: the model snapshot keeps the old CLR name as a
 string, so the next migration may show a difference for the renamed type.
+
+## Amendment 5: deleted files (Safe Delete)
+
+Safe Delete deletes a file when the deleted type was the only code in it. A deletion is the third resource operation
+after renames (Amendment 1) and creates (Amendment 2), with its own order and checks:
+
+- **Last.** `delete` entries follow every text change and file rename of the plan. They run only when every text target
+  (and rename) was confirmed; the text edit is one all-or-nothing `applyEdit`, each delete its own `deleteFile`. A failed
+  or refused delete leaves the text edits applied and is reported as such (`textAppliedOnly`); nothing is rolled back.
+  Deleting last means a failure never leaves code that refers to a file that is already gone.
+- **Only the previewed file.** `PlannedFileDelete.expectedHash` is the SHA-256 of the file's text in the snapshot. The
+  file is a source entry of the read set (revalidated), and the EditApplier checks, synchronously and right before each
+  delete, that the disk text still has that hash and that no editor holds unsaved or different text; otherwise the
+  delete is `refused`. Confirmed = the file no longer exists on disk.
+- **Compile membership.** Only a file whose membership is the plain SDK default glob (the proof of Amendment 1: no
+  Compile item names or patterns it, defaults not disabled, not linked, not under bin/obj) is deleted; any other file is
+  kept without code and the plan says why. The compilation delta is computed with the file's documents removed.
+- **Host resync.** The client sends `workspace/didDeleteFiles` (protocol 1.6, one document sequence event); the host
+  removes the documents of paths that no longer exist on disk. An older host or an unknown outcome restarts the route.
+- **Undo.** Edited files are undone with the editor's Undo while they still have the applied text; a deleted file is
+  created again with its previewed text only while it is absent, followed by a route restart (the host dropped it).

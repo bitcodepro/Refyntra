@@ -11,6 +11,9 @@ export const CAPABILITY_TITLES: Readonly<Record<string, string>> = {
   'tests.run': 'Run test',
   'csharp.moveTypeToFile': 'Move type to file (preview first)',
   'csharp.generateHandler': 'Generate handler (MediatR, preview first)',
+  'csharp.safeDelete': 'Safe delete (only when unused, preview first)',
+  'csharp.extractMethod': 'Extract method from the selection (preview first)',
+  'csharp.changeSignature': 'Change signature (preview first)',
   // Delegated TS/JS route (public VS Code provider commands; results not owned by Refyntra).
   'typescript.find': 'Find TypeScript/JavaScript symbol (delegated)',
   'typescript.related': 'Show declarations and references (delegated)',
@@ -50,6 +53,12 @@ export function commandForCapability(capabilityId: string): string | undefined {
       return 'refyntra.moveTypeToFile';
     case 'generateHandler':
       return 'refyntra.generateHandler';
+    case 'safeDelete':
+      return 'refyntra.safeDelete';
+    case 'extractMethod':
+      return 'refyntra.extractMethod';
+    case 'changeSignature':
+      return 'refyntra.changeSignature';
     default:
       return undefined;
   }

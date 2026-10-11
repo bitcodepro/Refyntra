@@ -403,8 +403,9 @@ scenarios.shop = [
       for (const [rel, needle] of [['Shop.Contracts/Orders/OrderRequests.cs', 'GetOrderQuery('], ['Shop.Api/Services/OrderServices.cs', 'IOrderService']]) {
         const { at } = await shopPosition(rel, needle, 1);
         const actions = await a.engine.actions(at);
-        // The catalogue plus, where they apply, the create-file actions (outside the catalogue).
-        const ids = actions.items.map((i) => i.capabilityId).filter((id) => id !== 'csharp.moveTypeToFile' && id !== 'csharp.generateHandler').sort();
+        // The catalogue plus, where they apply, the create-file and code refactoring actions (outside the catalogue).
+        const extra = ['csharp.moveTypeToFile', 'csharp.generateHandler', 'csharp.safeDelete', 'csharp.changeSignature', 'csharp.extractMethod'];
+        const ids = actions.items.map((i) => i.capabilityId).filter((id) => !extra.includes(id)).sort();
         assert.deepEqual(ids, [...CAPABILITY_CATALOGUE].sort(), JSON.stringify(actions));
         const related = actions.items.find((i) => i.capabilityId === 'csharp.related');
         assert.equal(related.state, 'available');
@@ -1525,6 +1526,8 @@ scenarios['create-file'] = require('./createFile.cjs').cases({ api, csharp, wait
 scenarios['rename-efcore'] = require('./efMigrationRename.cjs').cases({ api, csharp, waitFor });
 // Code Cleanup (test/suite/cleanup.cjs).
 scenarios.cleanup = require('./cleanup.cjs').cases({ api, csharp, waitFor });
+// Safe Delete, Extract Method, Change Signature (test/suite/codeRefactor.cjs).
+scenarios['code-refactor'] = require('./codeRefactor.cjs').cases({ api, csharp, waitFor });
 // Stack trace navigation (test/suite/stackTrace.cjs).
 scenarios['stack-trace'] = require('./stackTrace.cjs').cases({ api, csharp, waitFor });
 // Frontend ↔ backend HTTP links (test/suite/fullStack.cjs).

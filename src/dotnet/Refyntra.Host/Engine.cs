@@ -21,8 +21,10 @@ public sealed class Engine : IRpcHandler, IDisposable
     /// PrepareParams.documentUri / targetFolderUri, workspace/didCreateFiles.
     /// 1.4: code/resolveFrame (stack trace navigation); action csharp.cleanup (PrepareParams.cleanup, plan.cleanup).
     /// 1.5: PrepareParams.generatedEdits ("efMigrations" | "none") and plan.efMigrations (EF Core migrations in a rename).
+    /// 1.6: actions csharp.safeDelete / csharp.extractMethod / csharp.changeSignature, PrepareParams.range / signature,
+    /// PlannedChange kind "delete", plan.fileDelete, code/signature, workspace/didDeleteFiles.
     /// </summary>
-    public const int ProtocolMinor = 5;
+    public const int ProtocolMinor = 6;
     /// <summary>How long workspace/snapshotBarrier waits for a missing document sequence (tests shorten it).</summary>
     public TimeSpan BarrierTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
@@ -100,6 +102,8 @@ public sealed class Engine : IRpcHandler, IDisposable
                 return await PrepareAsync(Params<PrepareParams>(p), ct).ConfigureAwait(false);
             case "refactor/revalidate":
                 return Revalidate(Params<RevalidateParams>(p), ct);
+            case "code/signature":
+                return await SignatureAsync(Params<SymbolQueryParams>(p), ct).ConfigureAwait(false);
             case "code/resolveFrame":
                 return await ResolveFrameAsync(Params<ResolveFrameParams>(p), ct).ConfigureAwait(false);
             case "analysis/run":
@@ -177,6 +181,25 @@ public sealed class Engine : IRpcHandler, IDisposable
                     else Log.Warn("overlay", "created file of no known plan ignored (a reload picks it up)");
                 }
                 session.ApplyFileCreates(creates, e.Sequence, e.WorkspaceRevision);
+                break;
+            }
+            case "workspace/didDeleteFiles":
+            {
+                // Deleted files host resync (Safe Delete): the client deleted files of a plan; their documents leave the
+                // snapshot (only paths that no longer exist on disk). No reload.
+                var e = p.Deserialize<DidDeleteFilesParams>(Json.Options)!;
+                if (!_sessions.TryGetValue(e.WorkspaceId, out var session))
+                {
+                    Log.Warn("overlay", "file delete for unknown workspace ignored");
+                    return;
+                }
+                var paths = new List<string>();
+                foreach (var f in e.Files)
+                {
+                    try { paths.Add(UriPaths.ToPath(f.Uri)); }
+                    catch (ArgumentException) { Log.Warn("overlay", "non-file uri in file delete ignored"); }
+                }
+                session.ApplyFileDeletes(paths, e.Sequence, e.WorkspaceRevision);
                 break;
             }
             case "refactor/discard":
@@ -476,6 +499,7 @@ public sealed class Engine : IRpcHandler, IDisposable
         list.Add(rename);
         list.Add(references);
         if (subject != null) list.AddRange(await CreateFileActionsAsync(snap, subject.Value.symbol, p.Uri, Make, ct).ConfigureAwait(false));
+        list.AddRange(await CodeActionsAsync(snap, subject?.symbol, p.Uri, p.Position, Make, ct).ConfigureAwait(false));
         // Code ↔ tests: there is no supported public test integration, so running is explained, not offered.
         if (subject != null && TestNavigation.IsTestSymbol(subject.Value.symbol))
         {
@@ -510,6 +534,59 @@ public sealed class Engine : IRpcHandler, IDisposable
             list.Add(a);
         }
         return list;
+    }
+
+    /// <summary>
+    /// Safe Delete and Change Signature at the subject (shown only for symbol kinds they apply to, with the reason when
+    /// unavailable); Extract Method inside a member body (it works on the editor selection).
+    /// </summary>
+    private static async Task<List<AvailabilityDto>> CodeActionsAsync(Snapshot snap, ISymbol? symbol, string? uri, PositionDto? position,
+        Func<string, string, string?, string?, AvailabilityDto> make, CancellationToken ct)
+    {
+        var list = new List<AvailabilityDto>();
+        if (symbol != null && symbol.Kind is not (SymbolKind.Namespace or SymbolKind.TypeParameter or SymbolKind.Alias or SymbolKind.Label or SymbolKind.RangeVariable or SymbolKind.Discard)
+            && symbol.Locations.Any(l => l.IsInSource))
+        {
+            var g = SafeDeletePlanner.Guard(snap, symbol, ct);
+            var a = make(SafeDeletePlanner.ActionId, g == null ? "available" : "unavailable", g?.reason, g?.message);
+            a.Limitations.Add("Preview first: deletes only when nothing else uses the symbol; otherwise the uses are listed.");
+            list.Add(a);
+        }
+        if (symbol is IMethodSymbol)
+        {
+            var g = ChangeSignaturePlanner.Guard(snap, symbol, ct);
+            var a = make(ChangeSignaturePlanner.ActionId, g == null ? "available" : "unavailable", g?.reason, g?.message);
+            a.Limitations.Add("Preview first: the method, its overrides/implementations and every call site found by the compiler are updated.");
+            list.Add(a);
+        }
+        if (uri != null && position != null)
+        {
+            string? path = null;
+            try { path = UriPaths.ToPath(uri); } catch (ArgumentException) { }
+            if (path != null && await ExtractMethodPlanner.InsideBodyAsync(snap, path, position.Line, position.Character, ct).ConfigureAwait(false))
+            {
+                var a = make(ExtractMethodPlanner.ActionId, "available", null, "Select statements or an expression first.");
+                a.Limitations.Add("Preview first: works on the editor selection; refuses selections it cannot extract without changing behavior.");
+                list.Add(a);
+            }
+        }
+        return list;
+    }
+
+    private async Task<SignatureInfoDto> SignatureAsync(SymbolQueryParams p, CancellationToken ct)
+    {
+        var snap = RequireSnapshot(p.WorkspaceId, p.SnapshotId);
+        var (symbol, _) = await SymbolIds.ResolveAsync(snap, p.SymbolId, ct).ConfigureAwait(false);
+        var info = await ChangeSignaturePlanner.DescribeAsync(snap, symbol, ct).ConfigureAwait(false);
+        return new SignatureInfoDto
+        {
+            Name = info.Name,
+            Display = info.Display,
+            Parameters = info.Parameters.Select(x => new SignatureParameterDto { Name = x.Name, Type = x.Type, DefaultValue = x.DefaultValue, Modifiers = x.Modifiers }).ToList(),
+            ReasonCode = info.ReasonCode,
+            Message = info.Message,
+            SnapshotId = snap.Id,
+        };
     }
 
     // ------------------------------------------------------------------ analysis
@@ -552,13 +629,21 @@ public sealed class Engine : IRpcHandler, IDisposable
     private async Task<PrepareResultDto> PrepareAsync(PrepareParams p, CancellationToken ct)
     {
         var snap = RequireSnapshot(p.WorkspaceId, p.SnapshotId);
-        if (p.ActionId is not ("csharp.rename" or MoveTypePlanner.ActionId or GenerateHandlerPlanner.ActionId or Refactorings.Cleanup.CleanupPlanner.ActionId))
+        if (p.ActionId is not ("csharp.rename" or MoveTypePlanner.ActionId or GenerateHandlerPlanner.ActionId or Refactorings.Cleanup.CleanupPlanner.ActionId
+            or SafeDeletePlanner.ActionId or ExtractMethodPlanner.ActionId or ChangeSignaturePlanner.ActionId))
             return new PrepareResultDto { Kind = "unavailable", ReasonCode = "UnsupportedAction", Message = $"Action {p.ActionId} is not supported." };
         RenameOutcome outcome;
         if (p.ActionId == Refactorings.Cleanup.CleanupPlanner.ActionId)
         {
             // Code Cleanup (1.4): no symbol; the scope (files, folders, projects) and the fix ids come in params.cleanup.
             outcome = await Refactorings.Cleanup.CleanupPlanner.PrepareAsync(snap, (p.Cleanup?.ScopeUris ?? new()).Select(PathOf).ToList(), p.Cleanup?.Fixes, ct).ConfigureAwait(false);
+        }
+        else if (p.ActionId == ExtractMethodPlanner.ActionId)
+        {
+            // Extract Method (1.6): no symbol; the selection comes in documentUri + range, the name in newName.
+            if (p.DocumentUri == null || p.Range == null)
+                return new PrepareResultDto { Kind = "unavailable", ReasonCode = "InvalidParams", Message = "Extract Method needs documentUri and range." };
+            outcome = await ExtractMethodPlanner.PrepareAsync(snap, PathOf(p.DocumentUri), p.Range.Start.Line, p.Range.Start.Character, p.Range.End.Line, p.Range.End.Character, p.NewName ?? "", ct).ConfigureAwait(false);
         }
         else
         {
@@ -567,6 +652,9 @@ public sealed class Engine : IRpcHandler, IDisposable
             {
                 MoveTypePlanner.ActionId => await MoveTypePlanner.PrepareAsync(snap, symbol, p.DocumentUri != null ? PathOf(p.DocumentUri) : null, ct).ConfigureAwait(false),
                 GenerateHandlerPlanner.ActionId => await GenerateHandlerPlanner.PrepareAsync(snap, symbol, p.TargetFolderUri != null ? PathOf(p.TargetFolderUri) : null, ct).ConfigureAwait(false),
+                SafeDeletePlanner.ActionId => await SafeDeletePlanner.PrepareAsync(snap, symbol, ct).ConfigureAwait(false),
+                ChangeSignaturePlanner.ActionId => await ChangeSignaturePlanner.PrepareAsync(snap, symbol,
+                    p.Signature?.Parameters.Select(x => new ParameterSpec(x.From, x.Name, x.Type, x.DefaultValue, x.CallSiteValue)).ToList(), ct).ConfigureAwait(false),
                 _ => await RenamePlanner.PrepareAsync(snap, symbol, p.NewName ?? "", ct, p.RenameFile, p.GeneratedEdits).ConfigureAwait(false),
             };
         }
@@ -610,7 +698,10 @@ public sealed class Engine : IRpcHandler, IDisposable
                 }))
                     // File rename: resource operations follow every text change (applied after them).
                     .Concat(plan.FileRenames.Select(r => new PlannedFileRenameDto { OldUri = UriPaths.ToUri(r.OldPath), NewUri = UriPaths.ToUri(r.NewPath), ResultHash = r.ResultHash }))
+                    // Deleted files (1.6): last, after every text change and file rename.
+                    .Concat(plan.FileDeletes.Select(d => new PlannedFileDeleteDto { Uri = UriPaths.ToUri(d.Path), ExpectedHash = d.ExpectedHash }))
                     .ToList(),
+                FileDelete = plan.FileDeletes.Count == 0 ? null : new FileDeleteOfferDto { Files = plan.FileDeletes.Select(d => UriPaths.ToUri(d.Path)).ToList() },
                 FileRename = plan.FileRenameOffer is { } offer
                     ? new FileRenameOfferDto
                     {

@@ -83,6 +83,21 @@
         "category": "Refyntra"
       },
       {
+        "command": "refyntra.safeDelete",
+        "title": "Safe Delete",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.extractMethod",
+        "title": "Extract Method",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.changeSignature",
+        "title": "Change Signature",
+        "category": "Refyntra"
+      },
+      {
         "command": "refyntra.cleanup",
         "title": "Code Cleanup",
         "category": "Refyntra"

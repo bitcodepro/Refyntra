@@ -21,7 +21,8 @@ export interface CreateActionRequest {
 
 const TITLES: Record<string, string> = { [CSHARP_MOVE_TYPE_ACTION]: 'Move Type to File', [CSHARP_GENERATE_HANDLER_ACTION]: 'Generate Handler' };
 
-async function currentText(uri: string): Promise<string> {
+/** The current text of a file: the open editor's text, else the disk text (UTF-8 only). */
+export async function currentText(uri: string): Promise<string> {
   const open = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri && !d.isClosed);
   if (open) return open.getText();
   const text = decodeUtf8(await vscode.workspace.fs.readFile(vscode.Uri.parse(uri, true)));

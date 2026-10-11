@@ -377,6 +377,69 @@ public sealed class PlannedFileCreateDto
 }
 
 /// <summary>A folder a generated file can be created in (protocol 1.3, Generate handler).</summary>
+/// <summary>Deleted file resource operation (protocol 1.6, Safe Delete): deleted after every text change, only while its text is unchanged.</summary>
+public sealed class PlannedFileDeleteDto
+{
+    public string Kind { get; set; } = "delete";
+    public string Uri { get; set; } = "";
+    /// <summary>SHA-256 of the text the file must still have when it is deleted.</summary>
+    public string ExpectedHash { get; set; } = "";
+}
+
+/// <summary>The files a plan deletes (protocol 1.6).</summary>
+public sealed class FileDeleteOfferDto
+{
+    public List<string> Files { get; set; } = new();
+}
+
+/// <summary>workspace/didDeleteFiles (protocol 1.6): files deleted by the client; part of the document sequence.</summary>
+public sealed class DidDeleteFilesParams
+{
+    public string WorkspaceId { get; set; } = "";
+    public long Sequence { get; set; }
+    public long WorkspaceRevision { get; set; }
+    public List<CreatedFileDto> Files { get; set; } = new();
+}
+
+/// <summary>One parameter of a new signature (protocol 1.6, Change Signature).</summary>
+public sealed class ParameterSpecDto
+{
+    /// <summary>Index of the existing parameter (kept, moved or renamed); null adds a parameter.</summary>
+    public int? From { get; set; }
+    public string Name { get; set; } = "";
+    /// <summary>Type of an added parameter.</summary>
+    public string? Type { get; set; }
+    /// <summary>Default value in the declaration (an added parameter becomes optional).</summary>
+    public string? DefaultValue { get; set; }
+    /// <summary>Value passed at every existing call site for an added parameter.</summary>
+    public string? CallSiteValue { get; set; }
+}
+
+public sealed class SignatureParamsDto
+{
+    public List<ParameterSpecDto> Parameters { get; set; } = new();
+}
+
+/// <summary>code/signature (protocol 1.6): the current parameters of the method at the subject.</summary>
+public sealed class SignatureInfoDto
+{
+    public string? Name { get; set; }
+    public string? Display { get; set; }
+    public List<SignatureParameterDto> Parameters { get; set; } = new();
+    public string? ReasonCode { get; set; }
+    public string? Message { get; set; }
+    public string SnapshotId { get; set; } = "";
+}
+
+public sealed class SignatureParameterDto
+{
+    public string Name { get; set; } = "";
+    public string Type { get; set; } = "";
+    public string? DefaultValue { get; set; }
+    /// <summary>"ref", "out", "in", "params", "this" (space separated), or empty.</summary>
+    public string Modifiers { get; set; } = "";
+}
+
 public sealed class FolderChoiceDto
 {
     public string FolderUri { get; set; } = "";
@@ -458,7 +521,7 @@ public sealed class RefactorPlanDto
     public long BaseWorkspaceRevision { get; set; }
     public string BaseSnapshotId { get; set; } = "";
     public List<string> ProjectContextIds { get; set; } = new();
-    /// <summary>PlannedFileCreateDto entries (1.3), then PlannedTextChangeDto entries, then PlannedFileRenameDto entries.</summary>
+    /// <summary>PlannedFileCreateDto entries (1.3), then PlannedTextChangeDto entries, then PlannedFileRenameDto entries, then PlannedFileDeleteDto entries (1.6).</summary>
     public List<object> WriteSet { get; set; } = new();
     public FileRenameOfferDto? FileRename { get; set; }
     /// <summary>Create-file plans (protocol 1.3): the created file and the folder choices.</summary>
@@ -472,6 +535,8 @@ public sealed class RefactorPlanDto
     public CleanupReportDto? Cleanup { get; set; }
     /// <summary>Rename (protocol 1.5): EF Core migrations that reference the symbol, and the mode of this plan.</summary>
     public EfMigrationsOfferDto? EfMigrations { get; set; }
+    /// <summary>Safe Delete (protocol 1.6): the files the plan deletes. Required when the writeSet has a "delete".</summary>
+    public FileDeleteOfferDto? FileDelete { get; set; }
 }
 
 /// <summary>EF Core migrations a rename touches (protocol 1.5): the files and whether this plan edits them.</summary>
@@ -501,6 +566,10 @@ public sealed class PrepareParams : WorkspaceParams
     /// rename the references in them too) or "none" (leave them unchanged; the plan is limited).
     /// </summary>
     public string? GeneratedEdits { get; set; }
+    /// <summary>Extract Method (protocol 1.6): the selection in <see cref="DocumentUri"/> (statements or one expression).</summary>
+    public RangeDto? Range { get; set; }
+    /// <summary>Change Signature (protocol 1.6): the new parameter list.</summary>
+    public SignatureParamsDto? Signature { get; set; }
 }
 
 public sealed class PrepareResultDto

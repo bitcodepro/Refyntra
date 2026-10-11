@@ -338,7 +338,7 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
    * Sends one document notification with the next wire sequence. The sequence is consumed only when the send
    * succeeded, so a failed send never leaves a gap that would make every later barrier wait for it.
    */
-  private send<N extends 'textDocument/didOpen' | 'textDocument/didChange' | 'textDocument/didSave' | 'textDocument/didClose' | 'workspace/didRenameFiles' | 'workspace/didCreateFiles'>(
+  private send<N extends 'textDocument/didOpen' | 'textDocument/didChange' | 'textDocument/didSave' | 'textDocument/didClose' | 'workspace/didRenameFiles' | 'workspace/didCreateFiles' | 'workspace/didDeleteFiles'>(
     session: Session,
     method: N,
     params: Omit<NotificationMap[N], 'sequence'>,
@@ -609,7 +609,7 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
 
   prepare(req: PrepareRequest, token?: CancellationToken): Promise<RouteResult<PrepareResult>> {
     return this.semantic('refactor/prepare', token, (s, snapshotId, traceId) =>
-      s.transport.request('refactor/prepare', { traceId, workspaceId: this.opts.workspaceId, snapshotId, actionId: req.actionId, symbolId: req.symbolId, newName: req.newName, ...(req.renameFile ? { renameFile: true } : {}), ...(req.targetFolderUri ? { targetFolderUri: req.targetFolderUri } : {}), ...(req.documentUri ? { documentUri: req.documentUri } : {}), ...(req.cleanup ? { cleanup: req.cleanup } : {}), ...(req.generatedEdits ? { generatedEdits: req.generatedEdits } : {}) }, token),
+      s.transport.request('refactor/prepare', { traceId, workspaceId: this.opts.workspaceId, snapshotId, actionId: req.actionId, symbolId: req.symbolId, newName: req.newName, ...(req.renameFile ? { renameFile: true } : {}), ...(req.targetFolderUri ? { targetFolderUri: req.targetFolderUri } : {}), ...(req.documentUri ? { documentUri: req.documentUri } : {}), ...(req.cleanup ? { cleanup: req.cleanup } : {}), ...(req.generatedEdits ? { generatedEdits: req.generatedEdits } : {}), ...(req.range ? { range: req.range } : {}), ...(req.signature ? { signature: req.signature } : {}) }, token),
     );
   }
 
@@ -679,6 +679,25 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
     const session = this.session;
     if (!session || session.protocolMinor < 3 || uris.length === 0) return false;
     return this.send(session, 'workspace/didCreateFiles', { workspaceId: this.opts.workspaceId, workspaceRevision, files: uris.map((uri) => ({ uri })) });
+  }
+
+  /** Deleted files (protocol 1.6): the host removes the documents of deleted files (same document sequence as didOpen/didClose). */
+  filesDeleted(uris: readonly string[], workspaceRevision: number): boolean {
+    const session = this.session;
+    if (!session || session.protocolMinor < 6 || uris.length === 0) return false;
+    return this.send(session, 'workspace/didDeleteFiles', { workspaceId: this.opts.workspaceId, workspaceRevision, files: uris.map((uri) => ({ uri })) });
+  }
+
+  /** Change Signature (protocol 1.6): the parameters of the method at the position (symbolAt, then code/signature). */
+  signatureAt(uri: string, position: Position, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').SignatureInfo | null>> {
+    return this.semantic('code/signature', token, async (s, snapshotId, traceId) => {
+      if (s.protocolMinor < 6) return { parameters: [], reasonCode: 'ProtocolTooOld', message: 'The C# host is too old for Change Signature; update the extension.', snapshotId };
+      const sym = await s.transport.request('code/symbolAt', { traceId, workspaceId: this.opts.workspaceId, snapshotId, uri, position }, token);
+      if (!sym || !sym.symbolId) return null;
+      const r = await s.transport.request('code/signature', { traceId, workspaceId: this.opts.workspaceId, snapshotId, symbolId: sym.symbolId }, token);
+      if (!r || !Array.isArray(r.parameters)) return null;
+      return { ...r, parameters: r.parameters.filter((p) => p && typeof p.name === 'string' && typeof p.type === 'string'), snapshotId: r.snapshotId ?? snapshotId };
+    });
   }
 
   discard(planId: string): void {

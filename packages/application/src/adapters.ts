@@ -73,6 +73,10 @@ export interface PrepareRequest {
   cleanup?: import('@refyntra/contracts').CleanupParams;
   /** Rename: what to do with EF Core migrations that reference the symbol (protocol 1.5). */
   generatedEdits?: import('@refyntra/contracts').GeneratedEditsMode;
+  /** Extract Method (protocol 1.6): the selection in `documentUri`. */
+  range?: import('@refyntra/contracts').Range;
+  /** Change Signature (protocol 1.6): the new parameter list. */
+  signature?: import('@refyntra/contracts').SignatureParams;
 }
 
 export interface DelegatedRenameRequest {
@@ -130,6 +134,13 @@ export interface LanguageAdapter {
    * backend cannot take it (protocol minor < 3, no session); the caller then restarts the route.
    */
   filesCreated?(uris: readonly string[], workspaceRevision: number): boolean;
+  /**
+   * Deleted files host resync (Safe Delete): files deleted by an applied plan (in the document sequence). Returns false
+   * when the backend cannot take it (protocol minor < 6, no session); the caller then restarts the route.
+   */
+  filesDeleted?(uris: readonly string[], workspaceRevision: number): boolean;
+  /** Optional (protocol 1.6): the parameters of the method at a position (Change Signature). Null when there is no symbol. */
+  signatureAt?(uri: string, position: Position, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').SignatureInfo | null>>;
   dispose(): Promise<void>;
   /** Present on delegated routes (descriptor.ownership 'delegated') that offer rename. */
   readonly delegatedRename?: DelegatedRenamePort;

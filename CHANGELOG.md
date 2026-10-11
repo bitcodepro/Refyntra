@@ -4,6 +4,36 @@ All notable changes are listed here. The project is alpha; nothing has been rele
 
 ## Unreleased
 
+### Added (code refactorings, protocol 1.6)
+
+- **Safe Delete** (`csharp.safeDelete`, command `refyntra.safeDelete`): deletes a type, method, constructor, property,
+  field, event, local or parameter only when Roslyn finds no use outside the deleted code; otherwise refuses and names
+  the uses (*Show usages*). Interface/abstract/virtual members cascade to their implementations/overrides; an
+  implementation or override alone is refused. All partial declarations are deleted; a file left without code is
+  deleted after the text edits when its Compile membership is the plain SDK glob (else kept empty, with the reason).
+  Parameters are removed with their call-site arguments (side-effect-free arguments only). Framework relations
+  (MediatR, DI, endpoints) and string/`dynamic` uses make the plan limited.
+- **Extract Method** (`csharp.extractMethod`, command `refyntra.extractMethod`): statements or one expression into a
+  new private method, from Roslyn data-flow and control-flow analysis (parameters, returned variable, `out`/`ref`,
+  locals, always-returning selections), `static` when possible, `async` when it awaits, enclosing type parameters with
+  constraints; name prompt. Honest refusals for jumps, mixed exits, `yield`, unsafe code, local functions, ref locals,
+  anonymous types, async out values, assignment targets, constant contexts and more (reason codes in protocol-v1.md).
+- **Change Signature** (`csharp.changeSignature`, command `refyntra.changeSignature`): add, remove, reorder and rename
+  parameters (new parameters with a call-site value and/or a default) across the override/implementation hierarchy and
+  every call site (named arguments, optional arguments, `params`, extension calls, constructor initializers); evaluation
+  order of side-effecting arguments kept with named arguments; `<param>` docs updated; re-binding check of every
+  rewritten call and of same-named overloads. Method groups, attributes, pattern-based names and type changes are
+  refused; string/`dynamic` uses are reported as unknown callers (limited plan).
+- Protocol 1.6: `PrepareParams.range`/`signature`, `PlannedChange` kind `delete` (last; checked against
+  `expectedHash` right before the delete), `RefactorPlanDto.fileDelete`, request `code/signature`, notification
+  `workspace/didDeleteFiles` (host resync; an older host or an unknown outcome restarts the route). ADR-004
+  Amendment 5 describes the delete order and checks. Plan validation (domain) rejects unlisted, misplaced or
+  overlapping deletes.
+- Tests: .NET fixtures `tests/fixtures/Refactorings` with positive and negative cases for each refactoring (results
+  applied to the copy and built with `dotnet build`); vitest for plan validation, apply outcomes, resync, the preview
+  summary and the Change Signature editor model; e2e scenario `code-refactor` (apply, file deletion + resync + Undo,
+  a delete refused when the file changes in the last moment, Extract Method, Change Signature).
+
 ### Added (Task context)
 
 - **Refyntra Task Context** view: named contexts per workspace (create, rename, delete, switch; the active one is shown

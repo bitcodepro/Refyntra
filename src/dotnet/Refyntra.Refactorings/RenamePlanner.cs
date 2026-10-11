@@ -59,6 +59,8 @@ public sealed class RenamePlan
     public Cleanup.CleanupReport? Cleanup { get; init; }
     /// <summary>EF Core migrations that reference the symbol: the mode of this plan and those files (null when none do).</summary>
     public EfMigrationOffer? EfMigrations { get; init; }
+    /// <summary>Safe Delete (protocol 1.6): files deleted after every text edit (empty otherwise).</summary>
+    public IReadOnlyList<PlannedFileDelete> FileDeletes { get; init; } = Array.Empty<PlannedFileDelete>();
 }
 
 public sealed record RenameOutcome(RenamePlan? Plan, string? ReasonCode, string? Message)
@@ -621,6 +623,9 @@ public static class RenamePlanner
         // File rename: the target of every file rename must still be absent and the rename still proven safe.
         if (FileRenamePlanner.Revalidate(plan.FileRenames) is { } fileGuard)
             return new RevalidationOutcome("stale", fileGuard.code == "TargetExists" ? "TargetExists" : "FileRenameUnsafe", "The file rename is no longer safe: " + fileGuard.message);
+        // Safe Delete: every file to delete must still exist and be writable (its text is a Source entry of the read set).
+        if (SolutionPlanBuilder.RevalidateDeletes(plan.FileDeletes) is { } deleteGuard)
+            return new RevalidationOutcome("stale", "FileDeleteUnsafe", "Deleting the file is no longer safe: " + deleteGuard.message);
 
         // Revalidation never upgrades: a plan prepared as "limited" stays "limited", with the same limitations.
         if (plan.ValidationStatus != "valid")

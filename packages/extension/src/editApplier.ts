@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import type { PlannedChange, PlannedFileCreate, PlannedFileRename, PlannedTextChange } from '@refyntra/contracts';
+import type { PlannedChange, PlannedFileCreate, PlannedFileDelete, PlannedFileRename, PlannedTextChange } from '@refyntra/contracts';
 import type { ApplyFileReport, ApplyReport, ApplyResourceReport, CapturedEdit, CommitResult, EditApplier } from '@refyntra/application';
 import { applyTextEditsToText, decodeUtf8, sha256 } from './textEdits';
 
@@ -29,6 +29,11 @@ interface RenameTarget {
   change: PlannedFileRename;
   oldUri: vscode.Uri;
   newUri: vscode.Uri;
+}
+
+interface DeleteTarget {
+  change: PlannedFileDelete;
+  uri: vscode.Uri;
 }
 
 /**
@@ -68,6 +73,10 @@ function diskExists(uri: vscode.Uri): boolean {
  * A rename is refused (not attempted) when its target appeared meanwhile; later renames are not attempted after a
  * rename that did not complete. Every step is reconciled against the editor and the disk.
  *
+ * Deleted files (Safe Delete) come last, each as its own WorkspaceEdit.deleteFile, only after every text target and file
+ * rename was confirmed, and only while the file still has exactly the planned text on disk and no unsaved or different
+ * text in an editor (checked synchronously right before the delete). Confirmed = the file is gone from the disk.
+ *
  * Fault injection for tests: `faults.rejectNextApply` makes the next text apply resolve false without calling VS Code;
  * `faults.rejectNextFileRename` does the same for the next file rename; `faults.beforeFileRename` runs right before
  * each file rename (e.g. to create the target in that moment).
@@ -81,19 +90,34 @@ export class VsCodeEditApplier implements EditApplier {
     rejectNextCreate: boolean;
     /** Created files: runs right after the creates and before the text targets are checked again. */
     afterCreate: ((uri: string) => void | Promise<void>) | undefined;
+    /** Deleted files: the next delete resolves false without calling VS Code. */
+    rejectNextDelete: boolean;
+    /** Deleted files: runs right before each delete (e.g. to change the file in that moment). */
+    beforeDelete: ((uri: string) => void | Promise<void>) | undefined;
   } = {
     rejectNextApply: false,
     rejectNextFileRename: false,
     beforeFileRename: undefined,
     rejectNextCreate: false,
     afterCreate: undefined,
+    rejectNextDelete: false,
+    beforeDelete: undefined,
   };
 
   async capture(writeSet: readonly PlannedChange[]): Promise<CapturedEdit | { ok: false; reason: string; uri?: string }> {
     const targets: Target[] = [];
     const renames: RenameTarget[] = [];
     const creates: CreateTarget[] = [];
+    const deletes: DeleteTarget[] = [];
     for (const change of writeSet) {
+      if (change.kind === 'delete') {
+        const uri = vscode.Uri.parse(change.uri, true);
+        if (uri.scheme !== 'file') return { ok: false, reason: 'a deleted file is not a local file', uri: change.uri };
+        if (!diskExists(uri)) return { ok: false, reason: `${label(uri)} no longer exists`, uri: change.uri };
+        deletes.push({ change, uri });
+        continue;
+      }
+      if (deletes.length > 0) return { ok: false, reason: 'a change follows a file deletion' };
       if (change.kind === 'create') {
         if (targets.length > 0 || renames.length > 0) return { ok: false, reason: 'a created file follows a text change' };
         const uri = vscode.Uri.parse(change.uri, true);
@@ -128,7 +152,7 @@ export class VsCodeEditApplier implements EditApplier {
       }
       targets.push({ change, uri, diskText });
     }
-    return { ok: true, commit: () => this.commit(targets, renames, creates) };
+    return { ok: true, commit: () => this.commit(targets, renames, creates, deletes) };
   }
 
   /** Builds the text edit after checking every target synchronously; a string is the reason it cannot be applied. */
@@ -165,7 +189,7 @@ export class VsCodeEditApplier implements EditApplier {
   }
 
   /** Synchronous check of every target, then the first editor apply is started with no await in between. */
-  private commit(targets: Target[], renames: RenameTarget[], creates: CreateTarget[]): CommitResult {
+  private commit(targets: Target[], renames: RenameTarget[], creates: CreateTarget[], deletes: DeleteTarget[] = []): CommitResult {
     const edit = this.textEdit(targets);
     if (!(edit instanceof vscode.WorkspaceEdit)) return edit;
     // The absence precondition once more, synchronously: a target that appeared means nothing is applied at all.
@@ -175,7 +199,14 @@ export class VsCodeEditApplier implements EditApplier {
     for (const c of creates) {
       if (targetExists(c.uri.fsPath) || openDocument(c.uri)) return { started: false, reason: `${label(c.uri)} already exists`, uri: c.change.uri };
     }
-    const withRenames = async (report: ApplyReport): Promise<ApplyReport> => (renames.length === 0 ? report : { ...report, resources: [...(report.resources ?? []), ...(await this.applyRenames(report, renames))] });
+    // The files to delete once more, synchronously: a file that changed means nothing is applied at all.
+    for (const d of deletes) {
+      const problem = this.deleteProblem(d);
+      if (problem) return { started: false, reason: problem, uri: d.change.uri };
+    }
+    const withDeletes = async (report: ApplyReport): Promise<ApplyReport> => (deletes.length === 0 ? report : { ...report, resources: [...(report.resources ?? []), ...(await this.applyDeletes(report, deletes))] });
+    const withRenames = async (report: ApplyReport): Promise<ApplyReport> =>
+      withDeletes(renames.length === 0 ? report : { ...report, resources: [...(report.resources ?? []), ...(await this.applyRenames(report, renames))] });
     if (creates.length > 0) return { started: true, result: this.applyCreates(creates, targets).then(withRenames) };
     const applying = this.startText(edit, targets);
     return {
@@ -269,6 +300,21 @@ export class VsCodeEditApplier implements EditApplier {
   }
 
   /**
+   * Undo of a deleted file (user action after a Safe Delete): creates the file again with its previewed text, only while
+   * it does not exist (also ignoring case). Checked synchronously right before the create starts.
+   */
+  async restoreDeletedFile(uri: vscode.Uri, text: string): Promise<boolean> {
+    if (targetExists(uri.fsPath) || openDocument(uri)?.isDirty) return false;
+    const edit = new vscode.WorkspaceEdit();
+    edit.createFile(uri, { overwrite: false, ignoreIfExists: false, contents: new TextEncoder().encode(text) });
+    try {
+      return (await vscode.workspace.applyEdit(edit)) && diskExists(uri);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Undo of applied text edits (Code Cleanup): replaces each open document's text with `text` only while its current
    * text still hashes to `fromHash` (checked synchronously right before the edit starts). One workspace edit, not saved.
    * Returns false when a document is not open or changed (nothing is edited then).
@@ -285,6 +331,75 @@ export class VsCodeEditApplier implements EditApplier {
     } catch {
       return false;
     }
+  }
+
+  /** Why a planned delete must not happen now (its text changed, unsaved changes, unreadable), or undefined. Synchronous. */
+  private deleteProblem(d: DeleteTarget): string | undefined {
+    let text: string | undefined;
+    try {
+      text = decodeUtf8(fs.readFileSync(d.uri.fsPath));
+    } catch {
+      return `${label(d.uri)} cannot be read`;
+    }
+    if (text === undefined || sha256(text) !== d.change.expectedHash) return `${label(d.uri)} changed`;
+    const doc = openDocument(d.uri);
+    if (doc && (doc.isDirty || sha256(doc.getText()) !== d.change.expectedHash)) return `${label(d.uri)} has unsaved changes`;
+    return undefined;
+  }
+
+  /**
+   * Deleted files: one deleteFile each, only after every text target and file rename was confirmed, and only while the
+   * file is unchanged (checked right before each delete). Never rolled back.
+   */
+  private async applyDeletes(report: ApplyReport, deletes: DeleteTarget[]): Promise<ApplyResourceReport[]> {
+    const out: ApplyResourceReport[] = [];
+    const earlier = (report.resources ?? []).every((r) => r.status === 'confirmed');
+    let go = report.editorAccepted && report.files.every((f) => f.status === 'confirmed') && earlier;
+    for (const d of deletes) {
+      if (!go) {
+        out.push({ kind: 'delete', uri: d.change.uri, status: 'not-attempted', detail: report.files.every((f) => f.status === 'confirmed') && earlier ? 'an earlier file deletion did not complete' : 'the earlier edits were not all confirmed' });
+        continue;
+      }
+      try {
+        await this.faults.beforeDelete?.(d.change.uri);
+      } catch {
+        // Test hook only.
+      }
+      const problem = this.deleteProblem(d);
+      if (problem) {
+        out.push({ kind: 'delete', uri: d.change.uri, status: 'refused', detail: `${problem}; the file was not deleted` });
+        go = false;
+        continue;
+      }
+      let accepted: boolean;
+      if (this.faults.rejectNextDelete) {
+        this.faults.rejectNextDelete = false;
+        accepted = false;
+      } else {
+        const edit = new vscode.WorkspaceEdit();
+        edit.deleteFile(d.uri, { ignoreIfNotExists: false });
+        try {
+          accepted = await vscode.workspace.applyEdit(edit);
+        } catch {
+          accepted = false;
+        }
+      }
+      const onDisk = diskExists(d.uri);
+      let status: { status: ApplyResourceReport['status']; detail?: string };
+      if (!onDisk) status = { status: 'confirmed' };
+      else {
+        let same = false;
+        try {
+          same = sha256(decodeUtf8(fs.readFileSync(d.uri.fsPath)) ?? '') === d.change.expectedHash;
+        } catch {
+          same = false;
+        }
+        status = same ? { status: 'failed', detail: accepted ? 'the editor reported success but the file still exists' : 'the editor did not delete the file' } : { status: 'unknown', detail: 'after the delete: the file exists with other text' };
+      }
+      out.push({ kind: 'delete', uri: d.change.uri, ...status });
+      if (status.status !== 'confirmed') go = false;
+    }
+    return out;
   }
 
   /** confirmed = the file exists with exactly the planned text (editor buffer or disk); failed = it does not exist. */

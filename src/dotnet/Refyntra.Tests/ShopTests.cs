@@ -305,8 +305,11 @@ public sealed class ShopTests
         var (line, ch) = TestClient.Position(text, "record GetOrderQuery", 7);
         var caps = await C.RequestAsync("capability/query", new { traceId = "t", workspaceId = C.WorkspaceId, snapshotId = snap, uri = UriPaths.ToUri(Contracts), position = new { line, character = ch } });
         var byId = caps.EnumerateArray().ToDictionary(a => a.GetProperty("capabilityId").GetString()!);
-        // The catalogue, plus the create-file actions that apply here (outside the catalogue, like tests.run).
-        Assert.Equal(ReviewFindingsTests.Catalogue.Concat(new[] { "csharp.moveTypeToFile", "csharp.generateHandler" }).OrderBy(x => x), byId.Keys.OrderBy(x => x));
+        // The catalogue, plus the create-file and code refactoring actions that apply here (outside the catalogue, like
+        // tests.run). Change Signature and Extract Method do not apply to a record declaration.
+        Assert.Equal(ReviewFindingsTests.Catalogue.Concat(new[] { "csharp.moveTypeToFile", "csharp.generateHandler", "csharp.safeDelete" }).OrderBy(x => x), byId.Keys.OrderBy(x => x));
+        // Safe Delete is offered by kind (the uses are checked when it is prepared).
+        Assert.Equal("available", byId["csharp.safeDelete"].GetProperty("state").GetString());
         Assert.Equal("HandlerExists", byId["csharp.generateHandler"].GetProperty("reasonCode").GetString());
         Assert.Equal("available", byId["csharp.find"].GetProperty("state").GetString());
         Assert.Equal("available", byId["csharp.rename"].GetProperty("state").GetString());

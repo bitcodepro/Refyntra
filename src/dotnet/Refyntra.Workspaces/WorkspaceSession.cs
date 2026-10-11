@@ -513,6 +513,42 @@ public sealed class WorkspaceSession : IDisposable
         }
     }
 
+    /// <summary>
+    /// Deleted files (Safe Delete, protocol 1.6): files the client deleted (one event of the document sequence). A path
+    /// that no longer exists on disk leaves the snapshot in every context, with its overlay; a path that still exists is
+    /// left alone (the client reported a delete that did not happen). No project reload.
+    /// </summary>
+    public bool ApplyFileDeletes(IReadOnlyList<string> paths, long sequence, long workspaceRevision)
+    {
+        lock (_gate)
+        {
+            if (sequence <= _appliedSequence)
+            {
+                Log.Warn("overlay", $"ignored out-of-order file delete {sequence} (applied {_appliedSequence})");
+                return false;
+            }
+            _appliedSequence = sequence;
+            _revision = Math.Max(_revision, workspaceRevision);
+            if (_current != null)
+            {
+                var sol = _current.Solution;
+                foreach (var path in paths)
+                {
+                    if (System.IO.File.Exists(path)) { Log.Warn("overlay", "file reported deleted still exists; ignored"); continue; }
+                    if (!_pathIndex.Remove(path, out var ids) || ids.IsEmpty) continue;
+                    _overlays.Remove(path);
+                    var present = ids.Where(id => sol.GetDocument(id) != null).ToImmutableArray();
+                    foreach (var id in ids) _removed.Remove(id);
+                    if (present.Length > 0) sol = sol.RemoveDocuments(present);
+                    Log.Info("overlay", $"file deleted by the client: removed from {present.Length} project context(s)");
+                }
+                if (!ReferenceEquals(sol, _current.Solution)) _current = NewSnapshotLocked(sol);
+            }
+            ReleaseWaitersLocked();
+            return true;
+        }
+    }
+
     public bool HasOverlay(string path)
     {
         lock (_gate) return _overlays.ContainsKey(path);

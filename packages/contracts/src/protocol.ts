@@ -8,8 +8,10 @@ export const PROTOCOL_MAJOR = 1;
  * 1.1: optional `LoadDiagnostic.recoveryActions` (additive). 1.2: file rename with a type. 1.3: created files
  * (`PlannedChange` kind `create`, `fileCreate`, `targetFolderUri`/`documentUri`, `workspace/didCreateFiles`).
  * 1.4: stack frames, Code Cleanup. 1.5: EF Core migrations in a rename (`PrepareParams.generatedEdits`, `efMigrations`).
+ * 1.6: Safe Delete, Extract Method, Change Signature (`PrepareParams.range`/`signature`, `PlannedChange` kind `delete`,
+ * `fileDelete`, `code/signature`, `workspace/didDeleteFiles`).
  */
-export const PROTOCOL_MINOR = 5;
+export const PROTOCOL_MINOR = 6;
 
 /** Zero-based line, UTF-16 code unit character. */
 export interface Position {
@@ -410,11 +412,66 @@ export interface PlannedFileCreate {
   resultHash: string;
   text: string;
 }
-export type PlannedChange = PlannedTextChange | PlannedFileRename | PlannedFileCreate;
+/**
+ * Deleted file resource operation (protocol 1.6, Safe Delete): delete the file after every text change and file rename
+ * of the plan, only while its text (editor and disk) still hashes to `expectedHash`. Always listed last; never a text
+ * target, rename or create of the same plan.
+ */
+export interface PlannedFileDelete {
+  kind: 'delete';
+  uri: string;
+  expectedHash: string;
+}
+export type PlannedChange = PlannedTextChange | PlannedFileRename | PlannedFileCreate | PlannedFileDelete;
 
 /** Action ids of the create-file refactorings of the C# route (protocol 1.3; offered through capability/query). */
 export const CSHARP_MOVE_TYPE_ACTION = 'csharp.moveTypeToFile';
 export const CSHARP_GENERATE_HANDLER_ACTION = 'csharp.generateHandler';
+
+/** Action ids of the code refactorings of the C# route (protocol 1.6; offered through capability/query). */
+export const CSHARP_SAFE_DELETE_ACTION = 'csharp.safeDelete';
+export const CSHARP_EXTRACT_METHOD_ACTION = 'csharp.extractMethod';
+export const CSHARP_CHANGE_SIGNATURE_ACTION = 'csharp.changeSignature';
+
+/** One parameter of a new signature (Change Signature, protocol 1.6). */
+export interface ParameterSpec {
+  /** Index of the existing parameter (kept, moved or renamed); absent adds a parameter. */
+  from?: number;
+  name: string;
+  /** Type of an added parameter. */
+  type?: string;
+  /** Default value in the declaration (the added parameter becomes optional). */
+  defaultValue?: string;
+  /** Value passed at every existing call site for an added parameter. */
+  callSiteValue?: string;
+}
+
+export interface SignatureParams {
+  parameters: ParameterSpec[];
+}
+
+/** code/signature (protocol 1.6): the parameters of the method at the subject, or why Change Signature does not apply. */
+export interface SignatureInfo {
+  name?: string | null;
+  display?: string | null;
+  parameters: { name: string; type: string; defaultValue?: string | null; modifiers: string }[];
+  reasonCode?: string | null;
+  message?: string | null;
+  snapshotId: string;
+}
+
+/** The files a plan deletes (protocol 1.6, Safe Delete). */
+export interface FileDeleteOffer {
+  files: string[];
+}
+
+/** workspace/didDeleteFiles (protocol 1.6): files the client deleted; consumes a document sequence. */
+export interface DidDeleteFilesParams {
+  workspaceId: string;
+  sequence: number;
+  workspaceRevision: number;
+  files: { uri: string }[];
+}
 
 /**
  * Code Cleanup (protocol 1.4): a text-only plan over a scope (files, folders, project files). Prepared with
@@ -526,6 +583,8 @@ export interface RefactorPlanDto {
   cleanup?: CleanupReport;
   /** Rename (protocol 1.5): EF Core migrations that reference the symbol, and whether this plan edits them. */
   efMigrations?: EfMigrationsOffer;
+  /** Safe Delete (protocol 1.6): the files the plan deletes. Required when the writeSet has a `delete`. */
+  fileDelete?: FileDeleteOffer;
 }
 
 /**
@@ -558,6 +617,10 @@ export interface PrepareParams extends WorkspaceParams {
   cleanup?: CleanupParams;
   /** Rename (protocol 1.5): what to do with EF Core migrations that reference the symbol (absent: `efMigrations`). */
   generatedEdits?: GeneratedEditsMode;
+  /** Extract Method (protocol 1.6): the selection in `documentUri`; the method name comes in `newName`. */
+  range?: Range;
+  /** Change Signature (protocol 1.6): the new parameter list. */
+  signature?: SignatureParams;
 }
 export type PrepareResult =
   | { kind: 'prepared'; plan: RefactorPlanDto }
@@ -628,6 +691,8 @@ export interface MethodMap {
   'code/related': [RelatedParams, RelatedResult];
   /** Protocol 1.4. */
   'code/resolveFrame': [ResolveFrameParams, ResolveFrameResult];
+  /** Protocol 1.6. */
+  'code/signature': [SymbolQueryParams, SignatureInfo];
   'code/references': [SymbolQueryParams, LocationsResult];
   'code/implementations': [SymbolQueryParams, LocationsResult];
   'refactor/prepare': [PrepareParams, PrepareResult];
@@ -646,6 +711,8 @@ export interface NotificationMap {
   'workspace/didRenameFiles': DidRenameFilesParams;
   /** Created files (protocol 1.3): files the client created; consumes a document sequence (sent only to hosts with minor ≥ 3). */
   'workspace/didCreateFiles': DidCreateFilesParams;
+  /** Deleted files (protocol 1.6): files the client deleted; consumes a document sequence (sent only to hosts with minor ≥ 6). */
+  'workspace/didDeleteFiles': DidDeleteFilesParams;
   '$/cancelRequest': { id: number | string };
 }
 export type NotificationName = keyof NotificationMap;

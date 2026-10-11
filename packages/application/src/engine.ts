@@ -143,7 +143,16 @@ export interface PrepareOptions {
 export interface ActionPrepareOptions {
   /** Generate handler: one of the folder choices of an earlier preview (absent: the default folder). */
   targetFolderUri?: string;
+  /** Extract Method: the selection (no symbol is needed at the cursor). */
+  range?: import('@refyntra/contracts').Range;
+  /** Extract Method: the name of the new method. */
+  newName?: string;
+  /** Change Signature: the new parameter list. */
+  signature?: import('@refyntra/contracts').SignatureParams;
 }
+
+/** Change Signature: the parameters of the method at the cursor, or why there are none. */
+export type SignatureOutcome = { kind: 'signature'; info: import('@refyntra/contracts').SignatureInfo } | Unavailable;
 
 export interface ApplyOptions {
   /** The user explicitly confirmed the limitations of a plan whose validation is `limited`. */
@@ -172,6 +181,8 @@ export interface EngineClient {
    * The result is applied with applyRename (same lifecycle, revalidation and EditApplier).
    */
   prepareAction(target: DocumentTarget, actionId: string, token?: CancellationToken, options?: ActionPrepareOptions): Promise<RenameOutcome>;
+  /** Change Signature: the current parameters of the method at the cursor (owned route, protocol 1.6). */
+  signatureAt(target: DocumentTarget, token?: CancellationToken): Promise<SignatureOutcome>;
   /**
    * Code Cleanup (`csharp.cleanup`) of a scope on the owned route `adapterId`: a text-only plan, applied with applyRename
    * (same lifecycle, revalidation and EditApplier).
@@ -590,14 +601,21 @@ export class RefyntraEngine implements EngineClient {
       return { kind: 'unavailable', reasonCode: 'ActionNotSupported', message: 'This action is not provided for this file by Refyntra.', recoveryActions: [] };
     }
     try {
+      const extra = {
+        ...(options.targetFolderUri ? { targetFolderUri: options.targetFolderUri } : {}),
+        ...(options.range ? { range: options.range } : {}),
+        ...(options.signature ? { signature: options.signature } : {}),
+      };
       const prepared = await this.withStaleRetry(async () => {
+        // Extract Method works on a selection: no symbol is needed at the cursor.
+        if (options.range) return adapter.prepare({ symbolId: '', newName: options.newName ?? '', actionId, documentUri: target.uri, ...extra }, token);
         const sym = await adapter.symbolAt(target.uri, target.position, token);
         if (!sym.value || !sym.value.symbolId) return undefined;
-        const p = await adapter.prepare({ symbolId: sym.value.symbolId, newName: '', actionId, documentUri: target.uri, ...(options.targetFolderUri ? { targetFolderUri: options.targetFolderUri } : {}) }, token);
+        const p = await adapter.prepare({ symbolId: sym.value.symbolId, newName: options.newName ?? '', actionId, documentUri: target.uri, ...extra }, token);
         if (p.sessionEpoch !== sym.sessionEpoch) throw new StaleResultError('epoch');
         return p;
       }, token);
-      if (!prepared) return { kind: 'unavailable', reasonCode: 'NoSymbol', message: 'There is no type at the cursor.', recoveryActions: [] };
+      if (!prepared) return { kind: 'unavailable', reasonCode: 'NoSymbol', message: 'There is no symbol at the cursor.', recoveryActions: [] };
       const result = prepared.value;
       if (result.kind !== 'prepared') {
         return { kind: 'unavailable', reasonCode: result.reasonCode ?? 'Unavailable', message: result.message ?? 'The action is unavailable here.', recoveryActions: [RECOVERY_SHOW_HEALTH] };
@@ -611,6 +629,23 @@ export class RefyntraEngine implements EngineClient {
       if (issues.length > 0) lifecycle.transition('Failed', issues.map((i) => i.message).join('; '));
       else lifecycle.transition('Previewing');
       return { kind: 'preview', planId: plan.planId, plan, state: lifecycle.state, issues, applyEnabled: this.o.settings.applyRenameEnabled() && issues.length === 0 };
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      return this.toUnavailable(adapter, e);
+    }
+  }
+
+  async signatureAt(target: DocumentTarget, token?: CancellationToken): Promise<SignatureOutcome> {
+    const adapter = this.o.registry.routeFor(target.uri);
+    if (!adapter || adapter.descriptor.ownership !== 'owned-semantic' || typeof adapter.signatureAt !== 'function') {
+      return { kind: 'unavailable', reasonCode: 'ActionNotSupported', message: 'Change Signature is not provided for this file by Refyntra.', recoveryActions: [] };
+    }
+    try {
+      const r = await this.withStaleRetry(() => adapter.signatureAt!(target.uri, target.position, token), token);
+      const info = r.value;
+      if (!info) return { kind: 'unavailable', reasonCode: 'NoSymbol', message: 'There is no method or constructor at the cursor.', recoveryActions: [] };
+      if (info.reasonCode) return { kind: 'unavailable', reasonCode: info.reasonCode, message: info.message ?? 'Change Signature is unavailable here.', recoveryActions: [] };
+      return { kind: 'signature', info };
     } catch (e) {
       if (e instanceof CancelledError) throw e;
       return this.toUnavailable(adapter, e);
@@ -779,7 +814,8 @@ export class RefyntraEngine implements EngineClient {
       if (textConfirmed && resources.every((r) => r.status === 'confirmed')) {
         const created = creates.map((r) => `${baseName(r.uri)} created`);
         const renamed = resources.flatMap((r) => (r.kind === 'rename' ? [`${baseName(r.oldUri)} renamed to ${baseName(r.newUri)}`] : []));
-        const parts = [...created, ...(report.files.length || !created.length ? [`${confirmed.length} file(s) changed`] : []), ...renamed];
+        const deleted = resources.flatMap((r) => (r.kind === 'delete' ? [`${baseName(r.uri)} deleted`] : []));
+        const parts = [...created, ...(report.files.length || (!created.length && !deleted.length) ? [`${confirmed.length} file(s) changed`] : []), ...renamed, ...deleted];
         return finish('Applied', { status: 'applied', message: `${plan.title}: ${parts.join(' and ')}`, files: report.files, ...(resources.length ? { resources } : {}) });
       }
       if (creates.length > 0) return finish('Failed', createFailure(plan.title, report.files, creates, resources));
@@ -787,9 +823,12 @@ export class RefyntraEngine implements EngineClient {
         // File rename failure path: the text edits are applied (one all-or-nothing edit), a file rename is not.
         // Report exactly that; never roll back automatically.
         const what = resources.filter((r) => r.status !== 'confirmed').map((r) => `${r.kind === 'rename' ? `${baseName(r.oldUri)} → ${baseName(r.newUri)}` : baseName(r.uri)}: ${r.status}${r.detail ? ` (${r.detail})` : ''}`).join('; ');
+        const deleting = resources.some((r) => r.kind === 'delete' && r.status !== 'confirmed');
         return finish('Failed', {
           status: 'failed',
-          message: `The text edits were applied to ${confirmed.length} file(s) (not saved), but the file rename did not complete (${what}). Nothing was rolled back: use Undo in the editor to revert the text edits, or rename the file yourself.`,
+          message: deleting
+            ? `The text edits were applied to ${confirmed.length} file(s) (not saved), but the file deletion did not complete (${what}). Nothing was rolled back: use Undo in the editor to revert the text edits, or delete the file yourself.`
+            : `The text edits were applied to ${confirmed.length} file(s) (not saved), but the file rename did not complete (${what}). Nothing was rolled back: use Undo in the editor to revert the text edits, or rename the file yourself.`,
           files: report.files,
           resources,
           textAppliedOnly: true,
@@ -821,11 +860,16 @@ export class RefyntraEngine implements EngineClient {
     const moved = resources.flatMap((r) => (r.kind === 'rename' && r.status === 'confirmed' ? [{ oldUri: r.oldUri, newUri: r.newUri }] : []));
     // Created files: a file that exists (confirmed, or unknown) must reach the host; an unknown outcome restarts the route.
     const created = resources.flatMap((r) => (r.kind === 'create' && r.status === 'confirmed' ? [r.uri] : []));
+    // Deleted files: a confirmed delete leaves the host's snapshot; an unknown outcome restarts the route.
+    const deleted = resources.flatMap((r) => (r.kind === 'delete' && r.status === 'confirmed' ? [r.uri] : []));
     const unknown = resources.some((r) => r.status === 'unknown');
     const revision = this.o.tracker.bumpRevision();
-    const sent = (moved.length === 0 || adapter.filesRenamed?.(moved, revision) === true) && (created.length === 0 || adapter.filesCreated?.(created, revision) === true);
+    const sent =
+      (moved.length === 0 || adapter.filesRenamed?.(moved, revision) === true) &&
+      (created.length === 0 || adapter.filesCreated?.(created, revision) === true) &&
+      (deleted.length === 0 || adapter.filesDeleted?.(deleted, revision) === true);
     if (!sent || unknown) {
-      this.log('warn', 'file operation resync by restart', { moved: moved.length, created: created.length, unknown });
+      this.log('warn', 'file operation resync by restart', { moved: moved.length, created: created.length, deleted: deleted.length, unknown });
       void adapter.restart('files renamed').catch(() => undefined);
     }
   }

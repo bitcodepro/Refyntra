@@ -228,6 +228,15 @@ const scenarios = e2e
         settings: { 'refyntra.rename.apply': true, 'files.autoSave': 'off' },
         env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' },
       },
+      // Safe Delete, Extract Method, Change Signature on a temp copy of the Refactorings fixture: apply, file deletion
+      // with host resync, Undo (restore), a delete refused when the file changed in the last moment.
+      {
+        name: 'code-refactor',
+        fixtureCopy: ['Refactorings', 'Refactorings.sln'],
+        trusted: true,
+        settings: { 'refyntra.rename.apply': true, 'files.autoSave': 'off' },
+        env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' },
+      },
       // Stack trace navigation on a temp copy of the StackTraces fixture (path-suffix matching, ambiguity, by symbol).
       {
         name: 'stack-trace',

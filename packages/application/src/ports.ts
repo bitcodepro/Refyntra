@@ -87,7 +87,13 @@ export type ApplyResourceReport =
    * refused = the target existed right before the create, nothing was created; failed = the editor did not create it
    * and it does not exist; unknown = anything else.
    */
-  | { kind: 'create'; uri: string; status: ResourceStatus; detail?: string };
+  | { kind: 'create'; uri: string; status: ResourceStatus; detail?: string }
+  /**
+   * Deleted file (Safe Delete): confirmed = the file no longer exists (disk and editor); not-attempted = the text edits
+   * were not all confirmed; refused = its text changed right before the delete, nothing was deleted; failed = the editor
+   * did not delete it and it still exists unchanged; unknown = anything else.
+   */
+  | { kind: 'delete'; uri: string; status: ResourceStatus; detail?: string };
 
 export interface ApplyReport {
   /** What the editor's apply returned. Never trusted on its own: `files` is the reconciled post-state. */

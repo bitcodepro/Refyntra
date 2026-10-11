@@ -141,6 +141,17 @@ a test class. It is not part of `initialize.capabilities`.
   (Microsoft.EntityFrameworkCore), `MigrationAttribute` + `Migration` base type or `ModelSnapshot` base type, naming a
   DbContext declared in source. Other generated code is still refused (`GeneratedCode`). A host before 1.5 ignores
   `generatedEdits` and refuses such renames as generated code.
+- 1.6 (additive, code refactorings): actions `csharp.safeDelete`, `csharp.extractMethod` and `csharp.changeSignature`
+  for `refactor/prepare` (offered by `capability/query` outside the catalogue, only where they apply);
+  `PrepareParams.range?: Range` (Extract Method: the selection in `documentUri`, the method name in `newName`,
+  `symbolId` `""`) and `PrepareParams.signature?: {parameters: [{from?, name, type?, defaultValue?, callSiteValue?}]}`
+  (Change Signature); `PlannedChange` kind `"delete"` `{uri, expectedHash}` (always last, after every text change and
+  file rename); `RefactorPlanDto.fileDelete?: {files}`; request `code/signature` `SymbolQueryParams` →
+  `{name?, display?, parameters: [{name, type, defaultValue?, modifiers}], reasonCode?, message?, snapshotId}`;
+  notification `workspace/didDeleteFiles` `{workspaceId, sequence, workspaceRevision, files: [{uri}]}`. A host before
+  1.6 answers `unavailable` / `UnsupportedAction` (and `MethodNotFound` for `code/signature`, which a client sends only
+  to a host that reported minor ≥ 6); a 1.6 client sends `workspace/didDeleteFiles` only to a host that reported
+  minor ≥ 6 and restarts the route otherwise.
 - Additive (EF Core): relation kinds `efcore.*` and group `data` (above); `SearchFilters.entity?: boolean` ("entity:")
   and `SearchFilters.table?: string` ("table:NAME") return EF Core entities as symbol items. Older hosts ignore the
   filters (they return a normal symbol search); older clients render the kinds and the group generically. The
@@ -196,6 +207,8 @@ issuing semantic requests.
 | `refactor/prepare` | req | `PrepareParams` | `PrepareResult` |
 | `refactor/revalidate` | req | `{traceId, workspaceId, planId, snapshotId}` | `RevalidateResult` |
 | `refactor/discard` | notif | `{workspaceId, planId}` | – |
+| `code/signature` | req | `SymbolQueryParams` | `SignatureInfo` (since 1.6; Change Signature) |
+| `workspace/didDeleteFiles` | notif | `{workspaceId, sequence, workspaceRevision, files: [{uri}]}` | – (since 1.6; consumes a document sequence) |
 | `analysis/run` | req | `AnalysisRunParams` `{traceId, workspaceId, snapshotId, uri?}` | `AnalysisRunResult` (since 1.1, additive; see "Analysis") |
 | `$/cancelRequest` | notif | `{id}` | – |
 
@@ -265,6 +278,55 @@ provenance). The TypeScript conformance route uses `fixture.engine`.
   listed in `plan.cleanup.skipped` (ADR-004 Amendment 3 lists the codes). Refusals: `NoFixes`, `NoScope`,
   `NoFilesInScope`, `ScopeTooLarge` (more than 2000 C# files), `NoChanges` (nothing to change; the message counts the
   skipped files by reason), `IncompleteProjectClosure`. Revalidation is the ordinary read-set check.
+
+- Safe Delete (1.6): `refactor/prepare` with `actionId` `csharp.safeDelete` and the `symbolId` of a type, method,
+  constructor, property, field, event, local or parameter. Deleted only when every use Roslyn finds is inside the deleted
+  code; otherwise `ReferencesRemain` with the first uses (`File.cs:line`). An interface, abstract or virtual member is
+  deleted with its source implementations/overrides; every partial declaration of a type is deleted; a file left
+  without code (only usings, empty namespaces, comments) is deleted (`writeSet` entry `delete`, `fileDelete.files`) when
+  its Compile membership is the plain SDK glob, else kept empty with the reason in `limitations`. A parameter is removed
+  from the method, its hierarchy and every call site (the Change Signature engine). Framework relations other than
+  declarations, references, implementations and tests (for example `mediatr.request` of a handler) and string or
+  `dynamic` uses of the name make the plan `limited`. Refusals: `MetadataSymbol`, `GeneratedCode`,
+  `UnsupportedSymbolKind`, `PartialMethod`, `PrimaryConstructor`, `UnsupportedDeclaration`, `ImplementsMember` (the
+  member implements or overrides another one), `ReferencesRemain`, `InitializerHasSideEffects`, `UsingDeclaration`,
+  `ArgumentHasSideEffects`, `RefOutParameter`, `CompilationErrors`, `IncompleteProjectClosure`, `ReadOnlyFile`,
+  `UnsupportedEncoding`, `MixedLineEndings`. Revalidation: the read set, and every file to delete must still exist and
+  be writable (`stale` / `FileDeleteUnsafe`). The client deletes the files after the text changes (ADR-004 Amendment 5)
+  and sends `workspace/didDeleteFiles`.
+
+- Extract Method (1.6): `refactor/prepare` with `actionId` `csharp.extractMethod`, `symbolId` `""`, `documentUri`,
+  `range` (whole statements of one block, or exactly one expression; whitespace around the selection is ignored) and
+  `newName`. Text-only plan: the selection is replaced by a call and a private method is inserted after the enclosing
+  member. Data flow (Roslyn `AnalyzeDataFlow`): values flowing in become parameters, one variable flowing out is
+  returned, several become `out` (`ref` when also read first) parameters, variables only used inside are declared in the
+  new method; control flow (`AnalyzeControlFlow`): a selection that always returns is returned from. `static` when the
+  instance is not used, `async Task`/`Task<T>` when it awaits, type parameters (with constraints) of enclosing methods
+  are carried. Refusals: `InvalidIdentifier`, `NoDocument`, `GeneratedCode`, `EmptySelection`, `InvalidSelection`,
+  `NotInMethodBody`, `TopLevelStatements`, `AnalysisFailed`, `UnsafeCode`, `GotoIntoSelection`, `JumpOutOfSelection`
+  (break, continue, goto), `MultipleExits`, `Yield`, `LocalFunctionInSelection`, `Label`, `ConstructorInitializer`,
+  `QueryExpression`, `ConstantContext`, `ExpressionTree`, `AssignmentTarget`, `ExpressionDeclaresVariables`,
+  `ExpressionWritesVariables`, `NotAValue`, `RefLocal`, `RefReturn`, `RefLikeType`, `UnknownType`, `AnonymousType`,
+  `AsyncOutParameters`, `TypeParameterConflict`, `NameInUse`, `UnsupportedDeclaration`, `EmbeddedStatement`, `Layout`,
+  `CompilationErrors`.
+
+- Change Signature (1.6): `code/signature` lists the parameters; `refactor/prepare` with `actionId`
+  `csharp.changeSignature`, the method's or constructor's `symbolId` and `signature.parameters` (the new list: `from`
+  = index of a kept parameter, possibly with a new `name`; without `from` a new parameter with `type` and
+  `callSiteValue` and/or `defaultValue`). The method, every member it overrides or implements and every
+  override/implementation of those change together; every call site Roslyn binds (invocations, `new`, target-typed
+  `new`, `base`/`this` initializers, reduced extension calls, named arguments, omitted optional arguments, expanded
+  `params`) gets the new argument list; a reorder that would change the evaluation order of arguments with side effects
+  keeps the original order as named arguments. Every rewritten call must bind to the changed method afterwards and every
+  call of a same-named overload to the same overload as before. `<param>`/`<paramref>` names are renamed, `<param>` of
+  removed parameters removed. String or `dynamic` uses of the name make the plan `limited` (unknown callers).
+  Refusals: `UnsupportedSymbolKind`, `MetadataSymbol`, `GeneratedCode`, `PartialMethod`, `ExternMethod`,
+  `PrimaryConstructor`, `PatternMethod` (names the compiler calls implicitly), `DelegateNotSupported`,
+  `InvalidSignature`, `InvalidIdentifier`, `DuplicateParameter`, `TypeChangeNotSupported`, `ParamsArray`,
+  `ExtensionThis`, `InvalidType`, `InvalidValue`, `MissingValue`, `RefOutParameter`, `NoChanges`,
+  `ImplementsMetadataMember`, `NameInUse`, `ParameterUsed`, `UnsupportedReference`, `ImplicitCall`, `MethodGroupUse`,
+  `AttributeUse`, `UnsupportedCall`, `ArgumentHasSideEffects`, `EvaluationOrder`, `OverloadResolutionChange`,
+  `CompilationErrors`, `IncompleteProjectClosure`.
 
 ## Relation kinds (alpha)
 

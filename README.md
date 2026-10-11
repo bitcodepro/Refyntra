@@ -43,6 +43,9 @@ Stage D additions:
   classes that only match by name (*heuristic*), and from a test the production symbols it references. Running a test is
   not offered: Actions shows *Run test: unavailable — no supported public test integration*.
 
+Code refactorings with the same preview and apply pipeline: **Safe Delete**, **Extract Method** and **Change Signature**
+(see [Safe Delete, Extract Method and Change Signature](#safe-delete-extract-method-and-change-signature)).
+
 Rename shows a preview first, then **Apply rename** (see [Rename](#rename)). Set `refyntra.rename.apply` to off for preview-only renames.
 
 Framework relations are found by Roslyn from verified symbol identity (owned-semantic). Each relation states its confidence: *proven*, or *likely* for framework extension registrations such as `AddDbContext` and for MediatR versions outside the verified range. Results also say what was not understood (dynamic or unknown parts). See [docs/capabilities/alpha.md](docs/capabilities/alpha.md).
@@ -220,6 +223,46 @@ Residual risks: no transaction across the file creation and the text edit (repor
 write the target in the very last moment (VS Code refuses to overwrite; reported); MSBuild items from packages, the SDK
 or computed imports are not inspected (computed imports refuse the action); between the create and a save of the
 original file the type exists twice on disk, so a command-line build in that moment reports a duplicate.
+
+## Safe Delete, Extract Method and Change Signature
+
+All three are C# refactorings of the owned Roslyn route. Each one computes a plan on the snapshot without writing
+anything, shows a preview (a summary, a diff per file, deleted files as a diff to empty), revalidates the whole read set
+after you confirm, and applies through the same single EditApplier as Rename: edited files are not saved, the result is
+checked per file, nothing is rolled back automatically, and **Undo** is offered. A change that would introduce a new
+compiler error anywhere in the affected projects is refused. Uses the compiler cannot see (strings that may be
+reflection names, `dynamic` calls) and framework relations make a plan *limited*: Apply then asks for an explicit
+confirmation that lists them.
+
+**Safe Delete** (`refyntra.safeDelete`, or Actions on the symbol) deletes a type, method, constructor, property, field,
+event, local or parameter only when nothing else uses it. When uses remain, it refuses and names them (*Show usages*
+opens Related). Deleting an interface member, or an abstract or virtual one, deletes its implementations and overrides
+too (each must be unused); deleting an implementation or override alone is refused, because another member would run
+instead. All partial declarations of a type go together. A file that holds nothing but the deleted type is deleted after
+the edits, when it is included only by the SDK's default `*.cs` glob; otherwise the file is kept empty and the preview
+says why. Deleting a parameter also removes its argument from every call, but only when those arguments cannot have
+side effects. A MediatR handler, a DI registration or an endpoint found by Related is reported (the framework may use
+the type at run time without any reference in code).
+
+**Extract Method** (`refyntra.extractMethod`) moves the selected statements, or one selected expression, into a new
+private method placed after the current member, and asks for its name. Roslyn's data-flow analysis decides the
+parameters, the return value (one variable that is used afterwards, or the expression's value), `out`/`ref` parameters
+(several such variables) and the locals the new method needs; a selection that always returns is returned from. The
+method is `static` when the selection does not use the instance, `async` when it awaits, and generic when it uses type
+parameters of the enclosing method. It refuses what it cannot extract without changing behavior: `break`, `continue` or
+`goto` leaving the selection, a selection that returns on some paths only, `yield`, unsafe code, local functions, ref
+locals, anonymous types, `out`/`ref` results of async code, assignment targets, constant contexts and expression trees.
+
+**Change Signature** (`refyntra.changeSignature`) opens an editor for the parameter list of the method or constructor at
+the cursor: move, rename, remove, or add a parameter with its type, the value existing calls pass, and an optional
+default. The method changes together with everything it overrides or implements and every override or implementation;
+every call Roslyn finds is rewritten (named arguments, omitted optional arguments, `params`, extension calls,
+`base(...)`/`this(...)`, `new(...)`). When the new order would evaluate arguments with side effects in another order,
+they keep their order as named arguments. After the change every rewritten call must still reach this method, and every
+call of an overload with the same name the same overload as before; otherwise the change is refused. Uses as a method
+group or delegate, attributes, partial or extern methods, primary constructors, names the compiler calls implicitly
+(`Add`, `Dispose`, `GetEnumerator`, `Deconstruct`, …) and type changes are refused. Calls through reflection, `dynamic`
+or from outside the loaded solution are not updated; found string or `dynamic` uses are listed as unknown callers.
 
 ## Code Cleanup
 
@@ -511,6 +554,9 @@ of the file is not proven, so the item becomes ambiguous or missing instead of f
 | `refyntra.moveTypeToFile` | Move the type at the cursor into its own file (preview, then apply) |
 | `refyntra.generateHandler` | Create a MediatR handler for the request at the cursor (preview, then apply) |
 | `refyntra.cleanup` | Code Cleanup of a file, folder, project or the workspace (one preview, then apply, Undo) |
+| `refyntra.safeDelete` | Delete the symbol at the cursor only when nothing uses it (preview, then apply, Undo) |
+| `refyntra.extractMethod` | Extract the selected statements or expression into a new method (name prompt, preview, then apply) |
+| `refyntra.changeSignature` | Add, remove, reorder or rename parameters and update every call (editor, preview, then apply) |
 | `refyntra.showHealth` | The Health page: is Refyntra working, what it means, the fix, projects by state |
 | `refyntra.showHealthText` | The same report as a Markdown document, technical details included |
 | `refyntra.restartBackend` | Restart the .NET host |

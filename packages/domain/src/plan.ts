@@ -136,7 +136,7 @@ export class PlanLifecycle<P extends { planId: string } = AnyRefactorPlan> {
 }
 
 export interface PlanValidationIssue {
-  code: 'unsupported-change' | 'non-file-uri' | 'unsorted-edits' | 'overlapping-edits' | 'duplicate-document' | 'missing-hash' | 'empty-plan' | 'wrong-kind' | 'unordered-changes' | 'invalid-rename' | 'invalid-create';
+  code: 'unsupported-change' | 'non-file-uri' | 'unsorted-edits' | 'overlapping-edits' | 'duplicate-document' | 'missing-hash' | 'empty-plan' | 'wrong-kind' | 'unordered-changes' | 'invalid-rename' | 'invalid-create' | 'invalid-delete';
   message: string;
   uri?: string;
 }
@@ -164,8 +164,14 @@ export function validatePlanStructure(plan: AnyRefactorPlan): PlanValidationIssu
   const texts = new Map<string, string>();
   const renames: Extract<PlannedChange, { kind: 'rename' }>[] = [];
   const creates: Extract<PlannedChange, { kind: 'create' }>[] = [];
+  const deletes: Extract<PlannedChange, { kind: 'delete' }>[] = [];
   let sawOther = false;
   for (const change of plan.writeSet as PlannedChange[]) {
+    if (change && change.kind === 'delete') {
+      deletes.push(change);
+      continue;
+    }
+    if (deletes.length > 0) issues.push({ code: 'unordered-changes', message: 'A change follows a file deletion; deleted files must come last', uri: (change as { uri?: string })?.uri });
     if (change && change.kind === 'create') {
       if (sawOther) issues.push({ code: 'unordered-changes', message: 'A created file follows a text change or a file rename; created files must come first', uri: change.uri });
       creates.push(change);
@@ -177,7 +183,7 @@ export function validatePlanStructure(plan: AnyRefactorPlan): PlanValidationIssu
       continue;
     }
     if (!change || change.kind !== 'text') {
-      issues.push({ code: 'unsupported-change', message: 'Only text changes, file renames and created files are supported in this version' });
+      issues.push({ code: 'unsupported-change', message: 'Only text changes, file renames, created and deleted files are supported in this version' });
       continue;
     }
     if (renames.length > 0) issues.push({ code: 'unordered-changes', message: 'A text change follows a file rename; file renames must come after every text change', uri: change.uri });
@@ -200,6 +206,46 @@ export function validatePlanStructure(plan: AnyRefactorPlan): PlanValidationIssu
   issues.push(...validateFileRenames(plan, renames, texts));
   issues.push(...validateFileCreates(plan, creates, texts, renames));
   issues.push(...validateEfMigrations(plan, texts));
+  issues.push(...validateFileDeletes(plan, deletes, texts, renames, creates));
+  return issues;
+}
+
+/**
+ * Deleted files (protocol 1.6, Safe Delete): only in an owned-semantic plan that lists them (`fileDelete.files`), file:
+ * URIs, `*.cs` without an encoded path separator, a valid expected hash, never a text target, a created file or a file
+ * rename source/target of the same plan, no duplicates (ignoring case). The EditApplier checks the expected hash (editor
+ * and disk) again right before deleting.
+ */
+function validateFileDeletes(
+  plan: AnyRefactorPlan,
+  deletes: readonly Extract<PlannedChange, { kind: 'delete' }>[],
+  texts: ReadonlyMap<string, string>,
+  renames: readonly Extract<PlannedChange, { kind: 'rename' }>[],
+  creates: readonly Extract<PlannedChange, { kind: 'create' }>[],
+): PlanValidationIssue[] {
+  const issues: PlanValidationIssue[] = [];
+  if (deletes.length === 0) return issues;
+  const listed = plan.kind === 'owned-semantic' ? (plan.fileDelete?.files ?? []) : [];
+  if (plan.kind !== 'owned-semantic' || !plan.fileDelete || listed.length !== deletes.length) {
+    issues.push({ code: 'unsupported-change', message: 'This plan cannot delete files' });
+    return issues;
+  }
+  const seen = new Set<string>();
+  const others = new Set([...texts.keys(), ...creates.map((c) => String(c.uri)), ...renames.flatMap((r) => [String(r.oldUri), String(r.newUri)])].map((u) => u.toLowerCase()));
+  for (const d of deletes) {
+    const bad = (message: string) => issues.push({ code: 'invalid-delete', message, uri: d.uri });
+    if (typeof d.uri !== 'string' || !d.uri.startsWith('file:')) {
+      issues.push({ code: 'non-file-uri', message: 'A deleted file is not a local file', uri: String(d.uri) });
+      continue;
+    }
+    if (!HASH_RE.test(d.expectedHash ?? '')) issues.push({ code: 'missing-hash', message: 'A deleted file has no valid content hash', uri: d.uri });
+    if (!/\.cs$/.test(lastSegment(d.uri)) || /%2F|%5C/i.test(lastSegment(d.uri)) || lastSegment(d.uri) === '.cs') bad('A deleted file is not a C# file or contains a path separator');
+    if (!listed.includes(d.uri)) bad('A deleted file is not listed by the plan');
+    const key = d.uri.toLowerCase();
+    if (seen.has(key)) bad('A file is deleted twice');
+    seen.add(key);
+    if (others.has(key)) bad('A deleted file is also edited, created or renamed by the plan');
+  }
   return issues;
 }
 

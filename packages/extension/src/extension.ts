@@ -36,6 +36,7 @@ import { RelatedViewProvider, runRelatedGroupPick } from './related';
 import { PREVIEW_SCHEME, PreviewContentProvider, runNativeRename, runRename } from './rename';
 import { runCreateAction, undoCreate } from './createFile';
 import { runCleanup, undoCleanup } from './cleanup';
+import { runChangeSignature, runExtractMethod, runSafeDelete, undoCode } from './codeRefactor';
 import { CSHARP_GENERATE_HANDLER_ACTION, CSHARP_MOVE_TYPE_ACTION } from '@refyntra/contracts';
 import { runRestore } from './restore';
 import { SolutionService } from './solution';
@@ -75,6 +76,8 @@ export interface RefyntraTestApi {
   hostPids(): number[];
   /** Undo of an applied create-file plan (e2e: the same steps as the "Undo" button). */
   undoCreate(writeSet: readonly import('@refyntra/contracts').PlannedChange[]): Promise<string[]>;
+  /** Undo of an applied Safe Delete / Extract Method / Change Signature (e2e: the same steps as the "Undo" button). */
+  undoCode(writeSet: readonly import('@refyntra/contracts').PlannedChange[], deletedTexts: ReadonlyMap<string, string>): Promise<string[]>;
   /** Undo of an applied Code Cleanup (e2e: the same steps as the "Undo" button). */
   undoCleanup(entries: readonly import('./cleanupSummary').UndoEntry[]): Promise<string[]>;
   /** Rename preview store (tests read the last preview). */
@@ -317,6 +320,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     vscode.commands.registerCommand('refyntra.moveTypeToFile', () => runCreateAction(engine, previews, editApplier, CSHARP_MOVE_TYPE_ACTION)),
     vscode.commands.registerCommand('refyntra.generateHandler', () => runCreateAction(engine, previews, editApplier, CSHARP_GENERATE_HANDLER_ACTION)),
     vscode.commands.registerCommand('refyntra.cleanup', (uri?: unknown) => runCleanup(engine, previews, editApplier, uri)),
+    vscode.commands.registerCommand('refyntra.safeDelete', () => runSafeDelete(engine, previews, editApplier)),
+    vscode.commands.registerCommand('refyntra.extractMethod', () => runExtractMethod(engine, previews, editApplier)),
+    vscode.commands.registerCommand('refyntra.changeSignature', () => runChangeSignature(engine, previews, editApplier)),
     vscode.commands.registerCommand('refyntra.nativeRename', (uri?: unknown, position?: unknown) => runNativeRename(uri, position)),
     vscode.commands.registerCommand('refyntra.runRestore', (target: unknown) => runRestore(isTrusted, target)),
     vscode.commands.registerCommand('refyntra.showHealth', () => healthPage.show()),
@@ -363,6 +369,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     editApplier,
     undoCreate: (writeSet) => undoCreate(engine, editApplier, writeSet),
     undoCleanup: (entries) => undoCleanup(editApplier, entries),
+    undoCode: (writeSet, deletedTexts) => undoCode(engine, editApplier, writeSet, deletedTexts),
     previews,
     hostPids: () => [...pids],
     capabilityUi: (id) => ({ title: capabilityTitleOf(id), command: commandForCapability(id) }),

@@ -382,7 +382,8 @@ public sealed class ReviewFindingsTests
         var (line, ch) = TestClient.Position(text, "class Widget", 6);
         var caps = await c.RequestAsync("capability/query", new { traceId = "t", workspaceId = c.WorkspaceId, snapshotId = snap, uri = UriPaths.ToUri(Path.Combine(dir, "Renames.Lib", "Widget.cs")), position = new { line, character = ch } });
         var byId = caps.EnumerateArray().ToDictionary(a => a.GetProperty("capabilityId").GetString()!);
-        Assert.Equal(Catalogue.OrderBy(x => x), byId.Keys.OrderBy(x => x));
+        // The catalogue, plus Safe Delete (offered on a type, outside the catalogue like the other refactoring actions).
+        Assert.Equal(Catalogue.Append("csharp.safeDelete").OrderBy(x => x), byId.Keys.OrderBy(x => x));
         foreach (var id in Catalogue)
         {
             Assert.Equal("available", byId[id].GetProperty("state").GetString());
