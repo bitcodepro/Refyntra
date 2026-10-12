@@ -10,6 +10,7 @@ import {
   generateKinds,
   generateRequest,
   kindPickItems,
+  memberCountText,
   memberPickItems,
   needsMemberPick,
   parseGenerateRequest,
@@ -36,6 +37,10 @@ describe('Generate (code/generate glue)', () => {
     expect(generateKinds(bad).map((k) => k.kind)).toEqual(['constructor', 'implement', 'delegating', 'toString']);
     const items = kindPickItems(kinds);
     expect(items[0]).toEqual({ label: '$(symbol-constructor) Constructor', description: '2 members to initialise', kindId: 'constructor' });
+    expect(items.find((i) => i.kindId === 'implement')!.description).toBe('1 missing member');
+    expect(items.find((i) => i.kindId === 'toString')!.description).toBe('1 member to show');
+    expect(memberCountText('properties', 1)).toBe('1 field');
+    expect(memberCountText('properties', 3)).toBe('3 fields');
   });
 
   it('lists members with their preselection; delegating members per field', () => {

@@ -185,6 +185,12 @@ a test class. It is not part of `initialize.capabilities`.
   `EvaluationOrder`, `VariableWritten`, `ReadOnlyFile`, …). Never writes files; the client applies the edits as one
   undo step only while the document version is the one the request was made for. Sent only to hosts with minor ≥ 9.
 - 1.10 (additive, postfix templates and Generate):
+  - action id `csharp.introduceParameter` (Introduce Parameter) for `refactor/prepare` with `symbolId` `""`,
+    `documentUri` and `range` of exactly one expression in a method body: a text-only plan built like Change Signature
+    (new parameter before optional/`params` parameters, every call site of the hierarchy passes the expression).
+    `code/editActions` lists it as `csharp.edit.introduceParameter` (computing that id refuses with `UsePlan`), and
+    the Introduce Field / Constant choices as `csharp.edit.introduceField.{initializer,initializerAll,constructor,
+    constructorAll,member}` / `csharp.edit.introduceConstant.{local,class}` (titles share the prefix before `: `).
   - request `code/postfix` `{traceId, workspaceId, snapshotId, uri, position}` → `{items: [{name, detail, snippet}],
     expressionRange?, typeName?, snapshotId}`. `position` is right after a dot or after the part of a template name
     typed after it (`list.fo`). The host replaces the dot and the typed name with `;` in a copy of the document (so

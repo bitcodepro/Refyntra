@@ -20,15 +20,20 @@ export interface GenerateKindData {
 }
 
 /** Order and icon of each kind in the picker (Rider's Generate menu order). */
-export const GENERATE_KINDS: Readonly<Record<GenerateKindId, { order: number; icon: string; noun: string }>> = {
-  constructor: { order: 0, icon: 'symbol-constructor', noun: 'members to initialise' },
-  properties: { order: 1, icon: 'symbol-property', noun: 'fields' },
-  implement: { order: 2, icon: 'symbol-interface', noun: 'missing members' },
-  overrides: { order: 3, icon: 'symbol-method', noun: 'members to override' },
-  delegating: { order: 4, icon: 'symbol-field', noun: 'members to delegate' },
-  equality: { order: 5, icon: 'symbol-operator', noun: 'members to compare' },
-  toString: { order: 6, icon: 'symbol-string', noun: 'members to show' },
+export const GENERATE_KINDS: Readonly<Record<GenerateKindId, { order: number; icon: string; noun: string; one: string }>> = {
+  constructor: { order: 0, icon: 'symbol-constructor', noun: 'members to initialise', one: 'member to initialise' },
+  properties: { order: 1, icon: 'symbol-property', noun: 'fields', one: 'field' },
+  implement: { order: 2, icon: 'symbol-interface', noun: 'missing members', one: 'missing member' },
+  overrides: { order: 3, icon: 'symbol-method', noun: 'members to override', one: 'member to override' },
+  delegating: { order: 4, icon: 'symbol-field', noun: 'members to delegate', one: 'member to delegate' },
+  equality: { order: 5, icon: 'symbol-operator', noun: 'members to compare', one: 'member to compare' },
+  toString: { order: 6, icon: 'symbol-string', noun: 'members to show', one: 'member to show' },
 };
+
+/** "1 field", "2 fields": the count with the singular or plural noun of the kind. */
+export function memberCountText(kind: GenerateKindId, count: number): string {
+  return `${count} ${count === 1 ? GENERATE_KINDS[kind].one : GENERATE_KINDS[kind].noun}`;
+}
 
 const isKind = (k: unknown): k is GenerateKindId => typeof k === 'string' && Object.prototype.hasOwnProperty.call(GENERATE_KINDS, k);
 
@@ -44,7 +49,7 @@ export function generateKinds(kinds: readonly GenerateKindData[]): GenerateKindD
 export function kindPickItems(kinds: readonly GenerateKindData[]): { label: string; description: string; kindId: GenerateKindId }[] {
   return generateKinds(kinds).map((k) => ({
     label: `$(${GENERATE_KINDS[k.kind].icon}) ${k.title}`,
-    description: k.members.length ? `${k.members.length} ${GENERATE_KINDS[k.kind].noun}` : '',
+    description: k.members.length ? memberCountText(k.kind, k.members.length) : '',
     kindId: k.kind,
   }));
 }

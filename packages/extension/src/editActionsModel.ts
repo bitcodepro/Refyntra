@@ -38,12 +38,64 @@ export function editActionTitle(i: EditActionItem): string {
   return `${i.title} (Refyntra)`;
 }
 
+/** Edit action listed by the host that runs as a previewed plan (refactor/prepare csharp.introduceParameter). */
+export const INTRODUCE_PARAMETER_EDIT_ACTION = 'csharp.edit.introduceParameter';
+/** Command of the Introduce Parameter plan (preview, revalidation, Undo). */
+export const INTRODUCE_PARAMETER_COMMAND = 'refyntra.introduceParameter';
+
+/** One choice of a grouped action (shown in a QuickPick). */
+export interface EditActionChoice {
+  actionId: string;
+  label: string;
+}
+
+/** One code action: a single host item, or a family of choices ("Introduce field: …") asked for with a QuickPick. */
+export interface EditActionGroup {
+  title: string;
+  kind: string;
+  actionId: string;
+  choices: EditActionChoice[];
+}
+
+/**
+ * Groups host items whose titles share the prefix before ": " (Introduce field: initialize in …) into one action with
+ * choices; a family with one valid choice stays a single action with its full title. Host order is kept.
+ */
+export function groupEditActions(items: readonly EditActionItem[]): EditActionGroup[] {
+  const out: EditActionGroup[] = [];
+  const byTitle = new Map<string, EditActionGroup>();
+  for (const i of items) {
+    const at = i.title.indexOf(': ');
+    if (at <= 0) {
+      out.push({ title: i.title, kind: i.kind, actionId: i.actionId, choices: [] });
+      continue;
+    }
+    const head = i.title.slice(0, at);
+    const choice = { actionId: i.actionId, label: i.title.slice(at + 2) };
+    const g = byTitle.get(head);
+    if (g) g.choices.push(choice);
+    else {
+      const ng = { title: head, kind: i.kind, actionId: i.actionId, choices: [choice] };
+      byTitle.set(head, ng);
+      out.push(ng);
+    }
+  }
+  return out.map((g) => (g.choices.length === 0 ? g : g.choices.length === 1 ? { title: `${g.title}: ${g.choices[0]!.label}`, kind: g.kind, actionId: g.actionId, choices: [] } : { ...g, title: `${g.title}…` }));
+}
+
+/** QuickPick items of a group's choices (the first one is the default). */
+export function choicePickItems(choices: readonly EditActionChoice[]): { label: string; actionId: string }[] {
+  return choices.map((c) => ({ label: c.label.charAt(0).toUpperCase() + c.label.slice(1), actionId: c.actionId }));
+}
+
 export interface EditActionTarget {
   uri: string;
   range: { start: { line: number; character: number }; end: { line: number; character: number } };
   actionId: string;
   /** Document version the action was offered for (the edits are only applied to this version). */
   version: number;
+  /** Choices of a grouped action: the user picks one (QuickPick) before it is computed. */
+  choices?: EditActionChoice[];
 }
 
 const isPos = (p: unknown): p is { line: number; character: number } =>
@@ -52,10 +104,15 @@ const isPos = (p: unknown): p is { line: number; character: number } =>
 /** The argument of EDIT_ACTION_COMMAND, or undefined when malformed. */
 export function parseEditActionTarget(arg: unknown): EditActionTarget | undefined {
   if (!arg || typeof arg !== 'object') return undefined;
-  const a = arg as { uri?: unknown; range?: { start?: unknown; end?: unknown }; actionId?: unknown; version?: unknown };
+  const a = arg as { uri?: unknown; range?: { start?: unknown; end?: unknown }; actionId?: unknown; version?: unknown; choices?: unknown };
   if (typeof a.uri !== 'string' || !a.uri.startsWith('file:') || typeof a.actionId !== 'string' || !a.actionId.startsWith('csharp.edit.')) return undefined;
   if (!a.range || !isPos(a.range.start) || !isPos(a.range.end) || !Number.isInteger(a.version)) return undefined;
-  return { uri: a.uri, range: { start: { ...a.range.start }, end: { ...a.range.end } }, actionId: a.actionId, version: a.version as number };
+  const t: EditActionTarget = { uri: a.uri, range: { start: { ...a.range.start }, end: { ...a.range.end } }, actionId: a.actionId, version: a.version as number };
+  if (Array.isArray(a.choices)) {
+    const choices = a.choices.filter((c): c is EditActionChoice => !!c && typeof c === 'object' && typeof (c as EditActionChoice).actionId === 'string' && (c as EditActionChoice).actionId.startsWith('csharp.edit.') && typeof (c as EditActionChoice).label === 'string');
+    if (choices.length) t.choices = choices.map((c) => ({ actionId: c.actionId, label: c.label }));
+  }
+  return t;
 }
 
 /** Edits are applied only while the document is still the version the host computed them for. */

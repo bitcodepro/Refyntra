@@ -696,11 +696,16 @@ only while the document is still the version the action was computed for.
 | Inline Field / Constant | `refactor.inline.refyntra.field` | a `const`, or a `readonly` field whose initializer is side-effect free and made of constants; every read is replaced and the declaration removed | assignments outside the initializer, other initializers, reads on another object, `nameof` |
 | Inline Parameter | `refactor.inline.refyntra.parameter` | a parameter for which every caller passes the same side-effect-free value (constants, static readonly members); removed from the declaration and all calls | different values, caller locals or instance members in the value, method-group use, virtual/interface members |
 | Introduce Variable (this / all occurrences) | `refactor.extract.refyntra.variable` / `.variableAll` | a selected expression in a statement of a block | conditional or repeated evaluation (`&&`, `?:`, lambdas, loop heads), `ref`/`out` arguments, an earlier side effect in the statement; *all occurrences* needs a value that cannot change |
+| Introduce Field (one action; the choice in a QuickPick) | `refactor.extract.refyntra.field` | a selected expression in a method, constructor, accessor or operator: initialize in the field initializer (no locals, parameters or instance members), in the constructor(s) (no locals or parameters; chained `: this(…)` constructors are skipped, a constructor is added when there is none) or in the current member; `static` in a static context, `readonly` unless set in the member; *replace all occurrences in the type* when the value cannot change | method type parameters in the type, anonymous types, constant contexts, conditional/repeated evaluation (current member), constructors in another part of a partial type, primary constructors |
+| Introduce Constant (local / of the type) | `refactor.extract.refyntra.constant` | a compile-time constant of a `const` type; the constant of the type replaces every occurrence in the type | non-constant expressions, local constants in the value (constant of the type), `null` of a non-string type |
+| Introduce Parameter | `refactor.extract.refyntra.parameter` | a selected expression in a method body: a new parameter (before optional/`params` ones), every call site passes the expression (static members qualified with their type); a plan with preview, revalidation and Undo over every changed file, the override/interface hierarchy included | locals, parameters or instance members in the expression, a name that is inaccessible or means something else at a call site, method groups/delegates, methods visible outside the assembly (external callers), recursion inside the expression, side effects evaluated conditionally or repeatedly |
 
 In the `resharper` preset **Ctrl+Alt+V** runs Introduce Variable on the selection and **Ctrl+Alt+N** Inline Variable at
 the cursor (C# editors only; VS Code has no default binding for these keys). Protocol 1.9 (`code/editActions`).
 Inline Method, Field and Parameter change one document: every call or read must be in the file of the action
-(otherwise refused with *CrossFile*). Not yet available: Introduce Field/Constant/Parameter, the remaining Convert actions (switch, LINQ, primary constructor, record, full property,
+(otherwise refused with *CrossFile*). Introduce Field / Constant change one document; Introduce Parameter is a previewed
+plan over every changed file (`refactor/prepare` `csharp.introduceParameter`, command `refyntra.introduceParameter`).
+Names are suggested from the expression (no prompt); rename them afterwards with Rename (F2). Not yet available: the remaining Convert actions (switch, LINQ, primary constructor, record, full property,
 object initializer, using declaration, async) and Fix in scope.
 
 ### Postfix templates (C#)
@@ -790,6 +795,7 @@ constructor that needs them (the compile check refuses it).
 | `refyntra.selectRunTarget` | Choose project, launch profile, target framework and configuration (the status bar item) |
 | `refyntra.showImmediate` | The Refyntra Immediate panel for the stopped frame (Ctrl+Alt+I in the `visualStudio` preset while debugging) |
 | `refyntra.ctor.generate` / `refyntra.ctor.addParameters` | Generate a constructor from chosen fields and properties / add them to the existing constructor (also Ctrl+. on the class name) |
+| `refyntra.introduceParameter` | Introduce Parameter for the selected C# expression: every call site passes it (preview first) |
 | `refyntra.introduceVariable` / `refyntra.inlineVariable` | Introduce a local from the selected C# expression / inline the C# local at the cursor (Ctrl+Alt+V / Ctrl+Alt+N in the `resharper` preset) |
 | `refyntra.generateLaunchJson` | Write the run and debug configurations to `.vscode/launch.json` |
 | `refyntra.nativeRename` | (not in the palette) The editor's own Rename, offered when a TS/JS rename cannot be confirmed safe; not validated by Refyntra |

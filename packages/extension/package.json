@@ -98,6 +98,11 @@
         "category": "Refyntra"
       },
       {
+        "command": "refyntra.introduceParameter",
+        "title": "Introduce Parameter",
+        "category": "Refyntra"
+      },
+      {
         "command": "refyntra.changeSignature",
         "title": "Change Signature",
         "category": "Refyntra"

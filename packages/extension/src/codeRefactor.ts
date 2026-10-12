@@ -4,6 +4,7 @@ import { type ApplyOutcome, CancelledError, type EngineClient, type RenameOutcom
 import {
   CSHARP_CHANGE_SIGNATURE_ACTION,
   CSHARP_EXTRACT_METHOD_ACTION,
+  CSHARP_INTRODUCE_PARAMETER_ACTION,
   CSHARP_SAFE_DELETE_ACTION,
   type PlannedChange,
   type PlannedTextChange,
@@ -95,6 +96,25 @@ export async function runExtractMethod(engine: EngineClient, previews: PreviewCo
   const r = { ...target, name };
   await runCodePlan(engine, previews, applier, title, (token) => engine.prepareAction({ uri: r.uri, position: r.range.start }, CSHARP_EXTRACT_METHOD_ACTION, token, { range: r.range, newName: r.name }), () =>
     runExtractMethod(engine, previews, applier, r),
+  );
+}
+
+/** Introduce Parameter for the selected expression (or `seed`): the method gets a parameter, every call site passes the expression. */
+export async function runIntroduceParameter(engine: EngineClient, previews: PreviewContentProvider, applier: VsCodeEditApplier, seed?: { uri: string; range: Range }): Promise<void> {
+  const title = 'Introduce Parameter';
+  let target = seed;
+  if (!target) {
+    const ed = activeCSharp(title);
+    if (!ed) return;
+    if (ed.selection.isEmpty) {
+      void vscode.window.showInformationMessage('Refyntra Introduce Parameter: select the expression first.');
+      return;
+    }
+    target = { uri: ed.document.uri.toString(), range: { start: toPosition(ed.selection.start), end: toPosition(ed.selection.end) } };
+  }
+  const r = target;
+  await runCodePlan(engine, previews, applier, title, (token) => engine.prepareAction({ uri: r.uri, position: r.range.start }, CSHARP_INTRODUCE_PARAMETER_ACTION, token, { range: r.range }), () =>
+    runIntroduceParameter(engine, previews, applier, r),
   );
 }
 
@@ -364,6 +384,11 @@ export async function undoCode(engine: EngineClient, applier: VsCodeEditApplier,
   const openDoc = (uri: string) => vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri && !d.isClosed);
   for (const change of writeSet.filter((c): c is PlannedTextChange => c.kind === 'text')) {
     const doc = openDoc(change.uri);
+    // One editor Undo of a multi-file apply can already have restored this file (a workspace edit undoes as a whole).
+    if (doc && sha256(doc.getText()) === change.expectedHash) {
+      out.push(`${shortPath(change.uri)}: edit undone.`);
+      continue;
+    }
     if (!doc || sha256(doc.getText()) !== change.resultHash) {
       out.push(`${shortPath(change.uri)} changed after the apply; its edit was not undone.`);
       continue;

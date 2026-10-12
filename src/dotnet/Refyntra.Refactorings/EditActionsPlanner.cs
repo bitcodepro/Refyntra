@@ -161,6 +161,7 @@ public static partial class EditActionsPlanner
         }
         else
         {
+            AddIntroduceMembers(c, Add);
             Add(IntroduceLocal, "Introduce variable", "refactor.extract.refyntra.variable", Introduce(c, all: false));
             Add(IntroduceLocalAll, "Introduce variable (replace all occurrences)", "refactor.extract.refyntra.variableAll", Introduce(c, all: true));
         }
@@ -777,18 +778,7 @@ public static partial class EditActionsPlanner
         if (all && !(IsStable(expr, stmt.Parent!.Parent ?? stmt.Parent!, c.Model, c.Ct))) return null;
         return () =>
         {
-            if (ConditionallyEvaluated(expr, stmt) || expr.Ancestors().TakeWhile(a => a != stmt).Any(a => a is ArgumentSyntax { RefKindKeyword.RawKind: not (int)SyntaxKind.None }))
-                throw new Refusal("EvaluationOrder", "The expression is evaluated conditionally, repeatedly or by reference; introducing a variable would change that.");
-            var inLoopHead = stmt is WhileStatementSyntax or DoStatementSyntax or ForStatementSyntax
-                || stmt is ForEachStatementSyntax fe && !fe.Expression.Span.Contains(expr.Span)
-                || stmt is UsingStatementSyntax or FixedStatementSyntax or LockStatementSyntax;
-            if (inLoopHead)
-                throw new Refusal("EvaluationOrder", "The expression is part of a loop or resource statement whose evaluation would change.");
-            if (expr.Ancestors().Any(a => a is AttributeArgumentSyntax or CaseSwitchLabelSyntax or ConstantPatternSyntax) || c.Model.GetConstantValue(expr, c.Ct).HasValue && stmt is LocalDeclarationStatementSyntax { IsConst: true })
-                throw new Refusal("ConstantContext", "The expression must stay constant here.");
-            if (stmt.DescendantNodes().Any(n => n.SpanStart < expr.SpanStart && !n.Span.Contains(expr.Span) && IsImpure(n) && n.Span.End <= expr.SpanStart)
-                && !CodeFacts.IsSideEffectFree(expr, c.Model, c.Ct) && !IsPureOperators(expr, c.Model, c.Ct))
-                throw new Refusal("EvaluationOrder", "Something with possible side effects runs before the expression in its statement; moving it first would change the evaluation order.");
+            CheckIntroducibleBefore(c, expr, stmt);
             var name = SuggestName(c, expr, type, stmt);
             var occurrences = new List<ExpressionSyntax> { expr };
             if (all)
@@ -811,7 +801,45 @@ public static partial class EditActionsPlanner
         };
     }
 
+    /// <summary>Refuses when evaluating <paramref name="expr"/> before <paramref name="stmt"/> could change what the code does.</summary>
+    private static void CheckIntroducibleBefore(Ctx c, ExpressionSyntax expr, StatementSyntax stmt)
+    {
+        if (ConditionallyEvaluated(expr, stmt) || expr.Ancestors().TakeWhile(a => a != stmt).Any(a => a is ArgumentSyntax { RefKindKeyword.RawKind: not (int)SyntaxKind.None }))
+            throw new Refusal("EvaluationOrder", "The expression is evaluated conditionally, repeatedly or by reference; introducing a variable would change that.");
+        var inLoopHead = stmt is WhileStatementSyntax or DoStatementSyntax or ForStatementSyntax
+            || stmt is ForEachStatementSyntax fe && !fe.Expression.Span.Contains(expr.Span)
+            || stmt is UsingStatementSyntax or FixedStatementSyntax or LockStatementSyntax;
+        if (inLoopHead)
+            throw new Refusal("EvaluationOrder", "The expression is part of a loop or resource statement whose evaluation would change.");
+        if (expr.Ancestors().Any(a => a is AttributeArgumentSyntax or CaseSwitchLabelSyntax or ConstantPatternSyntax) || c.Model.GetConstantValue(expr, c.Ct).HasValue && stmt is LocalDeclarationStatementSyntax { IsConst: true })
+            throw new Refusal("ConstantContext", "The expression must stay constant here.");
+        if (stmt.DescendantNodes().Any(n => n.SpanStart < expr.SpanStart && !n.Span.Contains(expr.Span) && IsImpure(n) && n.Span.End <= expr.SpanStart)
+            && !CodeFacts.IsSideEffectFree(expr, c.Model, c.Ct) && !IsPureOperators(expr, c.Model, c.Ct))
+            throw new Refusal("EvaluationOrder", "Something with possible side effects runs before the expression in its statement; moving it first would change the evaluation order.");
+    }
+
     private static string SuggestName(Ctx c, ExpressionSyntax expr, ITypeSymbol type, StatementSyntax stmt)
+    {
+        var name = SuggestBaseName(expr, type);
+        var member = stmt.Ancestors().FirstOrDefault(a => a is MemberDeclarationSyntax or LocalFunctionStatementSyntax) ?? stmt.Parent!;
+        var taken = new HashSet<string>(member.DescendantNodes().Select(n => n switch
+        {
+            VariableDeclaratorSyntax v => v.Identifier.ValueText,
+            SingleVariableDesignationSyntax s => s.Identifier.ValueText,
+            ParameterSyntax p => p.Identifier.ValueText,
+            ForEachStatementSyntax f => f.Identifier.ValueText,
+            CatchDeclarationSyntax cd => cd.Identifier.ValueText,
+            LocalFunctionStatementSyntax lf => lf.Identifier.ValueText,
+            _ => "",
+        }), StringComparer.Ordinal);
+        bool Free(string n) => !taken.Contains(n) && c.Model.LookupSymbols(stmt.SpanStart, name: n).IsEmpty;
+        var candidate = name;
+        for (var i = 2; !Free(candidate); i++) candidate = name + i;
+        return candidate;
+    }
+
+    /// <summary>A camelCase name for the value of <paramref name="expr"/> (from the called member, the type or the kind of value); not a keyword.</summary>
+    private static string SuggestBaseName(ExpressionSyntax expr, ITypeSymbol type)
     {
         string? baseName = expr switch
         {
@@ -832,20 +860,6 @@ public static partial class EditActionsPlanner
             };
         var name = char.ToLowerInvariant(baseName[0]) + baseName[1..];
         if (SyntaxFacts.GetKeywordKind(name) != SyntaxKind.None || SyntaxFacts.GetContextualKeywordKind(name) is SyntaxKind.VarKeyword) name += "Value";
-        var member = stmt.Ancestors().FirstOrDefault(a => a is MemberDeclarationSyntax or LocalFunctionStatementSyntax) ?? stmt.Parent!;
-        var taken = new HashSet<string>(member.DescendantNodes().Select(n => n switch
-        {
-            VariableDeclaratorSyntax v => v.Identifier.ValueText,
-            SingleVariableDesignationSyntax s => s.Identifier.ValueText,
-            ParameterSyntax p => p.Identifier.ValueText,
-            ForEachStatementSyntax f => f.Identifier.ValueText,
-            CatchDeclarationSyntax cd => cd.Identifier.ValueText,
-            LocalFunctionStatementSyntax lf => lf.Identifier.ValueText,
-            _ => "",
-        }), StringComparer.Ordinal);
-        bool Free(string n) => !taken.Contains(n) && c.Model.LookupSymbols(stmt.SpanStart, name: n).IsEmpty;
-        var candidate = name;
-        for (var i = 2; !Free(candidate); i++) candidate = name + i;
-        return candidate;
+        return name;
     }
 }

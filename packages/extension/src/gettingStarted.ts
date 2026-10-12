@@ -59,6 +59,7 @@ export const MAIN_MENU: readonly MenuEntry[] = [
   { label: '$(symbol-variable) Introduce Variable', detail: 'Move the selected C# expression into a new local variable (checked by Roslyn)', command: 'refyntra.introduceVariable' },
   { label: '$(symbol-variable) Inline Variable', detail: 'Replace the C# local variable at the cursor with its value (checked by Roslyn)', command: 'refyntra.inlineVariable' },
   { label: '$(add) Generate…', detail: 'Constructor, Equals/GetHashCode, ToString, properties, missing, overriding or delegating members (Alt+Insert, checked by Roslyn)', command: 'refyntra.generate' },
+  { label: '$(symbol-parameter) Introduce Parameter', detail: 'Turn the selected C# expression into a parameter; every call site passes it: preview first, then Apply', command: 'refyntra.introduceParameter' },
 ];
 
 /** Walkthrough id as VS Code addresses it: <publisher>.<name>#<walkthrough id>. */

@@ -4,6 +4,22 @@ All notable changes are listed here. The project is alpha; nothing has been rele
 
 ## Unreleased
 
+### Added (Introduce Field, Constant and Parameter)
+
+- Edit actions (`code/editActions`): **Introduce Field** from a selected expression — initialize in the field
+  initializer, the constructor(s) or the current member (one code action, the valid choices in a QuickPick), `static`
+  in a static context, `readonly` when only set in the initializer/constructors, *replace all occurrences in the type*
+  when the value cannot change — and **Introduce Constant** (local `const` or a constant of the type replacing every
+  occurrence) for compile-time constants. Names are suggested from the expression (rename afterwards with F2).
+- **Introduce Parameter** (`refactor/prepare` action `csharp.introduceParameter`, additive in protocol 1.10; command
+  `refyntra.introduceParameter`, also in the lightbulb): the containing method gets a parameter and every call site
+  passes the expression, in any file, the override/interface hierarchy included, through the Change Signature machinery
+  with preview, revalidation and Undo. Refused: locals/parameters/instance members in the expression, names that are
+  inaccessible or mean something else at a call site, method groups/delegates, methods visible outside the assembly.
+- Fix: the Generate kind picker says "1 member to …" / "1 field" instead of "1 members" (picker baselines updated).
+- Tests: .NET (positive and refusals), unit glue (grouping, QuickPick items, plural), e2e (Introduce Field in the
+  constructor; Introduce Parameter across files with Undo).
+
 ### Added (Inline Method, Field and Parameter)
 
 - Edit actions (`code/editActions`, no protocol change): **Inline Method** at a call site or at all call sites with the

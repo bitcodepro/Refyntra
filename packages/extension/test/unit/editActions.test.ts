@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EDIT_ACTION_COMMAND, KEYBOARD_ACTIONS, canApply, editActionTitle, editKindMatches, offerEditActions, parseEditActionTarget } from '../../src/editActionsModel';
+import { EDIT_ACTION_COMMAND, KEYBOARD_ACTIONS, canApply, choicePickItems, editActionTitle, editKindMatches, groupEditActions, offerEditActions, parseEditActionTarget } from '../../src/editActionsModel';
 
 const items = [
   { actionId: 'csharp.edit.invertIf', title: "Invert 'if'", kind: 'refactor.rewrite.refyntra.invertIf' },
@@ -69,5 +69,24 @@ describe('edit actions (code/editActions glue)', () => {
     expect(offerEditActions(inline, 'refactor.inline').map((i) => i.actionId)).toEqual(inline.map((i) => i.actionId));
     expect(offerEditActions(inline, 'refactor.extract')).toEqual([]);
     expect(parseEditActionTarget({ uri: 'file:///a.cs', range: { start: { line: 1, character: 2 }, end: { line: 1, character: 2 } }, actionId: 'csharp.edit.inlineMethodAll', version: 3 })?.actionId).toBe('csharp.edit.inlineMethodAll');
+  });
+
+  it('groups Introduce Field / Constant choices into one action asked with a QuickPick', () => {
+    const intro = [
+      { actionId: 'csharp.edit.introduceVariable', title: 'Introduce variable', kind: 'refactor.extract.refyntra.variable' },
+      { actionId: 'csharp.edit.introduceField.initializer', title: 'Introduce field: initialize in the field initializer', kind: 'refactor.extract.refyntra.field' },
+      { actionId: 'csharp.edit.introduceField.constructor', title: 'Introduce field: initialize in the constructor(s)', kind: 'refactor.extract.refyntra.field' },
+      { actionId: 'csharp.edit.introduceConstant.class', title: 'Introduce constant: constant of the type, replace all occurrences in the type', kind: 'refactor.extract.refyntra.constant' },
+      { actionId: 'csharp.edit.introduceParameter', title: 'Introduce parameter (updates every call site; preview first)', kind: 'refactor.extract.refyntra.parameter' },
+    ];
+    const g = groupEditActions(intro);
+    expect(g.map((x) => x.title)).toEqual(['Introduce variable', 'Introduce field…', 'Introduce constant: constant of the type, replace all occurrences in the type', 'Introduce parameter (updates every call site; preview first)']);
+    expect(g[1]!.choices.map((c) => c.actionId)).toEqual(['csharp.edit.introduceField.initializer', 'csharp.edit.introduceField.constructor']);
+    expect(g[2]!.choices).toEqual([]);
+    expect(g[2]!.actionId).toBe('csharp.edit.introduceConstant.class');
+    expect(choicePickItems(g[1]!.choices)[1]).toEqual({ label: 'Initialize in the constructor(s)', actionId: 'csharp.edit.introduceField.constructor' });
+    const arg = { uri: 'file:///a.cs', range: { start: { line: 1, character: 2 }, end: { line: 1, character: 5 } }, actionId: 'csharp.edit.introduceField.initializer', version: 1, choices: [...g[1]!.choices, { actionId: 'csharp.rename', label: 'x' }, 7] };
+    expect(parseEditActionTarget(arg)?.choices?.map((c) => c.actionId)).toEqual(['csharp.edit.introduceField.initializer', 'csharp.edit.introduceField.constructor']);
+    expect(parseEditActionTarget({ ...arg, choices: undefined })?.choices).toBeUndefined();
   });
 });

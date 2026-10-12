@@ -1,7 +1,8 @@
 // Code refactorings e2e (runTest.mjs scenario "code-refactor") on a temp copy of the Refactorings fixture; the repository
 // fixture is never touched. Safe Delete of a type alone in its file (delete + host resync + Undo restores it), of a
 // method (text only), a delete refused when the file changes in the last moment (text applied, file kept, reported),
-// Extract Method from a selection and Change Signature with evaluation order kept.
+// Extract Method from a selection and Change Signature with evaluation order kept; Introduce Field (constructor)
+// and Introduce Parameter across files with Undo.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 
@@ -226,6 +227,64 @@ exports.cases = ({ api, csharp, waitFor }) => {
         assert.ok(!idoc.getText().includes('int Add('), 'the declaration is removed');
         await vscode.commands.executeCommand('undo');
         assert.equal(idoc.getText(), iOriginal);
+        await revertAll();
+      },
+    ],
+    [
+      'Introduce Field (initialized in the constructor) is one action with choices; one Undo step',
+      async () => {
+        const uri = lib('EditActions/IntroduceSamples.cs');
+        const doc = await vscode.workspace.openTextDocument(uri);
+        await vscode.window.showTextDocument(doc);
+        const original = doc.getText();
+        const start = doc.positionAt(doc.getText().indexOf('width * (60 * 60)') + 'width * ('.length);
+        const range = new vscode.Range(start, start.translate(0, '60 * 60'.length));
+        let list = [];
+        await waitFor(async () => {
+          list = ((await vscode.commands.executeCommand('vscode.executeCodeActionProvider', uri, range, 'refactor.extract')) ?? []).filter((x) => x.command?.command === 'refyntra.editAction');
+          return list.some((x) => x.title === 'Introduce field… (Refyntra)');
+        }, 'introduce field action', 120000);
+        const field = list.find((x) => x.title === 'Introduce field… (Refyntra)');
+        const arg = field.command.arguments[0];
+        assert.ok(arg.choices.some((c) => c.actionId === 'csharp.edit.introduceField.constructor'), JSON.stringify(arg.choices));
+        assert.ok(list.some((x) => x.kind.value === 'refactor.extract.refyntra.parameter'), list.map((x) => x.title).join(', '));
+        // The QuickPick answer: the constructor choice.
+        assert.equal(await vscode.commands.executeCommand('refyntra.editAction', { ...arg, actionId: 'csharp.edit.introduceField.constructor', choices: undefined }), true);
+        const text = doc.getText().replace(/\r\n/g, '\n');
+        assert.ok(text.includes('private readonly int _value;'), text);
+        assert.ok(text.includes('_value = 60 * 60;'), text);
+        assert.ok(text.includes('return width * (_value);'), text);
+        await vscode.commands.executeCommand('undo');
+        assert.equal(doc.getText(), original);
+        await revertAll();
+      },
+    ],
+    [
+      'Introduce Parameter across files: the plan updates the call sites in another file; Undo restores both',
+      async () => {
+        const a = await api();
+        const uri = lib('EditActions/IntroduceSamples.cs');
+        const callers = lib('EditActions/IntroduceCallers.cs');
+        const doc = await vscode.workspace.openTextDocument(uri);
+        const cdoc = await vscode.workspace.openTextDocument(callers);
+        const original = doc.getText();
+        const cOriginal = cdoc.getText();
+        const i = doc.getText().indexOf('net * (1 + TaxRate)') + 'net * ('.length;
+        const s = doc.positionAt(i);
+        const e = doc.positionAt(i + '1 + TaxRate'.length);
+        const range = { start: { line: s.line, character: s.character }, end: { line: e.line, character: e.character } };
+        const r = await a.engine.prepareAction({ uri: doc.uri.toString(), position: range.start }, 'csharp.introduceParameter', undefined, { range });
+        assert.equal(r.kind, 'preview', JSON.stringify(r));
+        assert.equal(r.plan.writeSet.length, 2);
+        const out = await a.engine.applyRename(r.planId);
+        assert.equal(out.status, 'applied', out.message);
+        assert.ok(doc.getText().includes('internal decimal Gross(decimal net, decimal value)'), doc.getText());
+        assert.ok(doc.getText().includes('return net * (value) + Fee();'));
+        assert.ok(cdoc.getText().includes('calc.Gross(10m, 1 + PriceCalculator.TaxRate)'), cdoc.getText());
+        const undone = await a.undoCode(r.plan.writeSet, new Map());
+        assert.equal(undone.filter((m) => m.endsWith('edit undone.')).length, 2, undone.join(' '));
+        assert.equal(doc.getText(), original);
+        assert.equal(cdoc.getText(), cOriginal);
         await revertAll();
       },
     ],

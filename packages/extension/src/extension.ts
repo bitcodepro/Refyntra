@@ -36,7 +36,7 @@ import { RelatedViewProvider, runRelatedGroupPick } from './related';
 import { PREVIEW_SCHEME, PreviewContentProvider, runNativeRename, runRename } from './rename';
 import { runCreateAction, undoCreate } from './createFile';
 import { runCleanup, undoCleanup } from './cleanup';
-import { runChangeSignature, runExtractMethod, runSafeDelete, undoCode } from './codeRefactor';
+import { runChangeSignature, runExtractMethod, runIntroduceParameter, runSafeDelete, undoCode } from './codeRefactor';
 import { CSHARP_GENERATE_HANDLER_ACTION, CSHARP_MOVE_TYPE_ACTION } from '@refyntra/contracts';
 import { runRestore } from './restore';
 import { registerCodeActions } from './codeActions';
@@ -364,6 +364,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     vscode.commands.registerCommand('refyntra.extractMethod', (arg?: unknown) => {
       const t = parseCodeActionTarget(arg);
       return runExtractMethod(engine, previews, editApplier, t?.range ? { uri: t.uri, range: t.range } : undefined);
+    }),
+    vscode.commands.registerCommand('refyntra.introduceParameter', (arg?: unknown) => {
+      const t = parseCodeActionTarget(arg);
+      return runIntroduceParameter(engine, previews, editApplier, t?.range ? { uri: t.uri, range: t.range } : undefined);
     }),
     vscode.commands.registerCommand('refyntra.changeSignature', (arg?: unknown) => runChangeSignature(engine, previews, editApplier, atTarget(arg))),
     registerCodeActions(engine),

@@ -758,7 +758,7 @@ public sealed class Engine : IRpcHandler, IDisposable
     {
         var snap = RequireSnapshot(p.WorkspaceId, p.SnapshotId);
         if (p.ActionId is not ("csharp.rename" or MoveTypePlanner.ActionId or GenerateHandlerPlanner.ActionId or Refactorings.Cleanup.CleanupPlanner.ActionId
-            or SafeDeletePlanner.ActionId or ExtractMethodPlanner.ActionId or ChangeSignaturePlanner.ActionId))
+            or SafeDeletePlanner.ActionId or ExtractMethodPlanner.ActionId or ChangeSignaturePlanner.ActionId or EditActionsPlanner.IntroduceParameterAction))
             return new PrepareResultDto { Kind = "unavailable", ReasonCode = "UnsupportedAction", Message = $"Action {p.ActionId} is not supported." };
         RenameOutcome outcome;
         if (p.ActionId == Refactorings.Cleanup.CleanupPlanner.ActionId)
@@ -772,6 +772,14 @@ public sealed class Engine : IRpcHandler, IDisposable
             if (p.DocumentUri == null || p.Range == null)
                 return new PrepareResultDto { Kind = "unavailable", ReasonCode = "InvalidParams", Message = "Extract Method needs documentUri and range." };
             outcome = await ExtractMethodPlanner.PrepareAsync(snap, PathOf(p.DocumentUri), p.Range.Start.Line, p.Range.Start.Character, p.Range.End.Line, p.Range.End.Character, p.NewName ?? "", ct).ConfigureAwait(false);
+        }
+        else if (p.ActionId == EditActionsPlanner.IntroduceParameterAction)
+        {
+            // Introduce Parameter (1.10, additive action id): the selected expression comes in documentUri + range.
+            if (p.DocumentUri == null || p.Range == null)
+                return new PrepareResultDto { Kind = "unavailable", ReasonCode = "InvalidParams", Message = "Introduce Parameter needs documentUri and range." };
+            outcome = await EditActionsPlanner.PrepareIntroduceParameterAsync(snap, PathOf(p.DocumentUri),
+                new Microsoft.CodeAnalysis.Text.LinePositionSpan(new(p.Range.Start.Line, p.Range.Start.Character), new(p.Range.End.Line, p.Range.End.Character)), ct).ConfigureAwait(false);
         }
         else
         {

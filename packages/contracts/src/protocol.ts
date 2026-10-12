@@ -436,6 +436,8 @@ export const CSHARP_GENERATE_HANDLER_ACTION = 'csharp.generateHandler';
 export const CSHARP_SAFE_DELETE_ACTION = 'csharp.safeDelete';
 export const CSHARP_EXTRACT_METHOD_ACTION = 'csharp.extractMethod';
 export const CSHARP_CHANGE_SIGNATURE_ACTION = 'csharp.changeSignature';
+/** Introduce Parameter (protocol 1.10, additive action id): refactor/prepare with documentUri + range of the expression. */
+export const CSHARP_INTRODUCE_PARAMETER_ACTION = 'csharp.introduceParameter';
 
 /** One parameter of a new signature (Change Signature, protocol 1.6). */
 export interface ParameterSpec {

@@ -2,14 +2,27 @@ import * as vscode from 'vscode';
 import type { EngineClient } from '@refyntra/application';
 import { toPosition } from './convert';
 import type { VsCodeEditApplier } from './editApplier';
-import { EDIT_ACTION_COMMAND, KEYBOARD_ACTIONS, type EditActionTarget, canApply, editActionTitle, offerEditActions, parseEditActionTarget } from './editActionsModel';
+import {
+  EDIT_ACTION_COMMAND,
+  INTRODUCE_PARAMETER_COMMAND,
+  INTRODUCE_PARAMETER_EDIT_ACTION,
+  KEYBOARD_ACTIONS,
+  type EditActionTarget,
+  canApply,
+  choicePickItems,
+  editActionTitle,
+  groupEditActions,
+  offerEditActions,
+  parseEditActionTarget,
+} from './editActionsModel';
 
 const CACHE_MS = 4000;
 
 /**
  * Rider-style C# edit actions in the lightbulb / Ctrl+. / Refactor… menu: Convert (expression ↔ block body, var ↔
  * explicit type, invert / merge / split if, conditional ↔ if, interpolated string), Inline Variable and Introduce
- * Variable. The C# host lists them and computes the edits with Roslyn, refusing a result with a new compiler error.
+ * Variable, Introduce Field / Constant (one action per family; its choices in a QuickPick) and Introduce Parameter
+ * (run as a previewed plan). The C# host lists them and computes the edits with Roslyn, refusing a result with a new compiler error.
  * Only an explicit request (Ctrl+., the Refactor menu) or a non-empty selection asks the host; the edits are applied
  * as one undo step, only while the document is still the version they were computed for.
  */
@@ -48,9 +61,9 @@ export class EditActionProvider implements vscode.CodeActionProvider {
       }
     }
     if (token.isCancellationRequested) return [];
-    return offerEditActions(items, context.only?.value).map((i) => {
+    return groupEditActions(offerEditActions(items, context.only?.value)).map((i) => {
       const a = new vscode.CodeAction(editActionTitle(i), vscode.CodeActionKind.Empty.append(i.kind));
-      const arg: EditActionTarget = { ...target, actionId: i.actionId, version: document.version };
+      const arg: EditActionTarget = { ...target, actionId: i.actionId, version: document.version, ...(i.choices.length ? { choices: i.choices } : {}) };
       a.command = { command: EDIT_ACTION_COMMAND, title: a.title, arguments: [arg] };
       return a;
     });
@@ -61,6 +74,16 @@ export class EditActionProvider implements vscode.CodeActionProvider {
 export async function runEditAction(engine: EngineClient, applier: VsCodeEditApplier, arg: unknown): Promise<boolean> {
   const t = parseEditActionTarget(arg);
   if (!t || !engine.editActions) return false;
+  if (t.choices && t.choices.length > 1) {
+    const pick = await vscode.window.showQuickPick(choicePickItems(t.choices), { title: 'Refyntra: choose how to introduce it', placeHolder: 'Where the value is initialized / declared' });
+    if (!pick) return false;
+    t.actionId = pick.actionId;
+  }
+  if (t.actionId === INTRODUCE_PARAMETER_EDIT_ACTION) {
+    // A plan over every call site (other files too): preview, revalidation and Undo of the code refactorings.
+    await vscode.commands.executeCommand(INTRODUCE_PARAMETER_COMMAND, { uri: t.uri, position: t.range.start, range: t.range });
+    return true;
+  }
   const doc = await vscode.workspace.openTextDocument(vscode.Uri.parse(t.uri, true));
   const before = doc.version;
   const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: 'Refyntra: computing the edit…' }, (_p, token) =>
