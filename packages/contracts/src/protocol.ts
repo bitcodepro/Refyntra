@@ -12,8 +12,9 @@ export const PROTOCOL_MAJOR = 1;
  * `fileDelete`, `code/signature`, `workspace/didDeleteFiles`).
  * 1.7: call and type hierarchy (`code/hierarchy`).
  * 1.8: runnable projects for Run and Debug (`workspace/runnableProjects`).
+ * 1.9: single-document edit actions computed and compile-checked by Roslyn (`code/editActions`).
  */
-export const PROTOCOL_MINOR = 8;
+export const PROTOCOL_MINOR = 9;
 
 /** Zero-based line, UTF-16 code unit character. */
 export interface Position {
@@ -515,6 +516,33 @@ export interface RunnableProjectsResult {
   snapshotId?: string | null;
 }
 
+/** code/editActions (protocol 1.9): list the edit actions at a range, or compute one (`actionId`). */
+export interface EditActionsParams extends WorkspaceParams {
+  snapshotId: string;
+  uri: string;
+  range: Range;
+  actionId?: string | null;
+}
+
+export interface EditActionInfo {
+  /** `csharp.edit.*`. */
+  actionId: string;
+  title: string;
+  /** Editor code action kind, e.g. `refactor.rewrite.refyntra.invertIf`. */
+  kind: string;
+}
+
+export interface EditActionsResult {
+  items: EditActionInfo[];
+  /** The edits of the requested action (absent when listing or refused). */
+  edits?: { range: Range; newText: string }[] | null;
+  /** SHA-256 of the document text the edits apply to. */
+  documentHash?: string | null;
+  reasonCode?: string | null;
+  message?: string | null;
+  snapshotId: string;
+}
+
 /** The files a plan deletes (protocol 1.6, Safe Delete). */
 export interface FileDeleteOffer {
   files: string[];
@@ -752,6 +780,8 @@ export interface MethodMap {
   'code/hierarchy': [HierarchyParams, HierarchyResult];
   /** Protocol 1.8. */
   'workspace/runnableProjects': [WorkspaceParams, RunnableProjectsResult];
+  /** Protocol 1.9. */
+  'code/editActions': [EditActionsParams, EditActionsResult];
   'code/references': [SymbolQueryParams, LocationsResult];
   'code/implementations': [SymbolQueryParams, LocationsResult];
   'refactor/prepare': [PrepareParams, PrepareResult];

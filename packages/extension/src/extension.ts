@@ -41,6 +41,7 @@ import { CSHARP_GENERATE_HANDLER_ACTION, CSHARP_MOVE_TYPE_ACTION } from '@refynt
 import { runRestore } from './restore';
 import { registerCodeActions } from './codeActions';
 import { registerConstructorActions } from './constructorActions';
+import { registerEditActions } from './editActions';
 import { type ImmediateViewProvider, registerImmediate } from './immediate';
 import { type CSharpEvaluatableExpressionProvider, type CSharpInlineValuesProvider, registerInlineValues } from './inlineValues';
 import { type RefyntraCodeLensProvider, registerCodeLens } from './codeLens';
@@ -365,6 +366,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     vscode.commands.registerCommand('refyntra.changeSignature', (arg?: unknown) => runChangeSignature(engine, previews, editApplier, atTarget(arg))),
     registerCodeActions(engine),
     registerConstructorActions(engine, editApplier), // constructor / DI helpers (constructorActions.ts)
+    registerEditActions(engine, editApplier), // Convert / Inline / Introduce edit actions computed by Roslyn (protocol 1.9)
     inlineValues.disposable, // C# inline debug values and hover member chains (inlineValues.ts)
     immediate.disposable, // Refyntra Immediate panel (immediate.ts)
     registerHierarchy(engine), // built-in Call / Type Hierarchy for C# (protocol 1.7)

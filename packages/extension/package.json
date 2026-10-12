@@ -434,6 +434,23 @@
         "title": "Add Parameters to Constructor…",
         "category": "Refyntra",
         "enablement": "editorLangId == csharp"
+      },
+      {
+        "command": "refyntra.introduceVariable",
+        "title": "Introduce Variable",
+        "category": "Refyntra",
+        "enablement": "editorLangId == csharp"
+      },
+      {
+        "command": "refyntra.inlineVariable",
+        "title": "Inline Variable",
+        "category": "Refyntra",
+        "enablement": "editorLangId == csharp"
+      },
+      {
+        "command": "refyntra.editAction",
+        "title": "Apply Edit Action",
+        "category": "Refyntra"
       }
     ],
     "taskDefinitions": [
@@ -599,6 +616,18 @@
         {
           "command": "refyntra.ctor.addParameters",
           "when": "editorLangId == csharp"
+        },
+        {
+          "command": "refyntra.introduceVariable",
+          "when": "editorLangId == csharp"
+        },
+        {
+          "command": "refyntra.inlineVariable",
+          "when": "editorLangId == csharp"
+        },
+        {
+          "command": "refyntra.editAction",
+          "when": "false"
         }
       ],
       "view/title": [
@@ -1308,6 +1337,18 @@
         "key": "ctrl+shift+g",
         "mac": "cmd+shift+g",
         "when": "config.refyntra.keybindings.preset == 'resharper' && editorTextFocus && editorLangId =~ /^(csharp|typescript|typescriptreact|javascript|javascriptreact|python|rust)$/"
+      },
+      {
+        "command": "refyntra.introduceVariable",
+        "key": "ctrl+alt+v",
+        "mac": "cmd+alt+v",
+        "when": "config.refyntra.keybindings.preset == 'resharper' && editorTextFocus && !editorReadonly && editorLangId == csharp"
+      },
+      {
+        "command": "refyntra.inlineVariable",
+        "key": "ctrl+alt+n",
+        "mac": "cmd+alt+n",
+        "when": "config.refyntra.keybindings.preset == 'resharper' && editorTextFocus && !editorReadonly && editorLangId == csharp"
       },
       {
         "command": "refyntra.showImmediate",

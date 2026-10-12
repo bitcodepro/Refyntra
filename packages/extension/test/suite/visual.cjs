@@ -403,7 +403,10 @@ exports.cases = ({ api, csharp, waitFor }) => {
           const clock = doc.positionAt(doc.getText().indexOf('IClock clock') + 8);
           const ed = await vscode.window.showTextDocument(doc, { preview: false, selection: new vscode.Selection(clock, clock) });
           ed.revealRange(new vscode.Range(clock, clock), vscode.TextEditorRevealType.InCenter);
-          await sleep(800);
+          // Deterministic: wait until the host's edit actions for this exact position are listed (this also fills the
+          // provider's short cache, so the Ctrl+. menu below shows them at once).
+          const cursor = new vscode.Range(clock, clock);
+          await waitFor(async () => ((await vscode.commands.executeCommand('vscode.executeCodeActionProvider', doc.uri, cursor, 'refactor.rewrite')) ?? []).some((a) => a.title === 'Convert to block body (Refyntra)'), 'host edit actions at the parameter', 120000);
           await vscode.commands.executeCommand('editor.action.quickFix');
           await shot('ctor-actions', 2500);
           key('Escape');

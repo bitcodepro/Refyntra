@@ -166,5 +166,50 @@ exports.cases = ({ api, csharp, waitFor }) => {
         await revertAll();
       },
     ],
+    [
+      'Edit actions (protocol 1.9): Ctrl+. offers Invert if / Inline / Introduce from the host; applying is one Undo step',
+      async () => {
+        const a = await api();
+        const uri = lib('EditActions/Samples.cs');
+        const doc = await vscode.workspace.openTextDocument(uri);
+        const editor = await vscode.window.showTextDocument(doc);
+        const original = doc.getText();
+        const pos = (needle, offset = 0) => doc.positionAt(doc.getText().indexOf(needle) + offset);
+        const offered = async (range, kind) => {
+          let list = [];
+          await waitFor(async () => {
+            list = (await vscode.commands.executeCommand('vscode.executeCodeActionProvider', uri, range, kind)) ?? [];
+            return list.some((x) => x.command?.command === 'refyntra.editAction');
+          }, `edit actions for ${kind}`, 120000);
+          return list.filter((x) => x.command?.command === 'refyntra.editAction');
+        };
+        // Convert: Invert 'if'.
+        const ifPos = pos('if (value > 0)', 1);
+        const rewrite = await offered(new vscode.Range(ifPos, ifPos), 'refactor.rewrite');
+        const invert = rewrite.find((x) => x.title === "Invert 'if' (Refyntra)");
+        assert.ok(invert, rewrite.map((x) => x.title).join(', '));
+        assert.equal(invert.kind.value, 'refactor.rewrite.refyntra.invertIf');
+        assert.equal(await vscode.commands.executeCommand(invert.command.command, ...invert.command.arguments), true);
+        assert.ok(doc.getText().includes('if (value <= 0)'));
+        await vscode.commands.executeCommand('undo');
+        assert.equal(doc.getText(), original);
+        // Inline Variable.
+        const sumPos = pos('var sum', 4);
+        const inline = (await offered(new vscode.Range(sumPos, sumPos), 'refactor.inline')).find((x) => x.kind.value === 'refactor.inline.refyntra.variable');
+        assert.ok(inline);
+        assert.equal(await vscode.commands.executeCommand(inline.command.command, ...inline.command.arguments), true);
+        assert.ok(doc.getText().includes('return (a + b) * (a + b);'));
+        await vscode.commands.executeCommand('undo');
+        assert.equal(doc.getText(), original);
+        // Introduce Variable (the keyboard command on the selection).
+        const s = pos('a * b + _factor');
+        editor.selection = new vscode.Selection(s, s.translate(0, 5));
+        assert.equal(await vscode.commands.executeCommand('refyntra.introduceVariable'), true);
+        assert.ok(doc.getText().includes('var value = a * b;'));
+        await vscode.commands.executeCommand('undo');
+        assert.equal(doc.getText(), original);
+        await revertAll();
+      },
+    ],
   ];
 };

@@ -25,8 +25,9 @@ public sealed class Engine : IRpcHandler, IDisposable
     /// PlannedChange kind "delete", plan.fileDelete, code/signature, workspace/didDeleteFiles.
     /// 1.7: code/hierarchy (call and type hierarchy).
     /// 1.8: workspace/runnableProjects (Run and Debug).
+    /// 1.9: code/editActions (single-document Convert / Inline / Introduce edit actions, compile-checked by Roslyn).
     /// </summary>
-    public const int ProtocolMinor = 8;
+    public const int ProtocolMinor = 9;
     /// <summary>How long workspace/snapshotBarrier waits for a missing document sequence (tests shorten it).</summary>
     public TimeSpan BarrierTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
@@ -108,6 +109,8 @@ public sealed class Engine : IRpcHandler, IDisposable
                 return await SignatureAsync(Params<SymbolQueryParams>(p), ct).ConfigureAwait(false);
             case "code/hierarchy":
                 return await HierarchyAsync(Params<HierarchyParams>(p), ct).ConfigureAwait(false);
+            case "code/editActions":
+                return await EditActionsAsync(Params<EditActionsParams>(p), ct).ConfigureAwait(false);
             case "workspace/runnableProjects":
                 return RunnableProjects(Params<WorkspaceParams>(p));
             case "code/resolveFrame":
@@ -604,6 +607,30 @@ public sealed class Engine : IRpcHandler, IDisposable
                 LaunchSettingsUri = r.LaunchSettingsPath == null ? null : UriPaths.ToUri(r.LaunchSettingsPath),
             }).ToList(),
         };
+    }
+
+    private async Task<EditActionsResultDto> EditActionsAsync(EditActionsParams p, CancellationToken ct)
+    {
+        var snap = RequireSnapshot(p.WorkspaceId, p.SnapshotId);
+        var path = PathOf(p.Uri);
+        var range = new Microsoft.CodeAnalysis.Text.LinePositionSpan(new(p.Range.Start.Line, p.Range.Start.Character), new(p.Range.End.Line, p.Range.End.Character));
+        var result = new EditActionsResultDto { SnapshotId = snap.Id };
+        if (string.IsNullOrEmpty(p.ActionId))
+        {
+            foreach (var a in await EditActionsPlanner.ListAsync(snap, path, range, ct).ConfigureAwait(false))
+                result.Items.Add(new EditActionDto { ActionId = a.ActionId, Title = a.Title, Kind = a.Kind });
+            return result;
+        }
+        var outcome = await EditActionsPlanner.ComputeAsync(snap, path, range, p.ActionId, ct).ConfigureAwait(false);
+        result.ReasonCode = outcome.ReasonCode;
+        result.Message = outcome.Message;
+        result.DocumentHash = outcome.DocumentHash;
+        result.Edits = outcome.Edits?.Select(e => new TextEditDto
+        {
+            Range = new RangeDto { Start = new PositionDto { Line = e.Range.Start.Line, Character = e.Range.Start.Character }, End = new PositionDto { Line = e.Range.End.Line, Character = e.Range.End.Character } },
+            NewText = e.NewText,
+        }).ToList();
+        return result;
     }
 
     private async Task<HierarchyResultDto> HierarchyAsync(HierarchyParams p, CancellationToken ct)

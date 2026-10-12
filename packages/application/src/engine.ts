@@ -162,6 +162,12 @@ export type HierarchyOutcome =
 /** Run and Debug (protocol 1.8): the runnable-project model of the C# route, or why there is none. */
 export type RunnableProjectsOutcome = { kind: 'projects'; result: import('@refyntra/contracts').RunnableProjectsResult } | Unavailable;
 
+/** Edit actions (protocol 1.9): the actions at a range, or the edits of one action, or why not. */
+export type EditActionsOutcome =
+  | { kind: 'actions'; items: import('@refyntra/contracts').EditActionInfo[] }
+  | { kind: 'edits'; edits: { range: import('@refyntra/contracts').Range; newText: string }[]; documentHash: string | null }
+  | Unavailable;
+
 export interface ApplyOptions {
   /** The user explicitly confirmed the limitations of a plan whose validation is `limited`. */
   acceptLimited?: boolean;
@@ -209,6 +215,11 @@ export interface EngineClient {
   hierarchy(target: DocumentTarget, direction: import('@refyntra/contracts').HierarchyDirection | 'subject', token?: CancellationToken): Promise<HierarchyOutcome>;
   /** Run and Debug (protocol 1.8): the C# projects of the loaded workspace classified for running and debugging. */
   runnableProjects?(token?: CancellationToken): Promise<RunnableProjectsOutcome>;
+  /**
+   * Edit actions (owned route, protocol 1.9): without `actionId` the actions at the range; with it the edits of that
+   * action, computed and compile-checked by the backend (or why it is refused).
+   */
+  editActions?(target: { uri: string; range: import('@refyntra/contracts').Range }, actionId?: string, token?: CancellationToken): Promise<EditActionsOutcome>;
   discardPlan(planId: string): void;
   planState(planId: string): PlanState | undefined;
   /** Rule analysis (`analysis/run`) of every route that offers it; one outcome per route, never throws except on cancel. */
@@ -683,6 +694,24 @@ export class RefyntraEngine implements EngineClient {
       if (!subject) return { kind: 'unavailable', reasonCode: 'NoSymbol', message: 'There is no symbol at the cursor.', recoveryActions: [] };
       if (direction !== 'subject' && !result) return { kind: 'unavailable', reasonCode: 'ProtocolTooOld', message: 'The C# host is too old for the hierarchy; update the extension.', recoveryActions: [] };
       return { kind: 'hierarchy', subject, items: result?.items ?? [], completeness: result?.completeness ?? 'complete', truncated: result?.truncated ?? false };
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      return this.toUnavailable(adapter, e);
+    }
+  }
+
+  async editActions(target: { uri: string; range: import('@refyntra/contracts').Range }, actionId?: string, token?: CancellationToken): Promise<EditActionsOutcome> {
+    const adapter = this.o.registry.routeFor(target.uri);
+    if (!adapter || adapter.descriptor.ownership !== 'owned-semantic' || typeof adapter.editActions !== 'function') {
+      return { kind: 'unavailable', reasonCode: 'ActionNotSupported', message: 'Edit actions are not provided for this file by Refyntra.', recoveryActions: [] };
+    }
+    try {
+      const r = await this.withStaleRetry(() => adapter.editActions!(target.uri, target.range, actionId, token), token);
+      const v = r.value;
+      if (!v) return { kind: 'unavailable', reasonCode: 'ProtocolTooOld', message: 'The C# host is too old for these actions; update the extension.', recoveryActions: [] };
+      if (!actionId) return { kind: 'actions', items: v.items };
+      if (!v.edits) return { kind: 'unavailable', reasonCode: v.reasonCode ?? 'Unavailable', message: v.message ?? 'The action is unavailable here.', recoveryActions: [] };
+      return { kind: 'edits', edits: v.edits, documentHash: v.documentHash ?? null };
     } catch (e) {
       if (e instanceof CancelledError) throw e;
       return this.toUnavailable(adapter, e);

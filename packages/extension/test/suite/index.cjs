@@ -1373,7 +1373,7 @@ scenarios['ts-delegated'] = [
 
 // ---- accessibility -----------------------------------------------------------------------------------
 // Internal commands: invoked by buttons and tree items, hidden from the Command Palette on purpose.
-const INTERNAL_COMMANDS = ['refyntra.openLocation', 'refyntra.runRestore', 'refyntra.related.open', 'refyntra.nativeRename', 'refyntra.stackTrace.openFrame', 'refyntra.stackTrace.related', 'refyntra.taskContext.addFindItem', 'refyntra.taskContext.addFromRelated', 'refyntra.codeLens.related', 'refyntra.selectRunTargetById', 'refyntra.pickDotnetProcess', 'refyntra.immediate.clear'];
+const INTERNAL_COMMANDS = ['refyntra.openLocation', 'refyntra.runRestore', 'refyntra.related.open', 'refyntra.nativeRename', 'refyntra.stackTrace.openFrame', 'refyntra.stackTrace.related', 'refyntra.taskContext.addFindItem', 'refyntra.taskContext.addFromRelated', 'refyntra.codeLens.related', 'refyntra.selectRunTargetById', 'refyntra.pickDotnetProcess', 'refyntra.immediate.clear', 'refyntra.editAction'];
 
 common.push([
   'keyboard: every user command is in the Command Palette and the status bar menu leads to the main ones',

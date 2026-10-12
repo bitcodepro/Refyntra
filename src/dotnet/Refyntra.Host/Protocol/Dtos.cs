@@ -710,3 +710,35 @@ public sealed class AnalysisRunResultDto
     public string Completeness { get; set; } = "complete";
     public string SnapshotId { get; set; } = "";
 }
+
+/// <summary>
+/// code/editActions (protocol 1.9): the single-document edit actions at a range (no actionId), or the computed,
+/// compile-checked edits of one action (actionId set).
+/// </summary>
+public sealed class EditActionsParams : WorkspaceParams
+{
+    public string SnapshotId { get; set; } = "";
+    public string Uri { get; set; } = "";
+    public RangeDto Range { get; set; } = new();
+    public string? ActionId { get; set; }
+}
+
+public sealed class EditActionDto
+{
+    public string ActionId { get; set; } = "";
+    public string Title { get; set; } = "";
+    /// <summary>Code action kind, e.g. "refactor.rewrite.refyntra.invertIf".</summary>
+    public string Kind { get; set; } = "";
+}
+
+public sealed class EditActionsResultDto
+{
+    public List<EditActionDto> Items { get; set; } = new();
+    /// <summary>The edits of the requested action (null when listing or refused).</summary>
+    public List<TextEditDto>? Edits { get; set; }
+    /// <summary>SHA-256 of the document text the edits apply to.</summary>
+    public string? DocumentHash { get; set; }
+    public string? ReasonCode { get; set; }
+    public string? Message { get; set; }
+    public string SnapshotId { get; set; } = "";
+}

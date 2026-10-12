@@ -173,6 +173,17 @@ a test class. It is not part of `initialize.capabilities`.
   projects, libraries, MAUI and Blazor WebAssembly are listed with `runnable: false` and a `reason`; WinForms/WPF are
   runnable with `windowsOnly: true`. The client reads the profiles of `launchSettingsUri` itself. While the workspace
   loads, `projects` is empty and `state` says so. A client sends it only to a host that reported minor ≥ 8.
+- 1.9 (additive, edit actions): request `code/editActions` `{traceId, workspaceId, snapshotId, uri, range, actionId?}`
+  → `{items: [{actionId, title, kind}], edits?: [{range, newText}], documentHash?, reasonCode?, message?, snapshotId}`.
+  Without `actionId` it lists the single-document edit actions that apply at the range (a syntax pass with a few
+  semantic queries, no compilation); ids are `csharp.edit.*` (toBlockBody, toExpressionBody, varToExplicit,
+  explicitToVar, invertIf, ifToTernary, ternaryToIf, mergeNestedIf, splitIf, toInterpolatedString, inlineVariable,
+  introduceVariable, introduceVariableAll) and `kind` is the editor code action kind. With `actionId` the host rewrites
+  the syntax tree, formats only the rewritten nodes (document options, .editorconfig) and returns the minimal edits
+  of the document with the SHA-256 of the text they apply to, or `reasonCode`/`message` when the action is refused
+  (`NotApplicable`, `CompilationErrors` — the document would get a compiler error it did not have —, `SideEffects`,
+  `EvaluationOrder`, `VariableWritten`, `ReadOnlyFile`, …). Never writes files; the client applies the edits as one
+  undo step only while the document version is the one the request was made for. Sent only to hosts with minor ≥ 9.
 - Additive (EF Core): relation kinds `efcore.*` and group `data` (above); `SearchFilters.entity?: boolean` ("entity:")
   and `SearchFilters.table?: string` ("table:NAME") return EF Core entities as symbol items. Older hosts ignore the
   filters (they return a normal symbol search); older clients render the kinds and the group generically. The
@@ -231,6 +242,7 @@ issuing semantic requests.
 | `code/signature` | req | `SymbolQueryParams` | `SignatureInfo` (since 1.6; Change Signature) |
 | `code/hierarchy` | req | `HierarchyParams` `{…, symbolId, direction}` | `HierarchyResult` (since 1.7; call and type hierarchy) |
 | `workspace/runnableProjects` | req | `WorkspaceParams` | `RunnableProjectsResult` (since 1.8; Run and Debug, no barrier) |
+| `code/editActions` | req | `EditActionsParams` `{…, uri, range, actionId?}` | `EditActionsResult` (since 1.9; Convert / Inline / Introduce) |
 | `workspace/didDeleteFiles` | notif | `{workspaceId, sequence, workspaceRevision, files: [{uri}]}` | – (since 1.6; consumes a document sequence) |
 | `analysis/run` | req | `AnalysisRunParams` `{traceId, workspaceId, snapshotId, uri?}` | `AnalysisRunResult` (since 1.1, additive; see "Analysis") |
 | `$/cancelRequest` | notif | `{id}` | – |

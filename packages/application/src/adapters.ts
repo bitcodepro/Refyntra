@@ -150,6 +150,11 @@ export interface LanguageAdapter {
    * Optional (protocol 1.8): the loaded projects classified for Run and Debug (workspace/runnableProjects, no barrier).
    * Null when the host is too old.
    */
+  /**
+   * Optional (protocol 1.9): single-document edit actions at a range (no actionId), or the compile-checked edits of one
+   * (barrier first; null for an older host).
+   */
+  editActions?(uri: string, range: import('@refyntra/contracts').Range, actionId: string | undefined, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').EditActionsResult | null>>;
   runnableProjects?(token?: CancellationToken): Promise<import('@refyntra/contracts').RunnableProjectsResult | null>;
   dispose(): Promise<void>;
   /** Present on delegated routes (descriptor.ownership 'delegated') that offer rename. */

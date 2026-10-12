@@ -675,6 +675,31 @@ nothing is changed and the message says so. That edit is in another file, so it 
 Limits: a syntax pass (no semantic model), so types are copied as written; a partial class is seen only in the current
 file; a class with a primary constructor gets no explicit constructor (it would need `: this(...)`).
 
+### Rider-style edit actions (C#)
+
+Ctrl+. (or the Refactor… menu) asks the C# host which of these apply at the cursor; with a selection the lightbulb
+offers Introduce Variable too. The host computes every result with Roslyn (syntax rewrite, formatting of the changed
+nodes with the document's `.editorconfig` options) and **refuses it when the file would get a compiler error it did
+not have**. The result touches only the current document, so it is applied as one editor change (one **Undo**), and
+only while the document is still the version the action was computed for.
+
+| Action | Code action kind | Applies to | Refused / not offered when |
+|---|---|---|---|
+| Convert to block body / expression body | `refactor.rewrite.refyntra.blockBody` / `.expressionBody` | methods, local functions, operators, constructors, accessors, get-only properties and indexers | ref returns; a block with more than one statement or with comments |
+| Use explicit type / Use `var` | `refactor.rewrite.refyntra.explicitType` / `.var` | locals with one variable, `foreach` | anonymous types; `var` would change the type (`long x = 1;`), target-typed or `null` initializers |
+| Invert `if` | `refactor.rewrite.refyntra.invertIf` | `if` with an `else` | `else if` chains; `<`/`>` flip only for integral operands (NaN and lifted nullables are negated with `!`) |
+| Convert `if` ↔ conditional expression | `refactor.rewrite.refyntra.ifToConditional` / `.conditionalToIf` | `return c ? a : b;`, `x = c ? a : b;` | branches of different types (the conditional would convert one) |
+| Merge nested `if` / Split `if` at `&&` | `refactor.rewrite.refyntra.mergeIf` / `.splitIf` | `if` without `else` | comments between the two `if`s |
+| Convert to interpolated string | `refactor.rewrite.refyntra.interpolatedString` | string `+` chains with a plain string literal | verbatim/raw literals; constant contexts |
+| Inline Variable | `refactor.inline.refyntra.variable` | a local with one initializer | the variable is written; an initializer with side effects used more than once, not in the next statement, conditionally, or after other side effects; comments on the declaration |
+| Introduce Variable (this / all occurrences) | `refactor.extract.refyntra.variable` / `.variableAll` | a selected expression in a statement of a block | conditional or repeated evaluation (`&&`, `?:`, lambdas, loop heads), `ref`/`out` arguments, an earlier side effect in the statement; *all occurrences* needs a value that cannot change |
+
+In the `resharper` preset **Ctrl+Alt+V** runs Introduce Variable on the selection and **Ctrl+Alt+N** Inline Variable at
+the cursor (C# editors only; VS Code has no default binding for these keys). Protocol 1.9 (`code/editActions`).
+Not yet available: postfix templates, the Generate menu (Alt+Insert), Inline Method/Field/Parameter, Introduce
+Field/Constant/Parameter, the remaining Convert actions (switch, LINQ, primary constructor, record, full property,
+object initializer, using declaration, async) and Fix in scope.
+
 ## Commands
 
 | Command | Purpose |
@@ -709,6 +734,7 @@ file; a class with a primary constructor gets no explicit constructor (it would 
 | `refyntra.selectRunTarget` | Choose project, launch profile, target framework and configuration (the status bar item) |
 | `refyntra.showImmediate` | The Refyntra Immediate panel for the stopped frame (Ctrl+Alt+I in the `visualStudio` preset while debugging) |
 | `refyntra.ctor.generate` / `refyntra.ctor.addParameters` | Generate a constructor from chosen fields and properties / add them to the existing constructor (also Ctrl+. on the class name) |
+| `refyntra.introduceVariable` / `refyntra.inlineVariable` | Introduce a local from the selected C# expression / inline the C# local at the cursor (Ctrl+Alt+V / Ctrl+Alt+N in the `resharper` preset) |
 | `refyntra.generateLaunchJson` | Write the run and debug configurations to `.vscode/launch.json` |
 | `refyntra.nativeRename` | (not in the palette) The editor's own Rename, offered when a TS/JS rename cannot be confirmed safe; not validated by Refyntra |
 

@@ -4,6 +4,20 @@ All notable changes are listed here. The project is alpha; nothing has been rele
 
 ## Unreleased
 
+### Added (Rider-style C# edit actions, protocol 1.9)
+
+- **`code/editActions`** (protocol minor 9): the C# host lists single-document edit actions at a range and computes
+  one with Roslyn: syntax rewrite, formatting of the changed nodes (document options, `.editorconfig`), refusal when the
+  document would get a new compiler error. Actions: convert expression body ↔ block body, `var` ↔ explicit type, invert
+  `if`, `if` ↔ conditional expression, merge / split nested `if`, string concatenation → interpolated string, Inline
+  Variable, Introduce Variable (this occurrence or all). Honest refusals for written variables, moved side effects,
+  conditional evaluation, mixed branch types, NaN-sensitive comparisons.
+- Editor: the actions appear in Ctrl+. and the Refactor… menu under `refactor.rewrite.refyntra.*`,
+  `refactor.inline.refyntra.*` and `refactor.extract.refyntra.*`; applied as one Undo step, only to the document version
+  they were computed for. Commands **Introduce Variable** / **Inline Variable**; `resharper` preset: Ctrl+Alt+V /
+  Ctrl+Alt+N (C# editors only).
+- Tests: .NET tests for every action (results and refusals) on the Refactorings fixture; unit tests for the editor glue.
+
 ### Added (debugging like Rider and Visual Studio; constructor and DI helpers)
 
 - **Inline debug values for C#** (`refyntra.debug.inlineValues`, default on): an InlineValuesProvider shows

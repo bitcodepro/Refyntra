@@ -714,6 +714,17 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
     });
   }
 
+  /** Edit actions (protocol 1.9): list at a range, or compute one action; null for an older host. */
+  editActions(uri: string, range: import('@refyntra/contracts').Range, actionId: string | undefined, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').EditActionsResult | null>> {
+    return this.semantic('code/editActions', token, async (s, snapshotId, traceId) => {
+      if (s.protocolMinor < 9) return null;
+      const r = await s.transport.request('code/editActions', { traceId, workspaceId: this.opts.workspaceId, snapshotId, uri, range, ...(actionId ? { actionId } : {}) }, token);
+      const items = Array.isArray(r?.items) ? r.items.filter((i) => i && typeof i.actionId === 'string' && typeof i.title === 'string' && typeof i.kind === 'string') : [];
+      const edits = Array.isArray(r?.edits) ? r.edits.filter((e) => e && e.range && e.range.start && e.range.end && typeof e.newText === 'string') : null;
+      return { items, edits, documentHash: r?.documentHash ?? null, reasonCode: r?.reasonCode ?? null, message: r?.message ?? null, snapshotId: r?.snapshotId ?? snapshotId };
+    });
+  }
+
   /** Run and Debug (protocol 1.8): the runnable-project model of the loaded workspace; null for an older host. */
   async runnableProjects(token?: CancellationToken): Promise<import('@refyntra/contracts').RunnableProjectsResult | null> {
     const session = await this.whenReady(token);
