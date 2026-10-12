@@ -351,6 +351,16 @@ describe('rename plan state machine and apply', () => {
   });
 });
 
+describe('runnable projects (protocol 1.8)', () => {
+  it('returns the project model of the owned route', async () => {
+    const ws = make();
+    const r = await ws.engine.runnableProjects();
+    if (r.kind !== 'projects') throw new Error(JSON.stringify(r));
+    expect(r.result.projects.map((p) => [p.name, p.kind, p.runnable])).toEqual([['App', 'console', true]]);
+    expect(r.result.projects[0]!.outputs[0]!.outputUri).toContain('App.dll');
+  });
+});
+
 describe('hierarchy (protocol 1.7)', () => {
   it('resolves the subject and returns the incoming calls from the owned route', async () => {
     const ws = make();

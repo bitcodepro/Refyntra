@@ -167,6 +167,11 @@ const visualSettings = {
   'files.autoSave': 'off',
   'refyntra.rename.apply': true,
   'refyntra.preview.style': 'native',
+  // Run and Debug UI off for the older screenshots (their baselines predate it); the run cases switch it on.
+  'refyntra.run.statusBar': false,
+  'refyntra.run.editorButtons': false,
+  'refyntra.run.view': false,
+  'refyntra.run.codeLens': false,
 };
 const visualThemes = { dark: 'Default Dark Modern', light: 'Default Light Modern' };
 
@@ -322,6 +327,9 @@ const scenarios = visual
       // extension disabled (also VS Code's built-in TypeScript features).
       { name: 'web-frameworks', webCopy: ['WebReact', 'WebNext', 'WebAngular', 'WebAngularOld'], trusted: true, env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' } },
       { name: 'web-frameworks-restricted', webCopy: ['WebReact'], trusted: false, env: { REFYNTRA_HOST_PATH: '', REFYNTRA_TEST_FORCE_RESTRICTED: '1' } },
+      // Run and Debug on a temp copy of the Runnable fixture, every other extension disabled: the bundled netcoredbg
+      // (breakpoint, locals, exit code) and debugpy (system Python), a web app run with its launch profile.
+      { name: 'run-debug', fixtureCopy: ['Runnable', 'Runnable.sln'], trusted: true, env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' } },
       // Task context on a temp copy of Shop: add, move by an edit, reload, rename through Refyntra, delete.
       {
         name: 'task-context',

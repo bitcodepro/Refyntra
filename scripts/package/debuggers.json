@@ -1,0 +1,31 @@
+{
+  "comment": "Debug adapters bundled in the VSIX. Downloaded ONLY at packaging time (scripts/package/servers.mjs) from the official release URLs and verified against these SHA-256 values (the digests GitHub / PyPI publish for the assets). Never downloaded at run time. Microsoft's vsdbg may not be redistributed by third parties, so .NET debugging uses Samsung netcoredbg (MIT). Targets without an official netcoredbg build (win32-arm64, darwin-x64 in this release, alpine-x64) ship without it: Health says .NET debugging is unavailable there; running still works.",
+  "netcoredbg": {
+    "version": "3.2.0-1092",
+    "license": "MIT",
+    "source": "https://github.com/Samsung/netcoredbg/releases/tag/3.2.0-1092",
+    "targets": {
+      "win32-x64": { "url": "https://github.com/Samsung/netcoredbg/releases/download/3.2.0-1092/netcoredbg-win64.zip", "sha256": "3c410a45fa502415203a94fcb88654af65bf8e3dac158a5527a722e7a6b9274a", "binary": "netcoredbg.exe" },
+      "linux-x64": { "url": "https://github.com/Samsung/netcoredbg/releases/download/3.2.0-1092/netcoredbg-linux-amd64.tar.gz", "sha256": "080eb3b2d2152465f599d3b33d1ee6e747794e11cc0a3773ec689f5e5f2c5afa", "binary": "netcoredbg" },
+      "linux-arm64": { "url": "https://github.com/Samsung/netcoredbg/releases/download/3.2.0-1092/netcoredbg-linux-arm64.tar.gz", "sha256": "065ff49badec8a695dbea2de6ab6a330c774a191e426a217ab8cc05250627ccb", "binary": "netcoredbg" },
+      "darwin-arm64": { "url": "https://github.com/Samsung/netcoredbg/releases/download/3.2.0-1092/netcoredbg-osx-arm64.zip", "sha256": "f4fa33b3ff874910cc184b4bb3b9c56d0abdf5c6521cee0b144d7c6e4a6e59ea", "binary": "netcoredbg" }
+    },
+    "licenses": [
+      { "file": "netcoredbg-LICENSE.txt", "what": "netcoredbg (MIT, Samsung Electronics)" },
+      { "file": "netcoredbg-roslyn-LICENSE.txt", "what": "Microsoft.CodeAnalysis*.dll shipped by netcoredbg for expression evaluation (Roslyn, MIT, .NET Foundation)" },
+      { "file": "netcoredbg-dbgshim-LICENSE.txt", "what": "dbgshim shipped by netcoredbg (.NET diagnostics, MIT, .NET Foundation)" },
+      { "file": "netcoredbg-third_party-json-LICENSE.txt", "what": "nlohmann/json, linked into netcoredbg (MIT)" },
+      { "file": "netcoredbg-third_party-libelfin-LICENSE.txt", "what": "libelfin, linked into netcoredbg (MIT)" },
+      { "file": "netcoredbg-third_party-linenoise-ng-LICENSE.txt", "what": "linenoise-ng, linked into netcoredbg (BSD-style)" }
+    ],
+    "unsupported": ["win32-arm64", "darwin-x64", "alpine-x64"]
+  },
+  "debugpy": {
+    "version": "1.8.22",
+    "license": "MIT",
+    "source": "https://pypi.org/project/debugpy/1.8.22/",
+    "url": "https://files.pythonhosted.org/packages/56/3d/c7dc9f35bc9e22cdb53679f844bee40fd5cff871862f60595869a433400d/debugpy-1.8.22-py2.py3-none-any.whl",
+    "sha256": "a9e9d3550e15ca479c59333e90845029190531f0cacfedab3b815a57bd913947",
+    "comment": "Only the pure-Python parts are staged: compiled speedups (.pyd/.so), the native attach-to-process helpers, their debug symbols, C/Cython sources, vendored tests and the protocol schemas only pydevd's code generator reads are left out. Launch and connect (attach by host/port) work; attaching to a process id does not."
+  }
+}

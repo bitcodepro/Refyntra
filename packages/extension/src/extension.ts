@@ -48,6 +48,7 @@ import { parseCodeActionTarget } from './codeActionsModel';
 import { SolutionService } from './solution';
 import { STACK_TRACE_VIEW, StackTraceViewProvider, runOpenStackTrace } from './stackTrace';
 import { type TaskContextViewProvider, registerTaskContext } from './taskContext';
+import { type RunService, registerRun } from './run';
 
 export const CSHARP_DESCRIPTOR: AdapterDescriptor = {
   adapterId: 'csharp',
@@ -114,6 +115,8 @@ export interface RefyntraTestApi {
   changeSignatureDialog(): ChangeSignatureDialog | undefined;
   /** Status bar state: loading / ready / problem / idle. */
   statusKind(): string;
+  /** Run and Debug (e2e: targets, sessions, opened URLs, debug exit codes, pickers). */
+  run: RunService;
 }
 
 let engineRef: RefyntraEngine | undefined;
@@ -264,8 +267,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
   });
   engineRef = engine;
 
-  const health = new HealthDocument(engine, () => solutions.selected());
-  const healthPage = new HealthPage(engine, () => solutions.selected(), isTrusted);
+  // Run and Debug (ADR-008): bundled netcoredbg / debugpy, the host's runnable-project model, js-debug configurations.
+  const run = registerRun(context, engine, isTrusted);
+  context.subscriptions.push(run.disposable);
+  const debugStatus = () => run.service.debuggers.status();
+  const health = new HealthDocument(engine, () => solutions.selected(), debugStatus);
+  const healthPage = new HealthPage(engine, () => solutions.selected(), isTrusted, debugStatus);
   const previews = new PreviewContentProvider();
   const bundlePreview = new BundlePreviewProvider();
   const debugBundle = new DebugBundleExporter({
@@ -413,6 +420,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     codeLens: codeLens.provider,
     changeSignatureDialog: () => ChangeSignatureDialog.current,
     statusKind: () => statusBar.kind(),
+    run: run.service,
   };
 }
 

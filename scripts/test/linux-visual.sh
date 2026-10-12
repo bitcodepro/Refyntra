@@ -41,7 +41,7 @@ fi
 step() { printf '\n==== %s ====\n' "$*"; }
 mkdir -p /work
 rsync -a --exclude node_modules --exclude bin --exclude obj --exclude dist --exclude out --exclude '*.tsbuildinfo' --exclude .git --exclude .vscode-test \
-  --exclude /test-results/ --exclude /packages/extension/servers/ --exclude /packages/extension/host/ /src/ /work/
+  --exclude /test-results/ --exclude /packages/extension/servers/ --exclude /packages/extension/host/ --exclude /packages/extension/debuggers/ /src/ /work/
 ln -sfn /cache/vscode-test /work/.vscode-test
 cd /work
 corepack enable
@@ -52,6 +52,7 @@ step "build"
 pnpm install --frozen-lockfile || exit 1
 pnpm -r run build || exit 1
 dotnet build src/dotnet/Refyntra.Host/Refyntra.Host.csproj -c Release || exit 1
+node scripts/package/servers.mjs --debuggers || exit 1
 
 step "screenshots (VS Code $REFYNTRA_TEST_VSCODE_VERSION, Xvfb 1600x1000x24)"
 rm -rf /out/actual /out/diff /out/report.html
@@ -59,7 +60,7 @@ export REFYNTRA_VISUAL_OUT=/out/actual
 display_start 1600x1000x24
 xrun -s "-screen 0 1600x1000x24 -dpi 96 -nolisten tcp" -- timeout 2400 pnpm --filter refyntra run test:visual
 shots=$?
-pkill -f 'Refyntra\.Host|Workspaces\.MSBuild\.BuildHost' 2>/dev/null
+pkill -f 'Refyntra\.Host|Workspaces\.MSBuild\.BuildHost|netcoredbg|Shop\.Api' 2>/dev/null
 
 step "compare"
 if [ "$REFYNTRA_VISUAL_UPDATE" = 1 ]; then

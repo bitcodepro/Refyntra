@@ -20,9 +20,24 @@ Python and Rust work without any other VS Code extension: Refyntra runs these se
   - `legal/typeshed-LICENSE.txt`: typeshed (Apache-2.0; parts MIT, as stated in the file)
   - `legal/rust-analyzer-LICENSE-MIT.txt`: rust-analyzer 2026-09-21 (MIT)
   - `legal/rust-analyzer-LICENSE-APACHE.txt`: rust-analyzer 2026-09-21 (Apache-2.0)
+  - `legal/netcoredbg-LICENSE.txt`: netcoredbg (MIT, Samsung Electronics)
+  - `legal/netcoredbg-roslyn-LICENSE.txt`: Microsoft.CodeAnalysis*.dll shipped by netcoredbg for expression evaluation (Roslyn, MIT, .NET Foundation)
+  - `legal/netcoredbg-dbgshim-LICENSE.txt`: dbgshim shipped by netcoredbg (.NET diagnostics, MIT, .NET Foundation)
+  - `legal/netcoredbg-third_party-json-LICENSE.txt`: nlohmann/json, linked into netcoredbg (MIT)
+  - `legal/netcoredbg-third_party-libelfin-LICENSE.txt`: libelfin, linked into netcoredbg (MIT)
+  - `legal/netcoredbg-third_party-linenoise-ng-LICENSE.txt`: linenoise-ng, linked into netcoredbg (BSD-style)
+  - `legal/debugpy-LICENSE.txt`: debugpy 1.8.22 (MIT)
+  - `legal/debugpy-ThirdPartyNotices.txt`: debugpy 1.8.22 third-party notices (pydevd EPL-2.0 and the other texts stated in the file)
   - `legal/typescript-LICENSE.txt`: TypeScript 6.0.3 (Apache-2.0)
   - `legal/typescript-ThirdPartyNoticeText.txt`: TypeScript 6.0.3 third-party notices
   - `legal/angular-language-service-LICENSE.txt`: @angular/language-service 22.2.1 (MIT)
+
+## Bundled debug adapters
+
+Running and debugging work without any other VS Code extension (ADR-008). the vsdbg debugger from Microsoft may not be redistributed by third parties, so it is not used.
+
+- **netcoredbg** 3.2.0-1092 (MIT, Samsung Electronics) in `extension/debuggers/netcoredbg` of the win32-x64, linux-x64, linux-arm64, darwin-arm64 packages: the official release archive for that platform, downloaded at packaging time from https://github.com/Samsung/netcoredbg/releases/tag/3.2.0-1092 and verified against the SHA-256 in `scripts/package/debuggers.json`. It ships Roslyn (`Microsoft.CodeAnalysis*.dll`, MIT, .NET Foundation) for expression evaluation and dbgshim (MIT, .NET Foundation), and links nlohmann/json (MIT), libelfin (MIT) and linenoise-ng (BSD-style); all texts ship in `legal/` and in `debuggers/netcoredbg/THIRD-PARTY-LICENSES.txt`. No official build exists for win32-arm64, darwin-x64, alpine-x64; those packages carry no .NET debugger.
+- **debugpy** 1.8.22 (MIT, Microsoft Corporation) in `extension/debuggers/debugpy`: the pure-Python files of the official `py2.py3-none-any` wheel from https://pypi.org/project/debugpy/1.8.22/, verified against its SHA-256. Compiled speed-ups, the native attach-to-process helpers and their symbols, C/Cython sources, vendored tests and the protocol schemas only pydevd's code generator reads are left out. debugpy vendors pydevd (PyDev.Debugger, EPL-2.0), shipped unmodified as Python source; the third-party notices (pydevd and the Python license texts it names) ship as `legal/debugpy-ThirdPartyNotices.txt`.
 
 ## Not bundled
 
@@ -38,12 +53,13 @@ Python and Rust work without any other VS Code extension: Refyntra runs these se
 | Apache-2.0 AND MIT | 1 |
 | Apache-2.0 | 1 |
 | MIT OR Apache-2.0 | 1 |
-| MIT | 27 |
+| MIT | 29 |
 
 ## Components
 
 | Ecosystem | Component | Version | License | Copyright | Shipped files |
 |---|---|---|---|---|---|
+| generic | netcoredbg | 3.2.0-1092 | MIT | Copyright (c) 2017 Samsung Electronics Co., LTD | debuggers/netcoredbg/netcoredbg(.exe) (the binary of the package platform), debuggers/netcoredbg/ManagedPart.dll, debuggers/netcoredbg/(lib)dbgshim +4 |
 | generic | rust-analyzer | 2026-09-21 | MIT OR Apache-2.0 | The rust-analyzer developers | servers/rust-analyzer/rust-analyzer(.exe) (the binary of the package platform), servers/rust-analyzer/LICENSE-MIT.txt, servers/rust-analyzer/LICENSE-APACHE.txt +1 |
 | generic | typeshed (stdlib stubs, bundled with Pyright) | 289e5d356896 | Apache-2.0 AND MIT | typeshed contributors | servers/pyright/dist/typeshed-fallback/commit.txt, servers/pyright/dist/typeshed-fallback/LICENSE, servers/pyright/dist/typeshed-fallback/README.md +753 |
 | npm | @angular/language-service | 22.2.1 | MIT | Copyright (c) Google LLC | servers/angular-language-service/LICENSE.txt, servers/angular-language-service/package.json, servers/angular-language-service/bundles/language-service.js |
@@ -74,6 +90,7 @@ Python and Rust work without any other VS Code extension: Refyntra runs these se
 | nuget | System.Composition.Hosting | 10.0.1 | MIT | © Microsoft Corporation. All rights reserved. | System.Composition.Hosting.dll |
 | nuget | System.Composition.Runtime | 10.0.1 | MIT | © Microsoft Corporation. All rights reserved. | System.Composition.Runtime.dll |
 | nuget | System.Composition.TypedParts | 10.0.1 | MIT | © Microsoft Corporation. All rights reserved. | System.Composition.TypedParts.dll |
+| pypi | debugpy | 1.8.22 | MIT | Copyright (c) Microsoft Corporation | debuggers/debugpy/LICENSE.txt, debuggers/debugpy/VERSION.txt, debuggers/debugpy/debugpy/public_api.py +232 |
 
 First-party assemblies (Refyntra, MIT, see `LICENSE`): Refyntra.Frameworks.Abstractions.dll, Refyntra.Frameworks.AspNetCore.dll, Refyntra.Frameworks.DependencyInjection.dll, Refyntra.Frameworks.EfCore.dll, Refyntra.Frameworks.MediatR.dll, Refyntra.Host.dll, Refyntra.Host.exe, Refyntra.Refactorings.dll, Refyntra.Semantics.dll, Refyntra.Workspaces.dll.
 
@@ -90,6 +107,7 @@ These files come from the NuGet packages themselves and are included unchanged i
 The components marked MIT above are distributed under the following terms. Copyright holders:
 
 - Copyright (c) .NET Foundation and Contributors
+- Copyright (c) 2017 Samsung Electronics Co., LTD
 - Copyright (c) Google LLC
 - Copyright (c) Microsoft Corporation
 - Microsoft

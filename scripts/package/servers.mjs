@@ -24,8 +24,9 @@ export function currentTarget() {
 
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 
-/** Minimal ZIP reader (stored/deflated entries) for the Windows release archive; no external tools. */
-function unzipEntry(buf, wanted) {
+/** Minimal ZIP reader (stored/deflated entries) for the release archives; no external tools. Returns every file entry. */
+export function unzipAll(buf) {
+  const out = [];
   let eocd = -1;
   for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65557); i--) if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
   if (eocd < 0) throw new Error('not a zip archive');
@@ -40,17 +41,45 @@ function unzipEntry(buf, wanted) {
     const commentLen = buf.readUInt16LE(p + 32);
     const local = buf.readUInt32LE(p + 42);
     const name = buf.subarray(p + 46, p + 46 + nameLen).toString('utf8');
-    if (path.posix.basename(name) === wanted) {
-      const lName = buf.readUInt16LE(local + 26);
-      const lExtra = buf.readUInt16LE(local + 28);
-      const data = buf.subarray(local + 30 + lName + lExtra, local + 30 + lName + lExtra + csize);
-      if (method === 0) return Buffer.from(data);
-      if (method === 8) return zlib.inflateRawSync(data);
-      throw new Error(`unsupported zip compression method ${method}`);
-    }
     p += 46 + nameLen + extraLen + commentLen;
+    if (name.endsWith('/')) continue;
+    const lName = buf.readUInt16LE(local + 26);
+    const lExtra = buf.readUInt16LE(local + 28);
+    const data = buf.subarray(local + 30 + lName + lExtra, local + 30 + lName + lExtra + csize);
+    if (method === 0) out.push({ name, data: Buffer.from(data) });
+    else if (method === 8) out.push({ name, data: zlib.inflateRawSync(data) });
+    else throw new Error(`unsupported zip compression method ${method} (${name})`);
   }
-  throw new Error(`${wanted} not found in the archive`);
+  return out;
+}
+
+/** Minimal tar.gz reader (regular files only; ustar names with prefix). */
+export function untarGzAll(gz) {
+  const buf = zlib.gunzipSync(gz);
+  const out = [];
+  let p = 0;
+  while (p + 512 <= buf.length) {
+    const header = buf.subarray(p, p + 512);
+    if (header.every((b) => b === 0)) break;
+    const str = (o, l) => {
+      const s = header.subarray(o, o + l).toString('utf8');
+      const z = s.indexOf('\0');
+      return z >= 0 ? s.slice(0, z) : s;
+    };
+    const size = parseInt(str(124, 12).trim() || '0', 8);
+    const type = header[156];
+    const prefix = str(345, 155);
+    const name = (prefix ? `${prefix}/` : '') + str(0, 100);
+    if (type === 0x30 || type === 0) out.push({ name, data: Buffer.from(buf.subarray(p + 512, p + 512 + size)) });
+    p += 512 + Math.ceil(size / 512) * 512;
+  }
+  return out;
+}
+
+function unzipEntry(buf, wanted) {
+  const e = unzipAll(buf).find((x) => path.posix.basename(x.name) === wanted);
+  if (!e) throw new Error(`${wanted} not found in the archive`);
+  return e.data;
 }
 
 /** Downloads (once) and verifies the rust-analyzer binary for a target; returns its cached path. */
@@ -157,8 +186,101 @@ export function stageWebWorker(dest) {
   return { typescript: JSON.parse(fs.readFileSync(path.join(tsSrc, 'package.json'), 'utf8')).version, angular: JSON.parse(fs.readFileSync(path.join(ngSrc, 'package.json'), 'utf8')).version };
 }
 
+// ---- Debug adapters (scripts/package/debuggers.json, ADR-008) ----
+// netcoredbg (MIT): the official release archive of the VSIX target, staged into debuggers/netcoredbg (none for targets
+// without a build). debugpy (MIT): the pure-Python parts of the official py2.py3-none-any wheel, identical in every VSIX.
+export const DBG = JSON.parse(fs.readFileSync(path.join(repo, 'scripts', 'package', 'debuggers.json'), 'utf8'));
+export const NETCOREDBG_TARGETS = Object.keys(DBG.netcoredbg.targets);
+
+async function verifiedDownload(url, sha, what) {
+  console.log(`Downloading ${what} (packaging only) …`);
+  const res = await fetch(url, { redirect: 'follow' });
+  if (!res.ok) throw new Error(`download failed: HTTP ${res.status} for ${url}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  const got = sha256(buf);
+  if (got !== sha) throw new Error(`SHA-256 mismatch for ${url}: expected ${sha}, got ${got}. Refusing to bundle.`);
+  return buf;
+}
+
+async function cachedVerified(url, sha, dir, what) {
+  const file = path.join(dir, path.posix.basename(new URL(url).pathname));
+  if (fs.existsSync(file) && sha256(fs.readFileSync(file)) === sha) return fs.readFileSync(file);
+  const buf = await verifiedDownload(url, sha, what);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(file, buf);
+  return buf;
+}
+
+/** The verified netcoredbg files of a target ({name, data}[] relative to its netcoredbg/ folder); undefined without a build. */
+export async function ensureNetcoredbg(target) {
+  const t = DBG.netcoredbg.targets[target];
+  if (!t) return undefined;
+  const buf = await cachedVerified(t.url, t.sha256, path.join(repo, '.cache', 'netcoredbg', DBG.netcoredbg.version, target), `netcoredbg ${DBG.netcoredbg.version} for ${target}`);
+  const entries = (t.url.endsWith('.zip') ? unzipAll(buf) : untarGzAll(buf))
+    .filter((e) => e.name.startsWith('netcoredbg/'))
+    .map((e) => ({ name: e.name.slice('netcoredbg/'.length), data: e.data }));
+  if (!entries.some((e) => e.name === t.binary)) throw new Error(`${t.binary} not found in ${t.url}`);
+  return entries;
+}
+
+/** Stages netcoredbg for a target into <dest> (debuggers/netcoredbg); false when no official build exists for it. */
+export async function stageNetcoredbg(target, dest) {
+  fs.rmSync(dest, { recursive: true, force: true });
+  const entries = await ensureNetcoredbg(target);
+  if (!entries) return false;
+  const t = DBG.netcoredbg.targets[target];
+  fs.mkdirSync(dest, { recursive: true });
+  for (const e of entries) {
+    const to = path.join(dest, e.name);
+    fs.mkdirSync(path.dirname(to), { recursive: true });
+    fs.writeFileSync(to, e.data);
+  }
+  fs.chmodSync(path.join(dest, t.binary), 0o755);
+  fs.copyFileSync(path.join(LICENSES_DIR, 'netcoredbg-LICENSE.txt'), path.join(dest, 'LICENSE.txt'));
+  const third = DBG.netcoredbg.licenses.slice(1).map((l) => `==== ${l.what} ====\n\n${fs.readFileSync(path.join(LICENSES_DIR, l.file), 'utf8').trim()}\n`);
+  fs.writeFileSync(path.join(dest, 'THIRD-PARTY-LICENSES.txt'), third.join('\n'));
+  fs.writeFileSync(path.join(dest, 'VERSION.txt'), `netcoredbg ${DBG.netcoredbg.version} (${target})\nSource: ${DBG.netcoredbg.source}\nSHA-256 of the release archive: ${t.sha256}\n`);
+  return true;
+}
+
+/** debugpy wheel entries that are staged: pure Python and data only (see debuggers.json). */
+export function debugpyKeep(name) {
+  if (!name.startsWith('debugpy/')) return false;
+  if (/(^|\/)tests?\//.test(name)) return false;
+  if (name.includes('/pydevd_attach_to_process/') && !name.endsWith('.py')) return false;
+  if (/(^|\/)\.gitignore$/.test(name)) return false;
+  // Protocol schemas only read by pydevd's code generator (__main__pydevd_gen_debug_adapter_protocol.py), not at run time.
+  if (/\/_debug_adapter\/[^/]+\.json$/.test(name)) return false;
+  return !/\.(pdb|c|pyx|pxd|pyd|so|dll|dylib|exe|cpp|hpp|h|sh|cmd|bat)$/i.test(name);
+}
+
+/** Stages the verified debugpy wheel's pure-Python files into <dest> (debuggers/debugpy); returns the version. */
+export async function stageDebugpy(dest) {
+  const d = DBG.debugpy;
+  const buf = await cachedVerified(d.url, d.sha256, path.join(repo, '.cache', 'debugpy', d.version), `debugpy ${d.version}`);
+  fs.rmSync(dest, { recursive: true, force: true });
+  const entries = unzipAll(buf);
+  for (const e of entries) {
+    if (!debugpyKeep(e.name)) continue;
+    const to = path.join(dest, e.name);
+    fs.mkdirSync(path.dirname(to), { recursive: true });
+    fs.writeFileSync(to, e.data);
+  }
+  const lic = entries.find((e) => /dist-info\/(licenses\/)?LICENSE$/.test(e.name));
+  if (!lic) throw new Error('the debugpy wheel has no LICENSE');
+  fs.writeFileSync(path.join(dest, 'LICENSE.txt'), lic.data);
+  fs.writeFileSync(path.join(dest, 'VERSION.txt'), `debugpy ${d.version} (pure-Python parts)\nSource: ${d.source}\nSHA-256 of the wheel: ${d.sha256}\n`);
+  return d.version;
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const i = process.argv.indexOf('--target');
   const target = i >= 0 ? process.argv[i + 1] : currentTarget();
   if (process.argv.includes('--rust-analyzer')) console.log(await ensureRustAnalyzer(target));
+  // Development: stage the debug adapters into packages/extension/debuggers (the extension's dev mode finds them there).
+  if (process.argv.includes('--debuggers')) {
+    const base = path.join(repo, 'packages', 'extension', 'debuggers');
+    console.log((await stageNetcoredbg(target, path.join(base, 'netcoredbg'))) ? `netcoredbg staged for ${target}` : `no netcoredbg build for ${target}`);
+    console.log(`debugpy ${await stageDebugpy(path.join(base, 'debugpy'))} staged`);
+  }
 }

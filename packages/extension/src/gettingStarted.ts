@@ -48,6 +48,11 @@ export const MAIN_MENU: readonly MenuEntry[] = [
   { label: '$(debug-stackframe) Open Stack Trace', detail: 'Paste a .NET, JavaScript/TypeScript, Python or Rust stack trace and open its frames in your code', command: 'refyntra.openStackTrace' },
   { label: '$(book) Get Started', detail: 'Open the Refyntra walkthrough', command: 'refyntra.getStarted' },
   { label: '$(keyboard) Keyboard Shortcuts', detail: 'Choose a keybinding preset (Visual Studio or ReSharper style)', command: 'refyntra.keyboardShortcuts' },
+  { label: '$(play) Run Without Debugging', detail: 'Build and run the selected project, script or file in a terminal (Ctrl+F5 without launch.json)', command: 'refyntra.run' },
+  { label: '$(debug-alt) Start Debugging', detail: 'Debug the selected project with the bundled netcoredbg or debugpy (F5 without launch.json)', command: 'refyntra.debug' },
+  { label: '$(flame) Run with Hot Reload', detail: 'dotnet watch for the selected .NET project', command: 'refyntra.runWatch' },
+  { label: '$(list-selection) Select What to Run', detail: 'Project, launch profile, target framework and configuration for Run and Debug', command: 'refyntra.selectRunTarget' },
+  { label: '$(new-file) Generate launch.json', detail: 'Write the run and debug configurations of this workspace to .vscode/launch.json', command: 'refyntra.generateLaunchJson' },
 ];
 
 /** Walkthrough id as VS Code addresses it: <publisher>.<name>#<walkthrough id>. */

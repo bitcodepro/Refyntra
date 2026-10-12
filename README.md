@@ -4,7 +4,7 @@
 
 Refyntra is a free (MIT) code companion for VS Code that makes writing, analysing and navigating code easier: find anything, see how code is connected (callers, implementations, tests, request handlers, endpoints, DI registrations), get focused diagnostics, and rename safely with a preview.
 
-C# is analysed by a local .NET host built on Roslyn, so answers such as "which handler serves this request?" or "where is this service registered?" come from the semantic identity of symbols, not from text search. TypeScript and JavaScript use the language features built into VS Code. Python and Rust use language servers that ship inside Refyntra (Pyright and rust-analyzer), run as Refyntra's own processes: **no other extension is needed**.
+C# is analysed by a local .NET host built on Roslyn, so answers such as "which handler serves this request?" or "where is this service registered?" come from the semantic identity of symbols, not from text search. TypeScript and JavaScript use the language features built into VS Code. Python and Rust use language servers that ship inside Refyntra (Pyright and rust-analyzer), run as Refyntra's own processes: **no other extension is needed**. Refyntra also **runs and debugs** .NET projects (bundled netcoredbg), Python files (bundled debugpy), package.json scripts (VS Code's built-in JavaScript debugger) and Cargo binaries, again without other extensions (see [Run and debug](#run-and-debug)).
 
 ## What the alpha does
 
@@ -91,7 +91,7 @@ The page updates by itself after a restore, a restart or a solution switch.
 ## What it is not
 
 - Not a ReSharper clone and not a feature-parity effort. ReSharper already exists for VS Code.
-- Not a compiler, debugger or general refactoring suite.
+- Not a compiler or general refactoring suite. Debugging uses bundled third-party debuggers (netcoredbg, debugpy) through VS Code's own debugging UI; Refyntra adds no debugger of its own.
 - No automatic fixes, file generation or code transformations in the alpha.
 - No promise of coverage for every C# project layout.
 
@@ -117,7 +117,7 @@ Loading a project evaluates MSBuild, which can run project code. Therefore:
 
 - In **Restricted Mode** Refyntra does not load projects. It shows a message and what to do. It only reads the file system to find solutions and projects.
 - In a **trusted** workspace Refyntra loads the selected solution. Trust is not a sandbox.
-- Refyntra never runs `dotnet restore` or `dotnet build` on its own. When packages are missing, the Health page offers **Restore packages** (and Related offers **Run dotnet restore**); only when you click it (and only in a trusted workspace) does Refyntra run `dotnet restore <solution>` as a task in the terminal panel. The path is passed to `dotnet` as a single argument without a shell, so nothing in a file name is interpreted.
+- Refyntra never runs `dotnet restore` or `dotnet build` on its own: building happens only when you start Run or Debug (see [Run and debug](#run-and-debug)). When packages are missing, the Health page offers **Restore packages** (and Related offers **Run dotnet restore**); only when you click it (and only in a trusted workspace) does Refyntra run `dotnet restore <solution>` as a task in the terminal panel. The path is passed to `dotnet` as a single argument without a shell, so nothing in a file name is interpreted.
 
 ## Rename
 
@@ -588,6 +588,47 @@ command and the same pipeline (plan → preview → revalidate → one EditAppli
   line naming the symbol shown and whether the view is pinned. **Stack trace**: opening a frame highlights its line
   briefly; frames of your own code have a coloured stack-frame icon, external frames a library icon.
 
+## Run and debug
+
+Refyntra runs and debugs projects without other extensions ([ADR-008](docs/adr/ADR-008-run-and-debug.md)). Building
+and running execute code from the workspace, so all of this works only in a **trusted** workspace; in Restricted Mode
+the Run view, Run, Debug and Generate launch.json explain why nothing starts.
+
+| Language | Run (no debugger) | Debug |
+|---|---|---|
+| .NET console, web, worker apps | `dotnet run --project … [-f …] [--launch-profile …]` in a terminal; **Run with Hot Reload** = `dotnet watch run` | Bundled **netcoredbg** 3.2.0 (MIT, Samsung): build with `dotnet build`, then breakpoints, stepping, locals, watch expressions, exception breakpoints (`all`, `user-unhandled`), attach to a process. Not on win32-arm64, macOS Intel and Alpine (no official build): Run still works there |
+| Windows Forms, WPF | Windows only | Windows only (netcoredbg) |
+| Test projects | Not run here: use the Test Explorer or the Tests group of Related | — |
+| .NET MAUI, Blazor WebAssembly | Not supported (listed with the reason) | — |
+| Python | `python <file>` with your interpreter (`python.defaultInterpreterPath`, a `.venv`/`venv`, or `python3`/`python` on PATH) | Bundled **debugpy** 1.8.22 (MIT), pure-Python parts; launch, `connect` attach. Attaching to a process id is not supported |
+| Rust | `cargo run --bin …` | Only with **lldb-dap** from an installed LLVM (detected, not bundled: CodeLLDB would add 45–56 MB per package) |
+| package.json scripts | `npm`/`pnpm`/`yarn run <script>` (package manager from the lock file) | VS Code's built-in JavaScript debugger: `node` launch of the script, and `msedge`/`chrome` on the dev-server URL (Vite, Next.js, CRA, Angular) |
+
+Where you find it:
+
+- **Refyntra Run view** (Refyntra side bar): runnable projects by language with Run, Debug, Stop and Restart; web
+  projects list their `launchSettings.json` profiles. Projects that cannot run are listed with the reason.
+- **Status bar**: the selected run target (`▷ WebApp · http · net10.0`). Click it to choose the project, then its launch
+  profile, target framework (multi-targeting) and Debug/Release.
+- **CodeLens** `Run | Debug` above `Main` or the first top-level statement of `Program.cs`, Python's
+  `if __name__ == "__main__":` and Rust's `fn main()`; **Run** and **Debug** buttons in the editor title.
+- **VS Code's own F5 and Ctrl+F5 are not changed.** With a `launch.json`, they run it as always. Without one, VS Code
+  asks Refyntra's debugger for the language of the active editor, and Refyntra starts the selected run target (Ctrl+F5
+  runs it in a terminal). Every runnable target also appears as a **dynamic configuration** in VS Code's Run and Debug
+  view and debug dropdown (*Refyntra .NET*, *Refyntra Python*, Node). **Refyntra: Generate launch.json** writes them to
+  `.vscode/launch.json` (existing entries are kept).
+- **Web apps**: the launch profile's `applicationUrl`, `environmentVariables` and `commandLineArgs` are used; with
+  `launchBrowser` the browser opens on the URL the app prints in `Now listening on:` (also while debugging).
+- **Health** has a *Run and debug* section: the bundled netcoredbg and debugpy versions, the Python interpreter, cargo,
+  and whether lldb-dap was found.
+
+Debug configuration (`"type": "refyntra-dotnet"`): `project` (built first unless `"build": false`), `framework`,
+`configuration`, `program`, `args`, `cwd`, `env`, `stopAtEntry`, `justMyCode` (default on), `console`, `launchBrowser`;
+attach: `processId` (`${command:refyntra.pickDotnetProcess}` shows a process picker). Limits: netcoredbg writes program
+output to the Debug Console (`console: integratedTerminal` behaves like `internalConsole`), so a program cannot read
+from stdin while it is debugged; use Run for that. `"type": "refyntra-python"`: `program` or `module`, `python`, `args`,
+`cwd`, `env`, `console` (`integratedTerminal` by default), `justMyCode`, `stopOnEntry`; attach: `connect`.
+
 ## Commands
 
 | Command | Purpose |
@@ -616,6 +657,11 @@ command and the same pipeline (plan → preview → revalidate → one EditAppli
 | `refyntra.taskContext.addSymbol` / `.addFile` | Add the symbol at the cursor or a file to the active task context |
 | `refyntra.taskContext.copyMarkdown` / `.export` / `.import` / `.clear` / `.refresh` | Copy as Markdown, export or import JSON, clear, resolve again |
 | `refyntra.findHandler` / `refyntra.findEndpoint` / `refyntra.findRegistration` | Find, narrowed to handlers, endpoints or DI registrations (the same search as Find, with a preset filter) |
+| `refyntra.run` / `refyntra.debug` | Run without debugging / start debugging the selected run target (or the project of the file, the Run view item, the CodeLens) |
+| `refyntra.runWatch` | Run the selected .NET project with `dotnet watch run` (hot reload) |
+| `refyntra.stop` / `refyntra.restart` | Stop or restart what Refyntra started (Run view, view title) |
+| `refyntra.selectRunTarget` | Choose project, launch profile, target framework and configuration (the status bar item) |
+| `refyntra.generateLaunchJson` | Write the run and debug configurations to `.vscode/launch.json` |
 | `refyntra.nativeRename` | (not in the palette) The editor's own Rename, offered when a TS/JS rename cannot be confirmed safe; not validated by Refyntra |
 
 ## Settings
@@ -635,6 +681,10 @@ command and the same pipeline (plan → preview → revalidate → one EditAppli
 | `refyntra.codeLens.enabled` | boolean, default on | CodeLens above C# types and methods |
 | `refyntra.codeLens.references` / `.mediatr` / `.endpoints` / `.efCore` | boolean, default on | One switch per CodeLens kind |
 | `refyntra.hover.mediatr` | boolean, default on | Hover on a MediatR request shows its handler |
+| `refyntra.run.codeLens` | boolean, default on | `Run \| Debug` CodeLens above entry points |
+| `refyntra.run.editorButtons` | boolean, default on | Run and Debug buttons in the editor title |
+| `refyntra.run.statusBar` | boolean, default on | The run target in the status bar |
+| `refyntra.run.view` | boolean, default on | The Refyntra Run view |
 | `refyntra.trace.level` | `info` (default) and other levels | Detail of the Refyntra output log. Source text is never logged |
 
 ## Troubleshooting

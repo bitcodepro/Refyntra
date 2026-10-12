@@ -42,7 +42,7 @@ step "environment"
 uname -a; grep PRETTY_NAME /etc/os-release; node --version; dotnet --version; echo "VS Code $REFYNTRA_TEST_VSCODE_VERSION"
 mkdir -p /work
 rsync -a --exclude node_modules --exclude bin --exclude obj --exclude dist --exclude out --exclude '*.tsbuildinfo' --exclude .git --exclude .vscode-test \
-  --exclude /packages/extension/servers/ --exclude /packages/extension/host/ /src/ /work/
+  --exclude /packages/extension/servers/ --exclude /packages/extension/host/ --exclude /packages/extension/debuggers/ /src/ /work/
 # The staging folders of a local package:vsix (servers/, host/) are left out: the container builds its own, and the
 # '--exclude dist' above would leave a partial copy (servers/pyright without its dist/ folder).
 ln -sfn /cache/vscode-test /work/.vscode-test
@@ -59,13 +59,15 @@ run() { # run <label> <command...>: record the outcome, keep going
   ORDER+=("$label")
   if "$@"; then RESULT[$label]=PASS; else RESULT[$label]="FAIL ($?)"; fi
 }
-orphans() { ! pgrep -fa 'Refyntra\.Host|Workspaces\.MSBuild\.BuildHost|refyntra-watchdog' | grep -v pgrep; }
+orphans() { ! pgrep -fa 'Refyntra\.Host|Workspaces\.MSBuild\.BuildHost|refyntra-watchdog|netcoredbg|debugpy|ConsoleApp\.dll|WebApp\.dll' | grep -v pgrep; }
 run "pnpm install --frozen-lockfile" pnpm install --frozen-lockfile
 run "pnpm -r run build"              pnpm -r run build
 run "pnpm test:unit"                 pnpm test:unit
 run "pnpm test:architecture"         pnpm test:architecture
 run "dotnet build (Release)"         dotnet build src/dotnet/Refyntra.sln -c Release
 run "dotnet test (Release)"          dotnet test src/dotnet/Refyntra.sln -c Release --no-build --blame-hang-timeout 600s --blame-hang-dump-type none
+# The bundled debug adapters for this platform (netcoredbg linux-x64, debugpy): official release URLs, SHA-256 pinned.
+run "stage debug adapters"           node scripts/package/servers.mjs --debuggers
 display_start
 run "xvfb-run pnpm test:integration" xrun -- pnpm test:integration
 run "xvfb-run pnpm test:e2e"         xrun -- pnpm test:e2e

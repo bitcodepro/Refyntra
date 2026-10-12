@@ -122,6 +122,22 @@ const common = [
 const scenarios = {
   restricted: [
     [
+      'Run and Debug refuse to build or run in Restricted Mode (no process, no configuration)',
+      async () => {
+        const a = await api();
+        const before = a.hostSpawnCount();
+        const session = await a.run.run();
+        assert.equal(session, undefined, 'no run session in Restricted Mode');
+        assert.equal(a.run.sessions.size, 0);
+        assert.deepEqual(await a.run.dynamicConfigurations('refyntra-dotnet'), [], 'no dynamic debug configurations');
+        assert.equal(await a.run.debug(), false, 'no debug session in Restricted Mode');
+        assert.equal(vscode.debug.activeDebugSession, undefined);
+        assert.equal(a.hostSpawnCount(), before, 'nothing spawned');
+        const text = await healthDocText();
+        assert.match(text, /Run and debug: Restricted Mode/);
+      },
+    ],
+    [
       'runs in (simulated) Restricted Mode',
       async () => {
         // VS Code trusts every Extension Development Host workspace; the runner sets REFYNTRA_TEST_FORCE_RESTRICTED.
@@ -1357,7 +1373,7 @@ scenarios['ts-delegated'] = [
 
 // ---- accessibility -----------------------------------------------------------------------------------
 // Internal commands: invoked by buttons and tree items, hidden from the Command Palette on purpose.
-const INTERNAL_COMMANDS = ['refyntra.openLocation', 'refyntra.runRestore', 'refyntra.related.open', 'refyntra.nativeRename', 'refyntra.stackTrace.openFrame', 'refyntra.stackTrace.related', 'refyntra.taskContext.addFindItem', 'refyntra.taskContext.addFromRelated', 'refyntra.codeLens.related'];
+const INTERNAL_COMMANDS = ['refyntra.openLocation', 'refyntra.runRestore', 'refyntra.related.open', 'refyntra.nativeRename', 'refyntra.stackTrace.openFrame', 'refyntra.stackTrace.related', 'refyntra.taskContext.addFindItem', 'refyntra.taskContext.addFromRelated', 'refyntra.codeLens.related', 'refyntra.selectRunTargetById', 'refyntra.pickDotnetProcess'];
 
 common.push([
   'keyboard: every user command is in the Command Palette and the status bar menu leads to the main ones',
@@ -1542,6 +1558,9 @@ scenarios['task-context'] = require('./taskContext.cjs').cases({ api, csharp, wa
 // Native VS Code UI: code actions, CodeLens, Call/Type Hierarchy, hover, Refactor Preview, Change Signature dialog (test/suite/nativeUi.cjs).
 scenarios['native-ui'] = require('./nativeUi.cjs').cases({ api, csharp, waitFor });
 // Visual (screenshot) scenarios, Docker/Xvfb only (test/suite/visual.cjs, scripts/test/linux-visual.sh).
+// Run and Debug on a temp copy of the Runnable fixture (bundled netcoredbg and debugpy; test/suite/runDebug.cjs).
+scenarios['run-debug'] = require('./runDebug.cjs').cases({ api, csharp, waitFor });
+
 scenarios['visual-dark'] = require('./visual.cjs').cases({ api, csharp, waitFor });
 scenarios['visual-light'] = require('./visual.cjs').cases({ api, csharp, waitFor });
 

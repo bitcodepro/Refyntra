@@ -5,7 +5,7 @@ import type { HealthSummary } from '@refyntra/domain';
 import { randomBytes } from 'node:crypto';
 import * as path from 'node:path';
 import { renderHealth } from './healthText';
-import { type HealthAction, type HealthPageModel, type RestoreRun, buildHealthPage, resolveMessage, RUSTUP_URL } from './healthPageModel';
+import { type DebugHealth, type HealthAction, type HealthPageModel, type RestoreRun, buildHealthPage, resolveMessage, RUSTUP_URL } from './healthPageModel';
 import { healthAnnouncement, renderHealthBody, renderHealthHtml } from './healthPageHtml';
 import { statusBarLabel } from './terminology';
 import { RESTORE_TASK_TYPE, runRestore } from './restore';
@@ -26,12 +26,13 @@ export class HealthDocument implements vscode.TextDocumentContentProvider, vscod
   constructor(
     private readonly engine: EngineClient,
     private readonly solution: () => string | undefined,
+    private readonly debug?: () => DebugHealth,
   ) {
     this.sub = engine.onDidChangeHealth(() => this.changed.fire(HEALTH_URI));
   }
 
   provideTextDocumentContent(): string {
-    return renderHealth(this.engine.health(), { solution: this.solution() });
+    return renderHealth(this.engine.health(), { solution: this.solution(), debug: this.debug?.() });
   }
 
   async show(): Promise<void> {
@@ -70,6 +71,7 @@ export class HealthPage implements vscode.Disposable {
     private readonly engine: EngineClient,
     private readonly solution: () => string | undefined,
     private readonly isTrusted: () => boolean,
+    private readonly debug?: () => DebugHealth,
   ) {
     this.current = this.build();
     this.subs.push(
@@ -92,7 +94,7 @@ export class HealthPage implements vscode.Disposable {
   }
 
   private build(): HealthPageModel {
-    return buildHealthPage({ health: this.engine.health(), restore: this.restore });
+    return buildHealthPage({ health: this.engine.health(), restore: this.restore, debug: this.debug?.() });
   }
 
   private updateMessage(): { type: 'update'; html: string; announce: string } {
@@ -165,7 +167,7 @@ export class HealthPage implements vscode.Disposable {
         await vscode.commands.executeCommand('refyntra.getStarted');
         return;
       case 'copyText':
-        await vscode.env.clipboard.writeText(renderHealth(this.engine.health(), { solution: this.solution() }));
+        await vscode.env.clipboard.writeText(renderHealth(this.engine.health(), { solution: this.solution(), debug: this.debug?.() }));
         void vscode.window.showInformationMessage('Refyntra: the health report was copied to the clipboard.');
         return;
       case 'installRust':

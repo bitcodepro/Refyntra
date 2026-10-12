@@ -35,7 +35,11 @@
   "main": "./dist/extension.js",
   "activationEvents": [
     "onStartupFinished",
-    "workspaceContains:**/*.{sln,slnx,csproj}"
+    "workspaceContains:**/*.{sln,slnx,csproj}",
+    "onDebugResolve:refyntra-dotnet",
+    "onDebugResolve:refyntra-python",
+    "onDebugResolve:refyntra-lldb",
+    "onDebugDynamicConfigurations"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -343,6 +347,69 @@
         "command": "refyntra.codeLens.related",
         "title": "Open Related from CodeLens",
         "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.run",
+        "title": "Run Without Debugging",
+        "category": "Refyntra",
+        "icon": "$(play)",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "refyntra.debug",
+        "title": "Start Debugging",
+        "category": "Refyntra",
+        "icon": "$(debug-alt)",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "refyntra.runWatch",
+        "title": "Run with Hot Reload (dotnet watch)",
+        "category": "Refyntra",
+        "icon": "$(flame)",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "refyntra.stop",
+        "title": "Stop",
+        "category": "Refyntra",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "refyntra.restart",
+        "title": "Restart",
+        "category": "Refyntra",
+        "icon": "$(debug-restart)",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "refyntra.selectRunTarget",
+        "title": "Select What to Run",
+        "category": "Refyntra",
+        "icon": "$(list-selection)"
+      },
+      {
+        "command": "refyntra.selectRunTargetById",
+        "title": "Select Run Target",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.generateLaunchJson",
+        "title": "Generate launch.json",
+        "category": "Refyntra",
+        "icon": "$(new-file)",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "refyntra.pickDotnetProcess",
+        "title": "Attach to a .NET Process (pick)",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.run.refresh",
+        "title": "Refresh Run Targets",
+        "category": "Refyntra",
+        "icon": "$(refresh)"
       }
     ],
     "taskDefinitions": [
@@ -355,6 +422,30 @@
           "target": {
             "type": "string",
             "description": "Absolute path of the .sln, .slnx or .csproj passed to dotnet restore as one argument."
+          }
+        }
+      },
+      {
+        "type": "refyntra-run",
+        "required": [
+          "target"
+        ],
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "Refyntra run target id (started from the Run view, the status bar or CodeLens)."
+          }
+        }
+      },
+      {
+        "type": "refyntra-build",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The build step Refyntra runs before a debug session (dotnet build, cargo build)."
           }
         }
       }
@@ -460,6 +551,18 @@
         {
           "command": "refyntra.codeLens.related",
           "when": "false"
+        },
+        {
+          "command": "refyntra.selectRunTargetById",
+          "when": "false"
+        },
+        {
+          "command": "refyntra.pickDotnetProcess",
+          "when": "false"
+        },
+        {
+          "command": "refyntra.runWatch",
+          "when": "refyntra.run.available"
         }
       ],
       "view/title": [
@@ -547,6 +650,26 @@
           "command": "refyntra.taskContext.addFromRelated",
           "when": "view == refyntra.relatedView",
           "group": "navigation@3"
+        },
+        {
+          "command": "refyntra.selectRunTarget",
+          "when": "view == refyntra.runView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "refyntra.run.refresh",
+          "when": "view == refyntra.runView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "refyntra.generateLaunchJson",
+          "when": "view == refyntra.runView",
+          "group": "1_run@1"
+        },
+        {
+          "command": "refyntra.stop",
+          "when": "view == refyntra.runView && refyntra.run.running",
+          "group": "navigation@0"
         }
       ],
       "view/item/context": [
@@ -604,6 +727,46 @@
           "command": "refyntra.taskContext.addFromRelated",
           "when": "view == refyntra.relatedView && viewItem == refyntra.relatedRelation",
           "group": "inline"
+        },
+        {
+          "command": "refyntra.run",
+          "when": "view == refyntra.runView && viewItem =~ /^refyntra\\.run(Target|Profile)$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "refyntra.debug",
+          "when": "view == refyntra.runView && viewItem =~ /^refyntra\\.run(Target|Profile)$/",
+          "group": "inline@2"
+        },
+        {
+          "command": "refyntra.stop",
+          "when": "view == refyntra.runView && viewItem =~ /^refyntra\\.run(Target|Profile)\\.running$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "refyntra.restart",
+          "when": "view == refyntra.runView && viewItem =~ /^refyntra\\.run(Target|Profile)\\.running$/",
+          "group": "inline@2"
+        },
+        {
+          "command": "refyntra.run",
+          "when": "view == refyntra.runView && viewItem =~ /^refyntra\\.run(Target|Profile)/",
+          "group": "1_run@1"
+        },
+        {
+          "command": "refyntra.debug",
+          "when": "view == refyntra.runView && viewItem =~ /^refyntra\\.run(Target|Profile)/",
+          "group": "1_run@2"
+        },
+        {
+          "command": "refyntra.runWatch",
+          "when": "view == refyntra.runView && viewItem =~ /^refyntra\\.run(Target|Profile)/",
+          "group": "1_run@3"
+        },
+        {
+          "command": "refyntra.stop",
+          "when": "view == refyntra.runView && viewItem =~ /^refyntra\\.run(Target|Profile)\\.running$/",
+          "group": "1_run@4"
         }
       ],
       "terminal/context": [
@@ -702,6 +865,18 @@
           "command": "refyntra.actions",
           "group": "3_context@3"
         }
+      ],
+      "editor/title": [
+        {
+          "command": "refyntra.run",
+          "when": "isWorkspaceTrusted && refyntra.run.available && resourceScheme == file && editorLangId =~ /^(csharp|python|rust)$/ && !inDebugMode && config.refyntra.run.editorButtons",
+          "group": "navigation@-20"
+        },
+        {
+          "command": "refyntra.debug",
+          "when": "isWorkspaceTrusted && refyntra.run.available && resourceScheme == file && editorLangId =~ /^(csharp|python|rust)$/ && !inDebugMode && config.refyntra.run.editorButtons",
+          "group": "navigation@-19"
+        }
       ]
     },
     "submenus": [
@@ -721,6 +896,12 @@
     },
     "views": {
       "refyntra": [
+        {
+          "id": "refyntra.runView",
+          "name": "Refyntra Run",
+          "contextualTitle": "Refyntra",
+          "when": "refyntra.run.viewVisible"
+        },
         {
           "id": "refyntra.relatedView",
           "name": "Refyntra Related",
@@ -768,6 +949,16 @@
         "view": "refyntra.taskContextView",
         "when": "!refyntra.taskContextActive",
         "contents": "Collect the symbols, files, endpoints and relations you work on for a task. Items are stored locally for this workspace and found again after code changes (resolved, moved, ambiguous or missing).\n[New Task Context](command:refyntra.taskContext.new)\n[Add Symbol at Cursor](command:refyntra.taskContext.addSymbol)\n[Import from File](command:refyntra.taskContext.import)"
+      },
+      {
+        "view": "refyntra.runView",
+        "when": "isWorkspaceTrusted && !refyntra.run.available",
+        "contents": "Refyntra runs and debugs .NET projects (console, web, worker; Windows Forms and WPF on Windows), package.json scripts, Python files and Cargo binaries without other extensions. Open a folder with a solution or project; runnable projects appear here once it has loaded.\n[Select What to Run](command:refyntra.selectRunTarget)\n[Generate launch.json](command:refyntra.generateLaunchJson)\n[Health](command:refyntra.showHealth)"
+      },
+      {
+        "view": "refyntra.runView",
+        "when": "!isWorkspaceTrusted",
+        "contents": "Restricted Mode: building and running execute code from this workspace, so Refyntra does not run or debug anything until you trust it.\n[Manage Workspace Trust](command:workbench.trust.manage)"
       }
     ],
     "walkthroughs": [
@@ -985,6 +1176,26 @@
           "type": "boolean",
           "default": true,
           "description": "Hover on a MediatR request shows its handler with a link."
+        },
+        "refyntra.run.codeLens": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show **Run | Debug** above `Main`/top-level `Program.cs`, Python `if __name__ == \"__main__\":` and Rust `fn main()`."
+        },
+        "refyntra.run.statusBar": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show the run target picker (project · profile · framework) in the status bar."
+        },
+        "refyntra.run.editorButtons": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show **Run** and **Debug** buttons in the editor title of C#, Python and Rust files."
+        },
+        "refyntra.run.view": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show the **Refyntra Run** view (runnable projects with Run, Debug and Stop) in the Refyntra side bar."
         }
       }
     },
@@ -1036,6 +1247,310 @@
         "key": "ctrl+shift+g",
         "mac": "cmd+shift+g",
         "when": "config.refyntra.keybindings.preset == 'resharper' && editorTextFocus && editorLangId =~ /^(csharp|typescript|typescriptreact|javascript|javascriptreact|python|rust)$/"
+      }
+    ],
+    "breakpoints": [
+      {
+        "language": "csharp"
+      },
+      {
+        "language": "python"
+      },
+      {
+        "language": "rust"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "refyntra-dotnet",
+        "label": "Refyntra .NET (netcoredbg)",
+        "languages": [
+          "csharp"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "properties": {
+              "project": {
+                "type": "string",
+                "description": "The .csproj to build before launching (dotnet build). Leave out to start \"program\" as is."
+              },
+              "build": {
+                "type": "boolean",
+                "default": true,
+                "description": "Build \"project\" before launching."
+              },
+              "framework": {
+                "type": "string",
+                "description": "Target framework to build and run (multi-targeting projects), e.g. net10.0."
+              },
+              "configuration": {
+                "type": "string",
+                "enum": [
+                  "Debug",
+                  "Release"
+                ],
+                "default": "Debug"
+              },
+              "launchProfile": {
+                "type": "string",
+                "description": "The launchSettings.json profile the configuration was generated from (informational)."
+              },
+              "program": {
+                "type": "string",
+                "description": "The built .dll (started with dotnet) or apphost to debug."
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Environment variables for the program.",
+                "default": {}
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Command-line arguments.",
+                "default": []
+              },
+              "cwd": {
+                "type": "string",
+                "description": "Working directory of the program.",
+                "default": "${workspaceFolder}"
+              },
+              "console": {
+                "type": "string",
+                "enum": [
+                  "internalConsole",
+                  "integratedTerminal",
+                  "externalTerminal"
+                ],
+                "default": "internalConsole",
+                "description": "netcoredbg starts the program itself and writes its output to the Debug Console; the terminal values are accepted, but output still goes to the Debug Console (use Run for a terminal)."
+              },
+              "stopAtEntry": {
+                "type": "boolean",
+                "default": false,
+                "description": "Break at the entry point."
+              },
+              "justMyCode": {
+                "type": "boolean",
+                "default": true,
+                "description": "Step and break only in user code."
+              },
+              "launchBrowser": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "url": {
+                    "type": "string"
+                  }
+                },
+                "description": "Web apps: open the browser when the app writes \"Now listening on\"."
+              }
+            }
+          },
+          "attach": {
+            "required": [
+              "processId"
+            ],
+            "properties": {
+              "processId": {
+                "type": [
+                  "string",
+                  "number"
+                ],
+                "default": "${command:refyntra.pickDotnetProcess}",
+                "description": "Process id to attach to."
+              },
+              "justMyCode": {
+                "type": "boolean",
+                "default": true
+              }
+            }
+          }
+        },
+        "configurationSnippets": [
+          {
+            "label": "Refyntra .NET: Launch project",
+            "body": {
+              "type": "refyntra-dotnet",
+              "request": "launch",
+              "name": "Launch ${1:Project}",
+              "project": "^\"\\${workspaceFolder}/${1:Project}/${1:Project}.csproj\"",
+              "program": "^\"\\${workspaceFolder}/${1:Project}/bin/Debug/${2:net10.0}/${1:Project}.dll\"",
+              "args": [],
+              "cwd": "^\"\\${workspaceFolder}/${1:Project}\"",
+              "stopAtEntry": false
+            }
+          },
+          {
+            "label": "Refyntra .NET: Attach to process",
+            "body": {
+              "type": "refyntra-dotnet",
+              "request": "attach",
+              "name": "Attach to .NET process",
+              "processId": "^\"\\${command:refyntra.pickDotnetProcess}\""
+            }
+          }
+        ]
+      },
+      {
+        "type": "refyntra-python",
+        "label": "Refyntra Python (debugpy)",
+        "languages": [
+          "python"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "properties": {
+              "program": {
+                "type": "string",
+                "default": "${file}"
+              },
+              "module": {
+                "type": "string"
+              },
+              "python": {
+                "type": "string",
+                "description": "Interpreter (default: python.defaultInterpreterPath, .venv/venv, or python on PATH)."
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Environment variables for the program.",
+                "default": {}
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Command-line arguments.",
+                "default": []
+              },
+              "cwd": {
+                "type": "string",
+                "description": "Working directory of the program.",
+                "default": "${workspaceFolder}"
+              },
+              "console": {
+                "type": "string",
+                "enum": [
+                  "internalConsole",
+                  "integratedTerminal",
+                  "externalTerminal"
+                ],
+                "default": "integratedTerminal"
+              },
+              "justMyCode": {
+                "type": "boolean",
+                "default": true
+              },
+              "stopOnEntry": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          },
+          "attach": {
+            "required": [
+              "connect"
+            ],
+            "properties": {
+              "connect": {
+                "type": "object",
+                "properties": {
+                  "host": {
+                    "type": "string",
+                    "default": "127.0.0.1"
+                  },
+                  "port": {
+                    "type": "number"
+                  }
+                }
+              },
+              "justMyCode": {
+                "type": "boolean",
+                "default": true
+              }
+            }
+          }
+        },
+        "configurationSnippets": [
+          {
+            "label": "Refyntra Python: Current file",
+            "body": {
+              "type": "refyntra-python",
+              "request": "launch",
+              "name": "Python: current file",
+              "program": "^\"\\${file}\"",
+              "console": "integratedTerminal"
+            }
+          }
+        ]
+      },
+      {
+        "type": "refyntra-lldb",
+        "label": "Refyntra Rust (lldb-dap, installed LLVM)",
+        "languages": [
+          "rust"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "required": [
+              "program"
+            ],
+            "properties": {
+              "program": {
+                "type": "string"
+              },
+              "cargo": {
+                "type": "object",
+                "properties": {
+                  "manifest": {
+                    "type": "string"
+                  },
+                  "bin": {
+                    "type": "string"
+                  }
+                },
+                "description": "Build with cargo build first."
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Environment variables for the program.",
+                "default": {}
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Command-line arguments.",
+                "default": []
+              },
+              "cwd": {
+                "type": "string",
+                "description": "Working directory of the program.",
+                "default": "${workspaceFolder}"
+              },
+              "stopOnEntry": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          }
+        }
       }
     ]
   },

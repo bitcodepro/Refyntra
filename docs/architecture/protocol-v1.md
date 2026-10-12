@@ -162,6 +162,17 @@ a test class. It is not part of `initialize.capabilities`.
   in source are returned (an item needs a document); at most 500 (`truncated`). An unknown direction is
   `InvalidParams`. A client sends it only to a host that reported minor ≥ 7; the extension resolves the subject with
   `code/symbolAt` on the same snapshot first and keeps only positions in its items (symbol ids are per snapshot).
+- 1.8 (additive, Run and Debug): request `workspace/runnableProjects` `{traceId, workspaceId}` → `{projects:
+  [{name, projectUri, kind, runnable, reason?, windowsOnly, targetFrameworks, outputs: [{targetFramework?, outputUri}],
+  assemblyName?, launchSettingsUri?}], state, snapshotId?}` on the current snapshot (no barrier: the project model does
+  not depend on open buffers). `kind` is `console | web | worker | winforms | wpf | test | library | maui |
+  blazor-wasm`, classified from the loaded MSBuild evaluation (output kind, output path and target framework of every
+  Roslyn project instance; resolved metadata references such as `xunit.core.dll`, `PresentationFramework.dll`) and the
+  project file (SDK, `UseWPF`, `UseWindowsForms`, `UseMaui`, `IsTestProject`, test PackageReferences, also from
+  `Directory.Build.props` above it). Multi-targeting projects are one entry with several `targetFrameworks`. Test
+  projects, libraries, MAUI and Blazor WebAssembly are listed with `runnable: false` and a `reason`; WinForms/WPF are
+  runnable with `windowsOnly: true`. The client reads the profiles of `launchSettingsUri` itself. While the workspace
+  loads, `projects` is empty and `state` says so. A client sends it only to a host that reported minor ≥ 8.
 - Additive (EF Core): relation kinds `efcore.*` and group `data` (above); `SearchFilters.entity?: boolean` ("entity:")
   and `SearchFilters.table?: string` ("table:NAME") return EF Core entities as symbol items. Older hosts ignore the
   filters (they return a normal symbol search); older clients render the kinds and the group generically. The
@@ -219,6 +230,7 @@ issuing semantic requests.
 | `refactor/discard` | notif | `{workspaceId, planId}` | – |
 | `code/signature` | req | `SymbolQueryParams` | `SignatureInfo` (since 1.6; Change Signature) |
 | `code/hierarchy` | req | `HierarchyParams` `{…, symbolId, direction}` | `HierarchyResult` (since 1.7; call and type hierarchy) |
+| `workspace/runnableProjects` | req | `WorkspaceParams` | `RunnableProjectsResult` (since 1.8; Run and Debug, no barrier) |
 | `workspace/didDeleteFiles` | notif | `{workspaceId, sequence, workspaceRevision, files: [{uri}]}` | – (since 1.6; consumes a document sequence) |
 | `analysis/run` | req | `AnalysisRunParams` `{traceId, workspaceId, snapshotId, uri?}` | `AnalysisRunResult` (since 1.1, additive; see "Analysis") |
 | `$/cancelRequest` | notif | `{id}` | – |

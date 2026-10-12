@@ -358,6 +358,36 @@ public sealed class HierarchyResultDto
     public string SnapshotId { get; set; } = "";
 }
 
+/// <summary>workspace/runnableProjects (protocol 1.8): one loaded project as Run and Debug sees it.</summary>
+public sealed class RunnableProjectDto
+{
+    public string Name { get; set; } = "";
+    public string ProjectUri { get; set; } = "";
+    /// <summary>"console" | "web" | "worker" | "winforms" | "wpf" | "test" | "library" | "maui" | "blazor-wasm".</summary>
+    public string Kind { get; set; } = "";
+    public bool Runnable { get; set; }
+    public string? Reason { get; set; }
+    public bool WindowsOnly { get; set; }
+    public List<string> TargetFrameworks { get; set; } = new();
+    public List<RunnableOutputDto> Outputs { get; set; } = new();
+    public string? AssemblyName { get; set; }
+    public string? LaunchSettingsUri { get; set; }
+}
+
+public sealed class RunnableOutputDto
+{
+    public string? TargetFramework { get; set; }
+    public string OutputUri { get; set; } = "";
+}
+
+public sealed class RunnableProjectsResultDto
+{
+    public List<RunnableProjectDto> Projects { get; set; } = new();
+    /// <summary>Engine state of the workspace (Loading: the list may still be empty).</summary>
+    public string State { get; set; } = "";
+    public string? SnapshotId { get; set; }
+}
+
 public sealed class LocationsResultDto
 {
     public List<LocationWithPreviewDto> Locations { get; set; } = new();

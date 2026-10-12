@@ -90,6 +90,22 @@ checked, and what has **not** been checked by a person with assistive technology
   whether the view is pinned. Stack trace: the line highlight of an opened frame is visual only (the cursor is on that
   line, which a screen reader reads).
 
+### Run and debug
+
+- Everything is reachable from the keyboard: **Refyntra: Run Without Debugging**, **Start Debugging**, **Run with Hot
+  Reload**, **Select What to Run**, **Generate launch.json** are in the Command Palette and the status bar menu; VS
+  Code's own F5 / Ctrl+F5 and Run and Debug view work unchanged. The CodeLens `Run | Debug` is reachable with **Show
+  CodeLens Commands For Current Line**; the editor title buttons have the command titles as labels.
+- Refyntra Run view: each item reads name, kind and state ("WebApp, web app, running"); projects that cannot run say
+  why in the same label ("not runnable: Test project: …"). Inline Run / Debug / Stop / Restart buttons are also in the
+  item's context menu (Shift+F10). The selected item is marked in words ("selected") and with an icon.
+- Status bar run target: text names project, profile, framework and configuration; its screen-reader label is the
+  sentence "Refyntra run target: WebApp, web app, profile http. Choose another". The choice is a sequence of
+  QuickPicks (project, profile, framework, configuration).
+- Debugging itself uses VS Code's debugging UI (Variables, Watch, Call Stack, Breakpoints, Debug Console, the accessible
+  debug toolbar), which Refyntra does not change. Program output of a .NET debug session is in the Debug Console
+  (netcoredbg has no terminal mode); Run uses a terminal that screen readers read as any VS Code terminal.
+
 ## Glossary (the same word on every surface)
 
 Defined once in `packages/extension/src/terminology.ts` (`GLOSSARY`, `STATE_PHRASE`, `REASON_PHRASE`,

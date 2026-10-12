@@ -714,6 +714,19 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
     });
   }
 
+  /** Run and Debug (protocol 1.8): the runnable-project model of the loaded workspace; null for an older host. */
+  async runnableProjects(token?: CancellationToken): Promise<import('@refyntra/contracts').RunnableProjectsResult | null> {
+    const session = await this.whenReady(token);
+    if (session.protocolMinor < 8) return null;
+    const r = await session.transport.request('workspace/runnableProjects', { traceId: this.traceIds.next(), workspaceId: this.opts.workspaceId }, token);
+    const projects = Array.isArray(r?.projects)
+      ? r.projects
+          .filter((p) => p && typeof p.name === 'string' && typeof p.projectUri === 'string' && typeof p.kind === 'string')
+          .map((p) => ({ ...p, runnable: !!p.runnable, windowsOnly: !!p.windowsOnly, targetFrameworks: Array.isArray(p.targetFrameworks) ? p.targetFrameworks.filter((t) => typeof t === 'string') : [], outputs: Array.isArray(p.outputs) ? p.outputs.filter((o) => o && typeof o.outputUri === 'string') : [] }))
+      : [];
+    return { projects, state: typeof r?.state === 'string' ? r.state : 'unknown', snapshotId: r?.snapshotId ?? null };
+  }
+
   discard(planId: string): void {
     try {
       this.session?.transport.notify('refactor/discard', { workspaceId: this.opts.workspaceId, planId });

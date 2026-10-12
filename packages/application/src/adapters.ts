@@ -146,6 +146,11 @@ export interface LanguageAdapter {
    * there is no symbol; `result` is null when the host is too old.
    */
   hierarchy?(uri: string, position: Position, direction: import('@refyntra/contracts').HierarchyDirection | 'subject', token?: CancellationToken): Promise<RouteResult<{ subject: SymbolRef | null; result: import('@refyntra/contracts').HierarchyResult | null }>>;
+  /**
+   * Optional (protocol 1.8): the loaded projects classified for Run and Debug (workspace/runnableProjects, no barrier).
+   * Null when the host is too old.
+   */
+  runnableProjects?(token?: CancellationToken): Promise<import('@refyntra/contracts').RunnableProjectsResult | null>;
   dispose(): Promise<void>;
   /** Present on delegated routes (descriptor.ownership 'delegated') that offer rename. */
   readonly delegatedRename?: DelegatedRenamePort;

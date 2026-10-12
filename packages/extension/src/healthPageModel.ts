@@ -77,8 +77,20 @@ export interface LanguageSection {
 
 export type RestoreRun = { state: 'running'; target: string } | { state: 'succeeded'; target: string } | { state: 'failed'; target: string; exitCode?: number | undefined };
 
+/** Debug adapters and tools for Run and Debug (ADR-008); structurally the DebuggerStatus of run.ts. */
+export interface DebugHealth {
+  netcoredbg: { path?: string; version?: string; reason?: string };
+  debugpy: { path?: string; version?: string };
+  python?: string;
+  lldbDap?: string;
+  cargo?: string;
+  dotnet?: string;
+}
+
 export interface HealthPageInput {
   health: HealthSummary;
+  /** Run and Debug section; left out when unknown. */
+  debug?: DebugHealth | undefined;
   /** The restore started from this page, if any. */
   restore?: RestoreRun | undefined;
 }
@@ -311,6 +323,20 @@ function otherSection(a: AdapterHealth, key: (id: HealthActionId) => string): La
   return section(icon, `${name}: ${a.state === 'NotStarted' ? 'starts when you open a file' : a.state.toLowerCase()}`, a.message ?? '');
 }
 
+/** The "Run and debug" section: what can be run and debugged here, and why not. */
+export function debugSection(d: DebugHealth, trusted: boolean): LanguageSection {
+  const ver = (v: string | undefined) => (v ? v.replace(/\s*\(.*$/, '') : undefined);
+  const parts: string[] = [];
+  parts.push(d.netcoredbg.path ? `.NET: debugging with the bundled ${ver(d.netcoredbg.version) ?? 'netcoredbg'} (MIT, Samsung); running with dotnet run${d.dotnet ? '' : ' (dotnet was not found on PATH)'}.` : `.NET: ${d.netcoredbg.reason ?? 'netcoredbg is not available.'}`);
+  parts.push(d.debugpy.path ? `Python: debugging with the bundled ${ver(d.debugpy.version) ?? 'debugpy'} (MIT) and ${d.python ? `the interpreter ${d.python}` : 'a Python interpreter, but none was found (install Python or create a .venv)'}.` : 'Python: the bundled debugpy is missing; reinstall Refyntra.');
+  parts.push(d.lldbDap ? `Rust: cargo run${d.cargo ? '' : ' (cargo was not found)'}; debugging with lldb-dap from the installed LLVM (${d.lldbDap}).` : `Rust: cargo run${d.cargo ? '' : ' (cargo was not found)'}; debugging needs lldb-dap from an installed LLVM, which was not found (Refyntra does not bundle a Rust debugger, see ADR-008).`);
+  parts.push('Node.js: package.json scripts run with npm, pnpm or yarn; debugging uses the JavaScript debugger built into VS Code.');
+  if (!trusted) return { adapterId: 'debug', icon: 'locked', headline: 'Run and debug: Restricted Mode', meaning: `Building and running execute code from this workspace, so Refyntra runs and debugs nothing until you trust it. ${parts.join(' ')}`, more: [], groups: [] };
+  const icon: StatusIcon = d.netcoredbg.path && d.debugpy.path ? 'ok' : 'warning';
+  const headline = d.netcoredbg.path ? 'Run and debug: ready' : 'Run and debug: .NET debugging is unavailable on this platform';
+  return { adapterId: 'debug', icon, headline, meaning: parts.join(' '), more: [], groups: [] };
+}
+
 export function buildHealthPage(input: HealthPageInput): HealthPageModel {
   const { health, restore } = input;
   const used = new Map<string, number>();
@@ -321,6 +347,7 @@ export function buildHealthPage(input: HealthPageInput): HealthPageModel {
   };
   const ordered = [...health.adapters].sort((x, y) => (x.adapterId === 'csharp' ? -1 : y.adapterId === 'csharp' ? 1 : 0));
   const sections = ordered.map((a) => (a.adapterId === 'csharp' ? csharpSection(a, health.workspaceTrusted, key, restore) : otherSection(a, key)));
+  if (input.debug) sections.push(debugSection(input.debug, health.workspaceTrusted));
   const model: HealthPageModel = {
     sections,
     secondary: [

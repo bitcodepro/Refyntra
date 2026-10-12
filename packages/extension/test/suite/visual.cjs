@@ -45,6 +45,12 @@ exports.cases = ({ api, csharp, waitFor }) => {
     parkMouse();
   }
 
+  /** The Run and Debug UI is off for the older screenshots (runTest.mjs visualSettings); these cases switch it on. */
+  async function runUi(on) {
+    const c = vscode.workspace.getConfiguration('refyntra');
+    for (const k of ['run.statusBar', 'run.editorButtons', 'run.view', 'run.codeLens']) await c.update(k, on, vscode.ConfigurationTarget.Global);
+  }
+
   async function open(rel, needle, offset = 0, length = 0) {
     const doc = await vscode.workspace.openTextDocument(file(rel));
     const i = doc.getText().indexOf(needle);
@@ -285,6 +291,61 @@ exports.cases = ({ api, csharp, waitFor }) => {
         await shot('find', 3000);
         key('Escape');
         await reset();
+      },
+    ],
+    [
+      'visual: run-view — the Refyntra Run view, the run target in the status bar and Run | Debug over Program.cs',
+      async () => {
+        const a = await ready();
+        await reset();
+        await runUi(true);
+        const targets = await a.run.refresh();
+        const api = targets.find((t) => t.label === 'Shop.Api');
+        assert.ok(api && api.runnable, 'Shop.Api is a runnable web app');
+        await a.run.select(api, { configuration: 'Debug' });
+        await open(PROGRAM, 'var builder');
+        await waitFor(async () => {
+          const ls = await vscode.commands.executeCommand('vscode.executeCodeLensProvider', file(PROGRAM), 10);
+          return ls.some((l) => l.command && /Run/.test(l.command.title));
+        }, 'Run | Debug lenses', 60000);
+        // The view's `when` (config.refyntra.run.view) needs a moment after the setting changed.
+        await sleep(1500);
+        await vscode.commands.executeCommand('workbench.view.extension.refyntra');
+        await vscode.commands.executeCommand('refyntra.runView.focus');
+        await shot('run-view', 2500);
+      },
+    ],
+    [
+      'visual: debug-stopped — netcoredbg stopped at a breakpoint in Program.cs (Run and Debug view, Variables)',
+      async () => {
+        const a = await ready();
+        await reset();
+        await runUi(true);
+        const api = (await a.run.refresh()).find((t) => t.label === 'Shop.Api');
+        const doc = await vscode.workspace.openTextDocument(file(PROGRAM));
+        const line = doc.getText().split(/\r?\n/).findIndex((l) => l.startsWith('var app = builder.Build();'));
+        assert.ok(line > 0, 'the breakpoint line');
+        const bp = new vscode.SourceBreakpoint(new vscode.Location(doc.uri, new vscode.Position(line, 0)));
+        vscode.debug.addBreakpoints([bp]);
+        let stopped = false;
+        const tracker = vscode.debug.registerDebugAdapterTrackerFactory('refyntra-dotnet', {
+          createDebugAdapterTracker: () => ({ onDidSendMessage: (m) => { if (m.type === 'event' && m.event === 'stopped') stopped = true; } }),
+        });
+        try {
+          assert.equal(await a.run.debug(api.id), true, 'debugging started');
+          await waitFor(() => stopped, 'stopped at the breakpoint', 240000);
+          await vscode.commands.executeCommand('workbench.view.debug');
+          await vscode.commands.executeCommand('workbench.action.closePanel');
+          await sleep(2000);
+          await shot('debug-stopped', 3000);
+        } finally {
+          tracker.dispose();
+          vscode.debug.removeBreakpoints([bp]);
+          if (vscode.debug.activeDebugSession) await vscode.debug.stopDebugging();
+          await waitFor(() => !vscode.debug.activeDebugSession, 'debug session ended', 60000);
+          await runUi(false);
+          await reset();
+        }
       },
     ],
   ];

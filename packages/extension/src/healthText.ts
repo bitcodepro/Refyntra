@@ -1,5 +1,5 @@
 import { type HealthSummary, formatAdapterHealth, projectCounts } from '@refyntra/domain';
-import { buildHealthPage, renderHealthPageText } from './healthPageModel';
+import { type DebugHealth, buildHealthPage, renderHealthPageText } from './healthPageModel';
 import { reasonPhrase } from './terminology';
 
 // Markdown version of the Health page (pure): "Refyntra: Show Health (text)", "Copy as text" and the fallback. The
@@ -9,8 +9,8 @@ function esc(s: string): string {
   return s.replace(/[|\\`*_[\]<>]/g, (c) => `\\${c}`);
 }
 
-export function renderHealth(h: HealthSummary, extra: { solution?: string | undefined }): string {
-  const summary = renderHealthPageText(buildHealthPage({ health: h })).split(/\r?\n/).slice(2, -2);
+export function renderHealth(h: HealthSummary, extra: { solution?: string | undefined; debug?: DebugHealth | undefined }): string {
+  const summary = renderHealthPageText(buildHealthPage({ health: h, debug: extra.debug })).split(/\r?\n/).slice(2, -2);
   const out: string[] = ['# Refyntra health', '', '```text', ...summary, '```', '', '## Technical details (for troubleshooting)', ''];
   if (!h.workspaceTrusted) {
     out.push(
@@ -49,6 +49,20 @@ export function renderHealth(h: HealthSummary, extra: { solution?: string | unde
       if (diags.length > 50) out.push(`- … ${diags.length - 50} more`);
     }
     out.push('');
+  }
+  if (extra.debug) {
+    const d = extra.debug;
+    out.push(
+      '### Run and debug',
+      '',
+      `- netcoredbg: ${d.netcoredbg.path ? `${esc(d.netcoredbg.version ?? 'bundled')} (${esc(d.netcoredbg.path)})` : `not available (${esc(d.netcoredbg.reason ?? '')})`}`,
+      `- debugpy: ${d.debugpy.path ? esc(d.debugpy.version ?? 'bundled') : 'missing'}`,
+      `- Python interpreter: ${d.python ? esc(d.python) : 'not found'}`,
+      `- dotnet: ${d.dotnet ? esc(d.dotnet) : 'not found on PATH'}`,
+      `- cargo: ${d.cargo ? esc(d.cargo) : 'not found'}`,
+      `- lldb-dap (Rust debugging): ${d.lldbDap ? esc(d.lldbDap) : 'not found'}`,
+      '',
+    );
   }
   return out.join('\n');
 }

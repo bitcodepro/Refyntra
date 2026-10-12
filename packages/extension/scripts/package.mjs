@@ -6,14 +6,15 @@
 //                                               without a pinned binary; Health then says Rust is not available there)
 //   pnpm package:vsix -- --allow-missing-host   packages without host/ (the extension then reports HostNotFound)
 // Host payload source: src/dotnet/Refyntra.Host/bin/Release/net10.0/** → packages/extension/host/
-// Language servers (scripts/package/servers.mjs): servers/pyright (identical in every VSIX) and servers/rust-analyzer
+// Debug adapters (scripts/package/debuggers.json): debuggers/debugpy (every VSIX) and debuggers/netcoredbg (targets with
+// an official build). Language servers (scripts/package/servers.mjs): servers/pyright (identical in every VSIX) and servers/rust-analyzer
 // (only the binary of the VSIX's own target; downloaded at packaging time only and SHA-256 verified).
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import path from 'node:path';
-import { RA_TARGETS, currentTarget, stagePyright, stageRustAnalyzer, stageWebWorker } from '../../../scripts/package/servers.mjs';
+import { DBG, RA_TARGETS, currentTarget, stageDebugpy, stageNetcoredbg, stagePyright, stageRustAnalyzer, stageWebWorker } from '../../../scripts/package/servers.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
@@ -74,6 +75,11 @@ console.log(`Pyright ${pyrightVersion}: staged into servers/pyright`);
 const webVersions = stageWebWorker(serversDir);
 console.log(`TypeScript ${webVersions.typescript} and Angular language service ${webVersions.angular}: staged into servers/typescript and servers/angular-language-service`);
 
+// 4c. Debug adapters (ADR-008): debugpy (pure Python, identical in every VSIX); netcoredbg per target below.
+const debuggersDir = path.join(root, 'debuggers');
+const debugpyVersion = await stageDebugpy(path.join(debuggersDir, 'debugpy'));
+console.log(`debugpy ${debugpyVersion}: staged into debuggers/debugpy`);
+
 const require = createRequire(import.meta.url);
 const vsce = path.join(path.dirname(require.resolve('@vscode/vsce/package.json')), 'vsce');
 const built = [];
@@ -85,6 +91,9 @@ try {
     const raDir = path.join(serversDir, 'rust-analyzer');
     fs.rmSync(raDir, { recursive: true, force: true });
     if (target) await stageRustAnalyzer(target, raDir);
+    // 5b. netcoredbg of this target only (none in the universal package or where no official build exists).
+    const ncd = target ? await stageNetcoredbg(target, path.join(debuggersDir, 'netcoredbg')) : (fs.rmSync(path.join(debuggersDir, 'netcoredbg'), { recursive: true, force: true }), false);
+    console.log(`netcoredbg ${DBG.netcoredbg.version}: ${ncd ? `staged for ${target}` : `not available for ${target ?? 'the universal package'} (Health reports .NET debugging as unavailable)`}`);
     const outFile = outFileFor(target);
     execFileSync(process.execPath, [vsce, 'package', '--no-dependencies', '--allow-missing-repository', ...(target ? ['--target', target] : []), '--out', outFile], { cwd: root, stdio: 'inherit' });
     built.push(outFile);

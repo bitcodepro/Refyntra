@@ -11,8 +11,9 @@ export const PROTOCOL_MAJOR = 1;
  * 1.6: Safe Delete, Extract Method, Change Signature (`PrepareParams.range`/`signature`, `PlannedChange` kind `delete`,
  * `fileDelete`, `code/signature`, `workspace/didDeleteFiles`).
  * 1.7: call and type hierarchy (`code/hierarchy`).
+ * 1.8: runnable projects for Run and Debug (`workspace/runnableProjects`).
  */
-export const PROTOCOL_MINOR = 7;
+export const PROTOCOL_MINOR = 8;
 
 /** Zero-based line, UTF-16 code unit character. */
 export interface Position {
@@ -487,6 +488,33 @@ export interface HierarchyResult {
   snapshotId: string;
 }
 
+/** workspace/runnableProjects (protocol 1.8): how Run and Debug sees a loaded project. */
+export type RunnableKind = 'console' | 'web' | 'worker' | 'winforms' | 'wpf' | 'test' | 'library' | 'maui' | 'blazor-wasm';
+
+export interface RunnableProjectInfo {
+  name: string;
+  projectUri: string;
+  kind: RunnableKind;
+  /** True when Run and Debug can start it (on Windows only when `windowsOnly`). */
+  runnable: boolean;
+  /** Why it is not runnable, or a limitation. */
+  reason?: string | null;
+  windowsOnly: boolean;
+  targetFrameworks: string[];
+  /** Output file per target framework from the design-time evaluation (Debug configuration). */
+  outputs: { targetFramework?: string | null; outputUri: string }[];
+  assemblyName?: string | null;
+  /** Properties/launchSettings.json of the project, when present (the client reads its profiles). */
+  launchSettingsUri?: string | null;
+}
+
+export interface RunnableProjectsResult {
+  projects: RunnableProjectInfo[];
+  /** Engine state of the workspace (Loading: the list may still be empty). */
+  state: string;
+  snapshotId?: string | null;
+}
+
 /** The files a plan deletes (protocol 1.6, Safe Delete). */
 export interface FileDeleteOffer {
   files: string[];
@@ -722,6 +750,8 @@ export interface MethodMap {
   'code/signature': [SymbolQueryParams, SignatureInfo];
   /** Protocol 1.7. */
   'code/hierarchy': [HierarchyParams, HierarchyResult];
+  /** Protocol 1.8. */
+  'workspace/runnableProjects': [WorkspaceParams, RunnableProjectsResult];
   'code/references': [SymbolQueryParams, LocationsResult];
   'code/implementations': [SymbolQueryParams, LocationsResult];
   'refactor/prepare': [PrepareParams, PrepareResult];

@@ -4,6 +4,36 @@ All notable changes are listed here. The project is alpha; nothing has been rele
 
 ## Unreleased
 
+### Added (Run and debug, protocol 1.8, ADR-008)
+
+- Refyntra runs and debugs projects without other extensions. **.NET**: the bundled Samsung **netcoredbg 3.2.0-1092**
+  (MIT; official release archives, SHA-256 pinned in `scripts/package/debuggers.json`, staged per platform package;
+  none exists for win32-arm64, darwin-x64 and alpine-x64, where Health says debugging is unavailable and Run still
+  works), debug type `refyntra-dotnet` (launch with a `dotnet build` step, attach with a process picker, exception
+  breakpoints, `env`/`args`/`cwd`/`stopAtEntry`/`justMyCode`, C# breakpoints). **Python**: the bundled **debugpy
+  1.8.22** (MIT, pure-Python parts of the official wheel, SHA-256 pinned), debug type `refyntra-python` run by your
+  interpreter. **Rust**: `cargo run`; debugging with an installed `lldb-dap` (detected, not bundled: CodeLLDB would add
+  45–56 MB per package). **package.json scripts**: run with npm/pnpm/yarn, debug configurations for VS Code's built-in
+  JavaScript debugger (`node`, `msedge`/`chrome` on the dev-server URL).
+- Host: `workspace/runnableProjects` (protocol 1.8) classifies the loaded projects (console, web, worker, Windows
+  Forms/WPF, test, library, MAUI, Blazor WebAssembly) with target frameworks, outputs and `launchSettings.json`; the
+  client reads the profiles (URL, environment, arguments, launchBrowser).
+- Run without debugging in a terminal (`dotnet run` with the launch profile, `dotnet watch run` for hot reload), Stop
+  and Restart; web profiles with `launchBrowser` open the browser on the `Now listening on:` URL, also when debugging.
+- UI: the **Refyntra Run** view, the run target in the status bar (project · profile · framework · configuration),
+  CodeLens `Run | Debug` over entry points, Run/Debug editor title buttons, dynamic configurations in VS Code's Run and
+  Debug view, **Refyntra: Generate launch.json**, a *Run and debug* section on the Health page. F5 and Ctrl+F5 keep VS
+  Code's behaviour (no keybinding is contributed). Settings `refyntra.run.codeLens`, `.editorButtons`, `.statusBar`,
+  `.view`. Trusted workspaces only.
+- Tests: .NET tests for the project detection (fixture `tests/fixtures/Runnable`: console, web with launchSettings,
+  worker, multi-target, library, test project; WinForms, WPF, MAUI and Blazor WebAssembly project files), unit tests for
+  the run model and configuration resolution, the Docker e2e scenario `run-debug` (netcoredbg stops at a breakpoint,
+  locals, an evaluated expression, exit code 7; the web fixture answers on its profile URL; debugpy stops in a Python
+  file), Restricted Mode checks, and the visual scenarios `run-view` and `debug-stopped`.
+- Packaging: `servers.mjs` stages netcoredbg and debugpy (verified downloads, packaging time only), `audit:vsix`
+  allows exactly their files and checks the binary platform and the pinned SHA-256, `pnpm notices` lists both with
+  their license texts in `legal/` and the SBOM (`pkg:github/Samsung/netcoredbg`, `pkg:pypi/debugpy`).
+
 ### Added (visual tests)
 
 - `pnpm test:visual` (`scripts/test/linux-visual.sh`): screenshot tests of Refyntra's UI in VS Code 1.90.2, headless in

@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { repo, extPkg, ensureVsix, extractVsix, walk, rel } from './lib.mjs';
-import { ANGULAR_LS_FILES, PYRIGHT_FILES, RA, TYPESCRIPT_FILES, TYPESCRIPT_LIB, TYPESHED_FILES } from './servers.mjs';
+import { ANGULAR_LS_FILES, DBG, PYRIGHT_FILES, RA, TYPESCRIPT_FILES, TYPESCRIPT_LIB, TYPESHED_FILES, debugpyKeep } from './servers.mjs';
 
 const vsix = ensureVsix();
 const tmp = extractVsix(vsix);
@@ -113,6 +113,32 @@ try {
   }
   console.log(`Language servers: Pyright (${files.filter((f) => f.rel.startsWith('extension/servers/pyright/')).length} files), rust-analyzer ${raBinary ? `${RA.version} for ${target}` : 'not included (universal package)'}`);
 
+  // ---- bundled debug adapters (ADR-008): exactly these files under extension/debuggers/ ----
+  const ncd = target ? DBG.netcoredbg.targets[target] : undefined;
+  const ncdAllowed = (n) => !!ncd && (n === ncd.binary || ['ManagedPart.dll', 'LICENSE.txt', 'THIRD-PARTY-LICENSES.txt', 'VERSION.txt'].includes(n) || /^Microsoft\.CodeAnalysis(\.CSharp)?(\.Scripting)?\.dll$/.test(n) || /^(lib)?dbgshim\.(dll|so|dylib)$/.test(n));
+  for (const f of files.filter((x) => x.rel.startsWith('extension/debuggers/'))) {
+    const n = f.rel.slice('extension/debuggers/'.length);
+    if (n.startsWith('netcoredbg/')) {
+      if (!ncdAllowed(n.slice('netcoredbg/'.length))) fail(`${f.rel}: not a netcoredbg file of the ${target ?? 'universal'} package`);
+    } else if (n.startsWith('debugpy/')) {
+      const d = n.slice('debugpy/'.length);
+      if (d !== 'LICENSE.txt' && d !== 'VERSION.txt' && !debugpyKeep(d)) fail(`${f.rel}: not one of the pure-Python debugpy files Refyntra bundles`);
+    } else fail(`${f.rel}: not allowed under debuggers/`);
+  }
+  for (const need of ['debugpy/LICENSE.txt', 'debugpy/VERSION.txt', 'debugpy/debugpy/adapter/__main__.py', ...(ncd ? [`netcoredbg/${ncd.binary}`, 'netcoredbg/LICENSE.txt', 'netcoredbg/THIRD-PARTY-LICENSES.txt', 'netcoredbg/VERSION.txt', 'netcoredbg/ManagedPart.dll'] : [])]) {
+    if (!files.some((f) => f.rel === `extension/debuggers/${need}`)) fail(`debuggers/${need}: bundled debug adapter file is missing`);
+  }
+  if (ncd) {
+    const bin = path.join(tmp, 'extension', 'debuggers', 'netcoredbg', ncd.binary);
+    const head = fs.readFileSync(bin).subarray(0, 4);
+    const kind = head[0] === 0x4d && head[1] === 0x5a ? 'win32' : head.toString('latin1', 1, 4) === 'ELF' ? 'linux' : [0xcf, 0xce].includes(head[0]) && head[1] === 0xfa ? 'darwin' : 'unknown';
+    if (kind !== target.split('-')[0]) fail(`debuggers/netcoredbg/${ncd.binary} is a ${kind} binary, but the VSIX targets ${target}`);
+    const v = fs.readFileSync(path.join(tmp, 'extension', 'debuggers', 'netcoredbg', 'VERSION.txt'), 'utf8');
+    if (!v.includes(ncd.sha256) || !v.includes(DBG.netcoredbg.version)) fail('debuggers/netcoredbg/VERSION.txt does not name the pinned release and its SHA-256');
+  }
+  if (!fs.readFileSync(path.join(tmp, 'extension', 'debuggers', 'debugpy', 'VERSION.txt'), 'utf8').includes(DBG.debugpy.sha256)) fail('debuggers/debugpy/VERSION.txt does not name the pinned wheel SHA-256');
+  console.log(`Debug adapters: debugpy ${DBG.debugpy.version} (${files.filter((f) => f.rel.startsWith('extension/debuggers/debugpy/')).length} files), netcoredbg ${ncd ? `${DBG.netcoredbg.version} for ${target}` : `not included (no official build for ${target ?? 'the universal package'})`}`);
+
   // ---- required content ----
   for (const need of ['extension/dist/extension.js', 'extension/host/Refyntra.Host.dll', 'extension/host/Refyntra.Host.deps.json', 'extension/LICENSE.txt', 'extension/THIRD_PARTY_NOTICES.md', 'extension/package.json']) {
     if (!files.some((f) => f.rel === need)) fail(`${need}: required file is missing`);
@@ -138,7 +164,7 @@ try {
   const add = (k, s) => { const b = buckets.get(k) ?? { n: 0, size: 0 }; b.n++; b.size += s; buckets.set(k, b); };
   for (const f of files) {
     const segs = f.rel.split('/');
-    add(segs.length <= 2 ? `${segs[0]}/(root files)` : segs.slice(0, (segs[1] === 'host' || segs[1] === 'servers') && segs.length > 3 ? 3 : 2).join('/'), f.size);
+    add(segs.length <= 2 ? `${segs[0]}/(root files)` : segs.slice(0, (segs[1] === 'host' || segs[1] === 'servers' || segs[1] === 'debuggers') && segs.length > 3 ? 3 : 2).join('/'), f.size);
   }
   const total = files.reduce((s, f) => s + f.size, 0);
   console.log(`VSIX: ${path.relative(repo, vsix)} (${(fs.statSync(vsix).size / 1024).toFixed(1)} KiB compressed, ${(total / 1024).toFixed(1)} KiB unpacked, ${files.length} files)\n`);

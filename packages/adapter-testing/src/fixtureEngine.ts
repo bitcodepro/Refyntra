@@ -180,6 +180,9 @@ export class FixtureEngine {
         return this.status();
       case 'workspace/close':
         return null;
+      case 'workspace/runnableProjects':
+        // Protocol 1.8: one console app (the fixture has no project files; enough for the client path).
+        return { state: 'Ready', projects: [{ name: 'App', projectUri: 'file:///ws/App/App.csproj', kind: 'console', runnable: true, windowsOnly: false, targetFrameworks: ['net10.0'], outputs: [{ targetFramework: 'net10.0', outputUri: 'file:///ws/App/bin/Debug/net10.0/App.dll' }], assemblyName: 'App' }] };
       case 'workspace/snapshotBarrier': {
         // Same strictness as the .NET host: a barrier for a sequence that was never received fails.
         const requested = Number(p.sequence);

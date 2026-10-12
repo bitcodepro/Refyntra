@@ -159,6 +159,9 @@ export type HierarchyOutcome =
   | { kind: 'hierarchy'; subject: import('@refyntra/contracts').SymbolRef; items: import('@refyntra/contracts').HierarchyItem[]; completeness: 'complete' | 'partial' | 'unknown'; truncated: boolean }
   | Unavailable;
 
+/** Run and Debug (protocol 1.8): the runnable-project model of the C# route, or why there is none. */
+export type RunnableProjectsOutcome = { kind: 'projects'; result: import('@refyntra/contracts').RunnableProjectsResult } | Unavailable;
+
 export interface ApplyOptions {
   /** The user explicitly confirmed the limitations of a plan whose validation is `limited`. */
   acceptLimited?: boolean;
@@ -204,6 +207,8 @@ export interface EngineClient {
    * ('subject' resolves only the symbol, with no items).
    */
   hierarchy(target: DocumentTarget, direction: import('@refyntra/contracts').HierarchyDirection | 'subject', token?: CancellationToken): Promise<HierarchyOutcome>;
+  /** Run and Debug (protocol 1.8): the C# projects of the loaded workspace classified for running and debugging. */
+  runnableProjects?(token?: CancellationToken): Promise<RunnableProjectsOutcome>;
   discardPlan(planId: string): void;
   planState(planId: string): PlanState | undefined;
   /** Rule analysis (`analysis/run`) of every route that offers it; one outcome per route, never throws except on cancel. */
@@ -678,6 +683,19 @@ export class RefyntraEngine implements EngineClient {
       if (!subject) return { kind: 'unavailable', reasonCode: 'NoSymbol', message: 'There is no symbol at the cursor.', recoveryActions: [] };
       if (direction !== 'subject' && !result) return { kind: 'unavailable', reasonCode: 'ProtocolTooOld', message: 'The C# host is too old for the hierarchy; update the extension.', recoveryActions: [] };
       return { kind: 'hierarchy', subject, items: result?.items ?? [], completeness: result?.completeness ?? 'complete', truncated: result?.truncated ?? false };
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      return this.toUnavailable(adapter, e);
+    }
+  }
+
+  async runnableProjects(token?: CancellationToken): Promise<RunnableProjectsOutcome> {
+    const adapter = this.o.registry.languageAdapters().find((a) => a.descriptor.ownership === 'owned-semantic' && typeof a.runnableProjects === 'function');
+    if (!adapter) return { kind: 'unavailable', reasonCode: 'NoLanguageRoute', message: 'No Refyntra route provides a .NET project model.', recoveryActions: [RECOVERY_SHOW_HEALTH] };
+    try {
+      const result = await adapter.runnableProjects!(token);
+      if (!result) return { kind: 'unavailable', reasonCode: 'ProtocolTooOld', message: 'The C# host is too old for Run and Debug; update the extension.', recoveryActions: [] };
+      return { kind: 'projects', result };
     } catch (e) {
       if (e instanceof CancelledError) throw e;
       return this.toUnavailable(adapter, e);

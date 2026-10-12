@@ -24,8 +24,9 @@ public sealed class Engine : IRpcHandler, IDisposable
     /// 1.6: actions csharp.safeDelete / csharp.extractMethod / csharp.changeSignature, PrepareParams.range / signature,
     /// PlannedChange kind "delete", plan.fileDelete, code/signature, workspace/didDeleteFiles.
     /// 1.7: code/hierarchy (call and type hierarchy).
+    /// 1.8: workspace/runnableProjects (Run and Debug).
     /// </summary>
-    public const int ProtocolMinor = 7;
+    public const int ProtocolMinor = 8;
     /// <summary>How long workspace/snapshotBarrier waits for a missing document sequence (tests shorten it).</summary>
     public TimeSpan BarrierTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
@@ -107,6 +108,8 @@ public sealed class Engine : IRpcHandler, IDisposable
                 return await SignatureAsync(Params<SymbolQueryParams>(p), ct).ConfigureAwait(false);
             case "code/hierarchy":
                 return await HierarchyAsync(Params<HierarchyParams>(p), ct).ConfigureAwait(false);
+            case "workspace/runnableProjects":
+                return RunnableProjects(Params<WorkspaceParams>(p));
             case "code/resolveFrame":
                 return await ResolveFrameAsync(Params<ResolveFrameParams>(p), ct).ConfigureAwait(false);
             case "analysis/run":
@@ -574,6 +577,33 @@ public sealed class Engine : IRpcHandler, IDisposable
             }
         }
         return list;
+    }
+
+    /// <summary>workspace/runnableProjects (protocol 1.8): the loaded projects classified for Run and Debug.</summary>
+    private RunnableProjectsResultDto RunnableProjects(WorkspaceParams p)
+    {
+        var session = RequireSession(p.WorkspaceId);
+        var snap = session.Current;
+        if (snap == null) return new RunnableProjectsResultDto { Projects = new(), State = session.State };
+        var list = RunnableProjectDetector.Detect(snap.Solution);
+        return new RunnableProjectsResultDto
+        {
+            State = session.State,
+            SnapshotId = snap.Id,
+            Projects = list.Select(r => new RunnableProjectDto
+            {
+                Name = r.Name,
+                ProjectUri = UriPaths.ToUri(r.ProjectPath),
+                Kind = r.Kind,
+                Runnable = r.Runnable,
+                Reason = r.Reason,
+                WindowsOnly = r.WindowsOnly,
+                TargetFrameworks = r.TargetFrameworks.ToList(),
+                Outputs = r.Outputs.Where(o => o.OutputPath != null).Select(o => new RunnableOutputDto { TargetFramework = o.Tfm, OutputUri = UriPaths.ToUri(o.OutputPath!) }).ToList(),
+                AssemblyName = r.AssemblyName,
+                LaunchSettingsUri = r.LaunchSettingsPath == null ? null : UriPaths.ToUri(r.LaunchSettingsPath),
+            }).ToList(),
+        };
     }
 
     private async Task<HierarchyResultDto> HierarchyAsync(HierarchyParams p, CancellationToken ct)

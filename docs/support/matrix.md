@@ -59,6 +59,28 @@ Rust toolchain, so the Rust runs covered the *cargo not found* path (route Parti
 rust-analyzer still resolved definitions, references and the rename inside the crate. The other packages were built
 and audited but not run on their platforms.
 
+## Run and debug per package (ADR-008)
+
+Measured 2026-10-12 (`pnpm package:vsix -- --all-targets --universal`, every package passed `audit:vsix --strict-binary`).
+debugpy 1.8.22 (pure Python) is in every package; netcoredbg 3.2.0-1092 only where Samsung publishes a build.
+
+| Package | .NET run | .NET debug (netcoredbg) | Python debug (debugpy) | VSIX size |
+|---|---|---|---|---|
+| win32-x64 | yes | yes | yes | 32.36 MiB |
+| win32-arm64 | yes | **no** (no official build) | yes | 28.29 MiB |
+| linux-x64 | yes | yes | yes | 32.83 MiB |
+| linux-arm64 | yes | yes | yes | 32.45 MiB |
+| alpine-x64 | yes | **no** (no musl build) | yes | 29.54 MiB |
+| darwin-x64 | yes | **no** (no build in 3.2.0) | yes | 29.15 MiB |
+| darwin-arm64 | yes | yes | yes | 31.98 MiB |
+| universal | yes | **no** | yes | 14.93 MiB |
+
+Where netcoredbg is missing, Health says ".NET debugging is unavailable on this platform" and Debug explains it; Run
+(`dotnet run`) still works. Windows Forms and WPF run and debug on Windows only. MAUI and Blazor WebAssembly are not run
+or debugged. Rust debugging needs an installed `lldb-dap` (not bundled). Verified 2026-10-12 in Docker (linux-x64,
+VS Code 1.90.2, Xvfb): e2e scenario `run-debug` (netcoredbg breakpoint, locals, evaluate, exit code; web app on its
+profile URL; debugpy breakpoint with the system Python 3.12). Debugging on Windows, macOS and arm64 was not run.
+
 ## Not supported and untested
 
 macOS, Windows ARM64, remote/WSL/Dev Containers, virtual workspaces, non-SDK-style projects, older SDKs, VS Code versions other than the two above.
