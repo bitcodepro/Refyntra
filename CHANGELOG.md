@@ -4,6 +4,25 @@ All notable changes are listed here. The project is alpha; nothing has been rele
 
 ## Unreleased
 
+### Added (postfix templates and Generate for C#, protocol 1.10)
+
+- **`code/postfix`** (protocol minor 10): after `expr.` the C# host lists Rider's postfix templates that fit the
+  expression's type — `.if .ifn .notnull .not .var .foreach .for .forr .await .return .throw .new .par .cast .arg
+  .using .lock .switch .while .nameof .yield` — as snippets formatted with the document's options, with tab stops and
+  names suggested from the expression or its type. Statement templates only for a whole expression statement.
+- Editor: a completion provider for C# (trigger `.`), sorted after the regular members, cached per document version and
+  dot, cancelled with the completion request; setting `refyntra.postfix.enabled` (default on).
+- **`code/generate`** (protocol minor 10) and **Refyntra: Generate…** (`refyntra.generate`, Alt+Insert in the
+  `visualStudio` and `resharper` presets, C# editors): constructor, Equals/GetHashCode (`IEquatable<T>`, `==`/`!=`,
+  `HashCode.Combine`), ToString, properties from fields, missing interface / abstract members, overrides and delegating
+  members. Roslyn writes the code (usings added, names simplified, partial types, `.editorconfig` formatting) and
+  refuses a result with a new compiler error; applied as one Undo step to the same document version only.
+- **Generate Constructor** (`refyntra.ctor.generate`) now goes through the same Roslyn generation; the text-based
+  helper stays as the fallback for an older host.
+- Tests: .NET tests per template category and per Generate kind (generics, records, partial types, nullable, structs,
+  refusals); unit tests for the editor glue; e2e (`.foreach`, `.ifn`, Equals/GetHashCode, Implement interface) and
+  visual baselines for the postfix list and the Generate picker.
+
 ### Added (Rider-style C# edit actions, protocol 1.9)
 
 - **`code/editActions`** (protocol minor 9): the C# host lists single-document edit actions at a range and computes

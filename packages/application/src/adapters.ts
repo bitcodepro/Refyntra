@@ -156,6 +156,13 @@ export interface LanguageAdapter {
    */
   editActions?(uri: string, range: import('@refyntra/contracts').Range, actionId: string | undefined, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').EditActionsResult | null>>;
   runnableProjects?(token?: CancellationToken): Promise<import('@refyntra/contracts').RunnableProjectsResult | null>;
+  /** Optional (protocol 1.10): postfix templates after the dot before the position (barrier first; null for an older host). */
+  postfix?(uri: string, position: Position, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').PostfixResult | null>>;
+  /**
+   * Optional (protocol 1.10): the Generate kinds for the type at the position (no request), or the compile-checked edits
+   * of one kind (barrier first; null for an older host).
+   */
+  generate?(uri: string, position: Position, request: GenerateRequest | undefined, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').GenerateResult | null>>;
   dispose(): Promise<void>;
   /** Present on delegated routes (descriptor.ownership 'delegated') that offer rename. */
   readonly delegatedRename?: DelegatedRenamePort;
@@ -249,4 +256,12 @@ export class AdapterRegistry {
   frameworksFor(providerRouteId: string): FrameworkAdapter[] {
     return this.frameworks.filter((f) => f.descriptor.providerRouteIds.includes(providerRouteId));
   }
+}
+
+/** What to generate (protocol 1.10, code/generate). */
+export interface GenerateRequest {
+  kind: import('@refyntra/contracts').GenerateKindId;
+  members?: string[];
+  equatable?: boolean;
+  operators?: boolean;
 }

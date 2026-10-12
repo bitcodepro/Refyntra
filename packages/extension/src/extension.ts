@@ -42,6 +42,8 @@ import { runRestore } from './restore';
 import { registerCodeActions } from './codeActions';
 import { registerConstructorActions } from './constructorActions';
 import { registerEditActions } from './editActions';
+import { registerGenerate } from './generate';
+import { registerPostfix } from './postfix';
 import { type ImmediateViewProvider, registerImmediate } from './immediate';
 import { type CSharpEvaluatableExpressionProvider, type CSharpInlineValuesProvider, registerInlineValues } from './inlineValues';
 import { type RefyntraCodeLensProvider, registerCodeLens } from './codeLens';
@@ -367,6 +369,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     registerCodeActions(engine),
     registerConstructorActions(engine, editApplier), // constructor / DI helpers (constructorActions.ts)
     registerEditActions(engine, editApplier), // Convert / Inline / Introduce edit actions computed by Roslyn (protocol 1.9)
+    registerPostfix(engine), // C# postfix templates after a dot (protocol 1.10)
+    registerGenerate(engine, editApplier), // Generate… / Alt+Insert (protocol 1.10)
     inlineValues.disposable, // C# inline debug values and hover member chains (inlineValues.ts)
     immediate.disposable, // Refyntra Immediate panel (immediate.ts)
     registerHierarchy(engine), // built-in Call / Type Hierarchy for C# (protocol 1.7)

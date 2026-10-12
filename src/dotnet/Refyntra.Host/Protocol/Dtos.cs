@@ -742,3 +742,72 @@ public sealed class EditActionsResultDto
     public string? Message { get; set; }
     public string SnapshotId { get; set; } = "";
 }
+
+/// <summary>code/postfix (protocol 1.10): the postfix templates after the dot before <see cref="Position"/>.</summary>
+public sealed class PostfixParams : WorkspaceParams
+{
+    public string SnapshotId { get; set; } = "";
+    public string Uri { get; set; } = "";
+    public PositionDto Position { get; set; } = new();
+}
+
+public sealed class PostfixTemplateDto
+{
+    /// <summary>Template name typed after the dot ("foreach").</summary>
+    public string Name { get; set; } = "";
+    /// <summary>The inserted code without tab stops.</summary>
+    public string Detail { get; set; } = "";
+    /// <summary>VS Code snippet that replaces the expression, the dot and the typed name.</summary>
+    public string Snippet { get; set; } = "";
+}
+
+public sealed class PostfixResultDto
+{
+    public List<PostfixTemplateDto> Items { get; set; } = new();
+    /// <summary>The expression the templates apply to (start to the dot).</summary>
+    public RangeDto? ExpressionRange { get; set; }
+    public string? TypeName { get; set; }
+    public string SnapshotId { get; set; } = "";
+}
+
+/// <summary>code/generate (protocol 1.10): list the Generate kinds for the type at the position, or generate one (<see cref="Kind"/>).</summary>
+public sealed class GenerateParams : WorkspaceParams
+{
+    public string SnapshotId { get; set; } = "";
+    public string Uri { get; set; } = "";
+    public PositionDto Position { get; set; } = new();
+    public string? Kind { get; set; }
+    /// <summary>Picked member ids (null: the preselected ones).</summary>
+    public List<string>? Members { get; set; }
+    /// <summary>Equality: implement IEquatable&lt;T&gt;.</summary>
+    public bool Equatable { get; set; }
+    /// <summary>Equality: generate the == and != operators.</summary>
+    public bool Operators { get; set; }
+}
+
+public sealed class GenerateMemberDto
+{
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string Detail { get; set; } = "";
+    public bool Picked { get; set; }
+    public string? Group { get; set; }
+}
+
+public sealed class GenerateKindDto
+{
+    public string Kind { get; set; } = "";
+    public string Title { get; set; } = "";
+    public List<GenerateMemberDto> Members { get; set; } = new();
+}
+
+public sealed class GenerateResultDto
+{
+    public string? TypeName { get; set; }
+    public List<GenerateKindDto> Kinds { get; set; } = new();
+    public List<TextEditDto>? Edits { get; set; }
+    public string? DocumentHash { get; set; }
+    public string? ReasonCode { get; set; }
+    public string? Message { get; set; }
+    public string SnapshotId { get; set; } = "";
+}

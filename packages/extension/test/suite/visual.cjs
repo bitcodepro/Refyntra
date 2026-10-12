@@ -427,6 +427,56 @@ exports.cases = ({ api, csharp, waitFor }) => {
         }
       },
     ],
+    [
+      'visual: postfix-completion — the C# postfix templates after "names." (from the host, after the regular members)',
+      async () => {
+        await ready();
+        await reset();
+        const rel = 'Shop.Api/Handlers/OrderHandlers.cs';
+        const { doc } = await open(rel, '_audit.Write("order placed");');
+        const edit = new vscode.WorkspaceEdit();
+        const at = doc.getText().indexOf('        _audit.Write("order placed");');
+        edit.insert(doc.uri, doc.positionAt(at), '        var names = new[] { "a", "b" };\n        names.\n');
+        await vscode.workspace.applyEdit(edit);
+        try {
+          const pos = doc.positionAt(doc.getText().indexOf('names.\n') + 'names.'.length);
+          const ed = await vscode.window.showTextDocument(doc, { preview: false, selection: new vscode.Selection(pos, pos) });
+          ed.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
+          // Deterministic: the host's templates for exactly this text are cached by the provider before the list opens.
+          await waitFor(async () => {
+            const list = await vscode.commands.executeCommand('vscode.executeCompletionItemProvider', doc.uri, pos, '.');
+            return (list?.items ?? []).some((i) => (typeof i.label === 'string' ? i.label : i.label.label) === 'foreach');
+          }, 'postfix templates for names.', 120000);
+          await vscode.commands.executeCommand('editor.action.triggerSuggest');
+          await sleep(1500);
+          await shot('postfix-completion', 1500);
+          key('Escape');
+        } finally {
+          await vscode.commands.executeCommand('workbench.action.files.revert');
+          await reset();
+        }
+      },
+    ],
+    [
+      'visual: generate-picker — Refyntra: Generate… (Alt+Insert) on a class: the kinds the host offers',
+      async () => {
+        const a = await ready();
+        await reset();
+        const rel = 'Shop.Api/Handlers/OrderHandlers.cs';
+        const { doc } = await open(rel, 'class OrderPlacedAuditHandler', 8);
+        const pos = doc.positionAt(doc.getText().indexOf('class OrderPlacedAuditHandler') + 8);
+        // Deterministic: the host lists the kinds for this class before the command asks for them again.
+        await waitFor(async () => {
+          const r = await a.engine.generate({ uri: doc.uri.toString(), position: { line: pos.line, character: pos.character } });
+          return r.kind === 'kinds' && r.kinds.length > 0;
+        }, 'Generate kinds for the class', 120000);
+        void vscode.commands.executeCommand('refyntra.generate');
+        await sleep(1500);
+        await shot('generate-picker', 1500);
+        key('Escape');
+        await reset();
+      },
+    ],
   ];
   // REFYNTRA_VISUAL_ONLY=codelens,find: only these screenshots (local debugging); the window setup always runs.
   return only.length ? cases.filter(([title], i) => i === 0 || only.some((o) => title.startsWith(`visual: ${o} `))) : cases;

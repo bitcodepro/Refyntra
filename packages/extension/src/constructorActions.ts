@@ -31,6 +31,7 @@ import {
 } from './constructorModel';
 import { toPosition } from './convert';
 import type { VsCodeEditApplier } from './editApplier';
+import { applyGenerate } from './generate';
 
 const KIND = vscode.CodeActionKind.RefactorRewrite.append('refyntra').append('constructor');
 const QUICKFIX = vscode.CodeActionKind.QuickFix.append('refyntra').append('constructor');
@@ -228,6 +229,10 @@ class ConstructorCommands {
     if (!x) return false;
     const members = await this.pickMembers(x.c, 'Generate constructor');
     if (!members) return false;
+    // Roslyn first (protocol 1.10): semantic types, usings, partial types, .editorconfig formatting, compile check.
+    // The text-based plan remains for an older host or a file the host does not know.
+    const viaHost = await applyGenerate(this.engine, this.applier, { uri: t.uri, position: toPosition(x.doc.positionAt(t.offset)) }, { kind: 'constructor', members: members.map((m) => m.name) }, ['NoType', 'UnknownMember', 'NotApplicable', 'NoDocument']);
+    if (viaHost !== undefined) return viaHost;
     return this.apply(x.doc, planGenerateConstructor(x.text, x.c, members, x.style));
   }
 

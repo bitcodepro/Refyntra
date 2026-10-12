@@ -13,8 +13,9 @@ export const PROTOCOL_MAJOR = 1;
  * 1.7: call and type hierarchy (`code/hierarchy`).
  * 1.8: runnable projects for Run and Debug (`workspace/runnableProjects`).
  * 1.9: single-document edit actions computed and compile-checked by Roslyn (`code/editActions`).
+ * 1.10: postfix templates (`code/postfix`) and Generate (`code/generate`).
  */
-export const PROTOCOL_MINOR = 9;
+export const PROTOCOL_MINOR = 10;
 
 /** Zero-based line, UTF-16 code unit character. */
 export interface Position {
@@ -543,6 +544,75 @@ export interface EditActionsResult {
   snapshotId: string;
 }
 
+/** code/postfix (protocol 1.10): the postfix templates for the expression before the dot that precedes `position`. */
+export interface PostfixParams extends WorkspaceParams {
+  snapshotId: string;
+  uri: string;
+  /** The cursor: right after the dot, or after the part of the template name typed so far. */
+  position: Position;
+}
+
+export interface PostfixTemplate {
+  /** Template name typed after the dot, e.g. `foreach`. */
+  name: string;
+  /** The inserted code without tab stops (shown in the completion list). */
+  detail: string;
+  /** VS Code snippet that replaces the expression, the dot and the typed name. */
+  snippet: string;
+}
+
+export interface PostfixResult {
+  items: PostfixTemplate[];
+  /** The expression the templates apply to (start to the dot); absent when no template applies. */
+  expressionRange?: Range | null;
+  typeName?: string | null;
+  snapshotId: string;
+}
+
+/** Generate kinds of `code/generate` (protocol 1.10). */
+export type GenerateKindId = 'constructor' | 'equality' | 'toString' | 'properties' | 'implement' | 'overrides' | 'delegating';
+
+/** code/generate (protocol 1.10): without `kind` the kinds that apply to the type at `position`; with it the edits. */
+export interface GenerateParams extends WorkspaceParams {
+  snapshotId: string;
+  uri: string;
+  position: Position;
+  kind?: GenerateKindId | null;
+  /** Picked member ids (absent: the preselected ones). */
+  members?: string[] | null;
+  /** Equality: implement IEquatable<T>. */
+  equatable?: boolean;
+  /** Equality: generate the == and != operators. */
+  operators?: boolean;
+}
+
+export interface GenerateMember {
+  /** Member name (fields, properties), documentation comment id (base / interface members) or `field|id` (delegating). */
+  id: string;
+  name: string;
+  detail: string;
+  /** Preselected in the picker. */
+  picked: boolean;
+  /** Delegating members: the field or property they go through. */
+  group?: string | null;
+}
+
+export interface GenerateKindInfo {
+  kind: GenerateKindId;
+  title: string;
+  members: GenerateMember[];
+}
+
+export interface GenerateResult {
+  typeName?: string | null;
+  kinds: GenerateKindInfo[];
+  edits?: { range: Range; newText: string }[] | null;
+  documentHash?: string | null;
+  reasonCode?: string | null;
+  message?: string | null;
+  snapshotId: string;
+}
+
 /** The files a plan deletes (protocol 1.6, Safe Delete). */
 export interface FileDeleteOffer {
   files: string[];
@@ -782,6 +852,9 @@ export interface MethodMap {
   'workspace/runnableProjects': [WorkspaceParams, RunnableProjectsResult];
   /** Protocol 1.9. */
   'code/editActions': [EditActionsParams, EditActionsResult];
+  /** Protocol 1.10. */
+  'code/postfix': [PostfixParams, PostfixResult];
+  'code/generate': [GenerateParams, GenerateResult];
   'code/references': [SymbolQueryParams, LocationsResult];
   'code/implementations': [SymbolQueryParams, LocationsResult];
   'refactor/prepare': [PrepareParams, PrepareResult];

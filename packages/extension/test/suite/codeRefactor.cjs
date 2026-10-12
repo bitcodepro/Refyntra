@@ -211,5 +211,80 @@ exports.cases = ({ api, csharp, waitFor }) => {
         await revertAll();
       },
     ],
+    [
+      'Postfix templates (protocol 1.10): .foreach on a list and .ifn on a nullable, inserted as snippets',
+      async () => {
+        const uri = lib('Postfix/Samples.cs');
+        const doc = await vscode.workspace.openTextDocument(uri);
+        const editor = await vscode.window.showTextDocument(doc);
+        const original = doc.getText();
+        const postfix = async (code, name) => {
+          const edit = new vscode.WorkspaceEdit();
+          const marker = doc.getText().indexOf('/*S*/');
+          edit.replace(uri, new vscode.Range(doc.positionAt(marker), doc.positionAt(marker + 5)), code);
+          assert.ok(await vscode.workspace.applyEdit(edit));
+          const pos = doc.positionAt(doc.getText().indexOf(code) + code.length);
+          let item;
+          await waitFor(async () => {
+            const list = await vscode.commands.executeCommand('vscode.executeCompletionItemProvider', uri, pos, '.');
+            item = (list?.items ?? []).find((i) => (typeof i.label === 'string' ? i.label : i.label.label) === name && i.kind === vscode.CompletionItemKind.Snippet);
+            return !!item;
+          }, `postfix .${name}`, 120000);
+          assert.ok(item.sortText.startsWith('~'), item.sortText);
+          const range = item.range instanceof vscode.Range ? item.range : item.range.replacing;
+          assert.ok(await editor.insertSnippet(item.insertText, range));
+          await vscode.commands.executeCommand('leaveSnippet');
+        };
+        await postfix('numbers.', 'foreach');
+        assert.ok(doc.getText().includes('foreach (var number in numbers)'), doc.getText());
+        assert.ok(!doc.getText().includes('numbers.'), 'the expression and the dot are replaced');
+        await vscode.commands.executeCommand('workbench.action.files.revert');
+        assert.equal(doc.getText(), original);
+        await postfix('maybe.', 'ifn');
+        assert.ok(doc.getText().includes('if (maybe is null)'), doc.getText());
+        await revertAll();
+      },
+    ],
+    [
+      'Generate (protocol 1.10): Equals/GetHashCode and Implement interface computed by Roslyn; one Undo step each',
+      async () => {
+        const a = await api();
+        const uri = lib('Generate/Samples.cs');
+        const doc = await vscode.workspace.openTextDocument(uri);
+        const editor = await vscode.window.showTextDocument(doc);
+        const original = doc.getText();
+        const cursorAt = (needle) => {
+          const p = doc.positionAt(doc.getText().indexOf(needle) + 2);
+          editor.selection = new vscode.Selection(p, p);
+          return { uri: doc.uri.toString(), position: { line: p.line, character: p.character } };
+        };
+        // The kinds the picker would offer for Person.
+        const listed = await a.engine.generate(cursorAt('class Person'));
+        assert.equal(listed.kind, 'kinds', JSON.stringify(listed));
+        assert.ok(listed.kinds.some((k) => k.kind === 'equality'));
+        cursorAt('class Person');
+        assert.equal(await vscode.commands.executeCommand('refyntra.generate', { kind: 'equality', members: ['_name', '_age'], equatable: true, operators: true }), true);
+        const text = doc.getText();
+        assert.ok(text.includes('public class Person : IEquatable<Person>'), text);
+        assert.ok(text.includes('return HashCode.Combine(_name, _age);'), text);
+        assert.ok(text.includes('public static bool operator ==(Person? left, Person? right)'), text);
+        await vscode.commands.executeCommand('undo');
+        assert.equal(doc.getText(), original);
+        // Implement IShape on Circle (the class gets the interface first).
+        const edit = new vscode.WorkspaceEdit();
+        const circle = doc.getText().indexOf('public class Circle') + 'public class Circle'.length;
+        edit.insert(uri, doc.positionAt(circle), ' : IShape');
+        assert.ok(await vscode.workspace.applyEdit(edit));
+        const withInterface = doc.getText();
+        cursorAt('class Circle');
+        assert.equal(await vscode.commands.executeCommand('refyntra.generate', { kind: 'implement' }), true);
+        const implemented = doc.getText();
+        assert.ok(implemented.includes('    public double Area()\n    {\n        throw new NotImplementedException();\n    }') || implemented.includes('public double Area()'), implemented);
+        assert.ok(implemented.includes('public event EventHandler? Changed;'), implemented);
+        await vscode.commands.executeCommand('undo');
+        assert.equal(doc.getText(), withInterface);
+        await revertAll();
+      },
+    ],
   ];
 };

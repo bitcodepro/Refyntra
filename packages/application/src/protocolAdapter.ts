@@ -725,6 +725,34 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
     });
   }
 
+  /** Postfix templates (protocol 1.10); null for an older host. */
+  postfix(uri: string, position: Position, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').PostfixResult | null>> {
+    return this.semantic('code/postfix', token, async (s, snapshotId, traceId) => {
+      if (s.protocolMinor < 10) return null;
+      const r = await s.transport.request('code/postfix', { traceId, workspaceId: this.opts.workspaceId, snapshotId, uri, position }, token);
+      const items = Array.isArray(r?.items)
+        ? r.items.filter((i) => i && typeof i.name === 'string' && typeof i.snippet === 'string').map((i) => ({ name: i.name, detail: typeof i.detail === 'string' ? i.detail : '', snippet: i.snippet }))
+        : [];
+      const range = r?.expressionRange && r.expressionRange.start && r.expressionRange.end ? r.expressionRange : null;
+      return { items, expressionRange: range, typeName: typeof r?.typeName === 'string' ? r.typeName : null, snapshotId: r?.snapshotId ?? snapshotId };
+    });
+  }
+
+  /** Generate (protocol 1.10): list the kinds (no request) or compute one; null for an older host. */
+  generate(uri: string, position: Position, request: import('./adapters').GenerateRequest | undefined, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').GenerateResult | null>> {
+    return this.semantic('code/generate', token, async (s, snapshotId, traceId) => {
+      if (s.protocolMinor < 10) return null;
+      const r = await s.transport.request('code/generate', { traceId, workspaceId: this.opts.workspaceId, snapshotId, uri, position, ...(request ?? {}) }, token);
+      const kinds = Array.isArray(r?.kinds)
+        ? r.kinds
+            .filter((k) => k && typeof k.kind === 'string' && typeof k.title === 'string')
+            .map((k) => ({ ...k, members: Array.isArray(k.members) ? k.members.filter((m) => m && typeof m.id === 'string' && typeof m.name === 'string').map((m) => ({ ...m, detail: typeof m.detail === 'string' ? m.detail : '', picked: !!m.picked })) : [] }))
+        : [];
+      const edits = Array.isArray(r?.edits) ? r.edits.filter((e) => e && e.range && e.range.start && e.range.end && typeof e.newText === 'string') : null;
+      return { typeName: r?.typeName ?? null, kinds, edits, documentHash: r?.documentHash ?? null, reasonCode: r?.reasonCode ?? null, message: r?.message ?? null, snapshotId: r?.snapshotId ?? snapshotId };
+    });
+  }
+
   /** Run and Debug (protocol 1.8): the runnable-project model of the loaded workspace; null for an older host. */
   async runnableProjects(token?: CancellationToken): Promise<import('@refyntra/contracts').RunnableProjectsResult | null> {
     const session = await this.whenReady(token);

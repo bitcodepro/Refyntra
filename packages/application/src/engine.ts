@@ -168,6 +168,17 @@ export type EditActionsOutcome =
   | { kind: 'edits'; edits: { range: import('@refyntra/contracts').Range; newText: string }[]; documentHash: string | null }
   | Unavailable;
 
+/** Postfix templates (protocol 1.10): the templates for the expression before the dot, or why not. */
+export type PostfixOutcome =
+  | { kind: 'templates'; items: import('@refyntra/contracts').PostfixTemplate[]; expressionRange: import('@refyntra/contracts').Range | null; typeName: string | null }
+  | Unavailable;
+
+/** Generate (protocol 1.10): the kinds for the type at the position, or the edits of one kind, or why not. */
+export type GenerateOutcome =
+  | { kind: 'kinds'; typeName: string | null; kinds: import('@refyntra/contracts').GenerateKindInfo[] }
+  | { kind: 'edits'; edits: { range: import('@refyntra/contracts').Range; newText: string }[]; documentHash: string | null }
+  | Unavailable;
+
 export interface ApplyOptions {
   /** The user explicitly confirmed the limitations of a plan whose validation is `limited`. */
   acceptLimited?: boolean;
@@ -220,6 +231,10 @@ export interface EngineClient {
    * action, computed and compile-checked by the backend (or why it is refused).
    */
   editActions?(target: { uri: string; range: import('@refyntra/contracts').Range }, actionId?: string, token?: CancellationToken): Promise<EditActionsOutcome>;
+  /** Postfix templates (owned route, protocol 1.10) after the dot before the position. */
+  postfix?(target: DocumentTarget, token?: CancellationToken): Promise<PostfixOutcome>;
+  /** Generate (owned route, protocol 1.10): without `request` the kinds for the type at the position; with it the edits. */
+  generate?(target: DocumentTarget, request?: import('./adapters').GenerateRequest, token?: CancellationToken): Promise<GenerateOutcome>;
   discardPlan(planId: string): void;
   planState(planId: string): PlanState | undefined;
   /** Rule analysis (`analysis/run`) of every route that offers it; one outcome per route, never throws except on cancel. */
@@ -711,6 +726,40 @@ export class RefyntraEngine implements EngineClient {
       if (!v) return { kind: 'unavailable', reasonCode: 'ProtocolTooOld', message: 'The C# host is too old for these actions; update the extension.', recoveryActions: [] };
       if (!actionId) return { kind: 'actions', items: v.items };
       if (!v.edits) return { kind: 'unavailable', reasonCode: v.reasonCode ?? 'Unavailable', message: v.message ?? 'The action is unavailable here.', recoveryActions: [] };
+      return { kind: 'edits', edits: v.edits, documentHash: v.documentHash ?? null };
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      return this.toUnavailable(adapter, e);
+    }
+  }
+
+  async postfix(target: DocumentTarget, token?: CancellationToken): Promise<PostfixOutcome> {
+    const adapter = this.o.registry.routeFor(target.uri);
+    if (!adapter || adapter.descriptor.ownership !== 'owned-semantic' || typeof adapter.postfix !== 'function') {
+      return { kind: 'unavailable', reasonCode: 'ActionNotSupported', message: 'Postfix templates are not provided for this file by Refyntra.', recoveryActions: [] };
+    }
+    try {
+      const r = await this.withStaleRetry(() => adapter.postfix!(target.uri, target.position, token), token);
+      const v = r.value;
+      if (!v) return { kind: 'unavailable', reasonCode: 'ProtocolTooOld', message: 'The C# host is too old for postfix templates; update the extension.', recoveryActions: [] };
+      return { kind: 'templates', items: v.items, expressionRange: v.expressionRange ?? null, typeName: v.typeName ?? null };
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      return this.toUnavailable(adapter, e);
+    }
+  }
+
+  async generate(target: DocumentTarget, request?: import('./adapters').GenerateRequest, token?: CancellationToken): Promise<GenerateOutcome> {
+    const adapter = this.o.registry.routeFor(target.uri);
+    if (!adapter || adapter.descriptor.ownership !== 'owned-semantic' || typeof adapter.generate !== 'function') {
+      return { kind: 'unavailable', reasonCode: 'ActionNotSupported', message: 'Generate is not provided for this file by Refyntra.', recoveryActions: [] };
+    }
+    try {
+      const r = await this.withStaleRetry(() => adapter.generate!(target.uri, target.position, request, token), token);
+      const v = r.value;
+      if (!v) return { kind: 'unavailable', reasonCode: 'ProtocolTooOld', message: 'The C# host is too old for Generate; update the extension.', recoveryActions: [] };
+      if (!request) return { kind: 'kinds', typeName: v.typeName ?? null, kinds: v.kinds };
+      if (!v.edits) return { kind: 'unavailable', reasonCode: v.reasonCode ?? 'Unavailable', message: v.message ?? 'Nothing can be generated here.', recoveryActions: [] };
       return { kind: 'edits', edits: v.edits, documentHash: v.documentHash ?? null };
     } catch (e) {
       if (e instanceof CancelledError) throw e;

@@ -26,8 +26,10 @@ public sealed class Engine : IRpcHandler, IDisposable
     /// 1.7: code/hierarchy (call and type hierarchy).
     /// 1.8: workspace/runnableProjects (Run and Debug).
     /// 1.9: code/editActions (single-document Convert / Inline / Introduce edit actions, compile-checked by Roslyn).
+    /// 1.10: code/postfix (postfix templates) and code/generate (Generate: constructor, equality, ToString, properties,
+    /// missing / overriding / delegating members).
     /// </summary>
-    public const int ProtocolMinor = 9;
+    public const int ProtocolMinor = 10;
     /// <summary>How long workspace/snapshotBarrier waits for a missing document sequence (tests shorten it).</summary>
     public TimeSpan BarrierTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
@@ -111,6 +113,10 @@ public sealed class Engine : IRpcHandler, IDisposable
                 return await HierarchyAsync(Params<HierarchyParams>(p), ct).ConfigureAwait(false);
             case "code/editActions":
                 return await EditActionsAsync(Params<EditActionsParams>(p), ct).ConfigureAwait(false);
+            case "code/postfix":
+                return await PostfixAsync(Params<PostfixParams>(p), ct).ConfigureAwait(false);
+            case "code/generate":
+                return await GenerateAsync(Params<GenerateParams>(p), ct).ConfigureAwait(false);
             case "workspace/runnableProjects":
                 return RunnableProjects(Params<WorkspaceParams>(p));
             case "code/resolveFrame":
@@ -630,6 +636,47 @@ public sealed class Engine : IRpcHandler, IDisposable
             Range = new RangeDto { Start = new PositionDto { Line = e.Range.Start.Line, Character = e.Range.Start.Character }, End = new PositionDto { Line = e.Range.End.Line, Character = e.Range.End.Character } },
             NewText = e.NewText,
         }).ToList();
+        return result;
+    }
+
+    private static RangeDto ToRange(Microsoft.CodeAnalysis.Text.LinePositionSpan r) =>
+        new() { Start = new PositionDto { Line = r.Start.Line, Character = r.Start.Character }, End = new PositionDto { Line = r.End.Line, Character = r.End.Character } };
+
+    private async Task<PostfixResultDto> PostfixAsync(PostfixParams p, CancellationToken ct)
+    {
+        var snap = RequireSnapshot(p.WorkspaceId, p.SnapshotId);
+        var outcome = await PostfixPlanner.ListAsync(snap, PathOf(p.Uri), new(p.Position.Line, p.Position.Character), ct).ConfigureAwait(false);
+        return new PostfixResultDto
+        {
+            SnapshotId = snap.Id,
+            TypeName = outcome.TypeName,
+            ExpressionRange = outcome.ExpressionRange is { } r ? ToRange(r) : null,
+            Items = outcome.Items.Select(i => new PostfixTemplateDto { Name = i.Name, Detail = i.Detail, Snippet = i.Snippet }).ToList(),
+        };
+    }
+
+    private async Task<GenerateResultDto> GenerateAsync(GenerateParams p, CancellationToken ct)
+    {
+        var snap = RequireSnapshot(p.WorkspaceId, p.SnapshotId);
+        var path = PathOf(p.Uri);
+        var position = new Microsoft.CodeAnalysis.Text.LinePosition(p.Position.Line, p.Position.Character);
+        var result = new GenerateResultDto { SnapshotId = snap.Id };
+        if (string.IsNullOrEmpty(p.Kind))
+        {
+            var (typeName, kinds) = await GeneratePlanner.ListAsync(snap, path, position, ct).ConfigureAwait(false);
+            result.TypeName = typeName;
+            result.Kinds = kinds.Select(k => new GenerateKindDto
+            {
+                Kind = k.Kind, Title = k.Title,
+                Members = k.Members.Select(m => new GenerateMemberDto { Id = m.Id, Name = m.Name, Detail = m.Detail, Picked = m.Picked, Group = m.Group }).ToList(),
+            }).ToList();
+            return result;
+        }
+        var outcome = await GeneratePlanner.ComputeAsync(snap, path, position, p.Kind, new GenerateOptions(p.Members, p.Equatable, p.Operators), ct).ConfigureAwait(false);
+        result.ReasonCode = outcome.ReasonCode;
+        result.Message = outcome.Message;
+        result.DocumentHash = outcome.DocumentHash;
+        result.Edits = outcome.Edits?.Select(e => new TextEditDto { Range = ToRange(e.Range), NewText = e.NewText }).ToList();
         return result;
     }
 

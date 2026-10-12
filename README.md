@@ -696,9 +696,60 @@ only while the document is still the version the action was computed for.
 
 In the `resharper` preset **Ctrl+Alt+V** runs Introduce Variable on the selection and **Ctrl+Alt+N** Inline Variable at
 the cursor (C# editors only; VS Code has no default binding for these keys). Protocol 1.9 (`code/editActions`).
-Not yet available: postfix templates, the Generate menu (Alt+Insert), Inline Method/Field/Parameter, Introduce
-Field/Constant/Parameter, the remaining Convert actions (switch, LINQ, primary constructor, record, full property,
+Not yet available: Inline Method/Field/Parameter, Introduce Field/Constant/Parameter, the remaining Convert actions (switch, LINQ, primary constructor, record, full property,
 object initializer, using declaration, async) and Fix in scope.
+
+### Postfix templates (C#)
+
+Type a dot after an expression and the completion list ends with Rider's postfix templates that fit the expression's
+type (the C# host decides with Roslyn); choosing one replaces the expression with the snippet and puts the cursor on
+the first name (Tab moves on). Setting `refyntra.postfix.enabled` (default on).
+
+| Template | Result | Offered for |
+|---|---|---|
+| `.if` / `.while` | `if (expr) { }` / `while (expr) { }` | `bool`, as a statement |
+| `.not` | `!expr` | `bool` |
+| `.ifn` / `.notnull` | `if (expr is null) { }` / `if (expr is not null) { }` | reference types, `T?` value types, unconstrained type parameters |
+| `.var` | `var name = expr;` | any value, as a statement |
+| `.foreach` | `foreach (var item in expr) { }` | arrays, strings, `IEnumerable`, types with `GetEnumerator()` |
+| `.for` / `.forr` | `for (var i = 0; i < expr.Count; i++)` / reversed | arrays and strings (`Length`), indexable lists (`Count`) |
+| `.await` | `await expr` | awaitable values (`GetAwaiter()`) |
+| `.return` / `.yield` | `return expr;` / `yield return expr;` | in a member that returns a value / an enumerable |
+| `.throw` | `throw expr;` | exceptions |
+| `.new` | `new Type()` | type names that can be created |
+| `.using` / `.lock` / `.switch` | `using (var x = expr) { }` / `lock (expr) { }` / `switch (expr) { case … }` | disposables / reference types / any value |
+| `.par` / `.cast` / `.arg` / `.nameof` | `(expr)` / `((T)expr)` / `Method(expr)` / `nameof(expr)` | any value (`nameof`: symbols) |
+
+Statement templates appear only when the expression is a whole statement; blocks follow the document's
+`.editorconfig` brace and indentation style; names come from the expression (`orders.foreach` → `order`) or its type
+and never clash with names in the member. Answers are cached per document version and come from the current
+snapshot (protocol 1.10, `code/postfix`). Limits: the expression must be on the cursor's line; an expression typed
+in an unfinished statement that does not parse (e.g. an open `(`) gets no templates.
+
+### Generate (Alt+Insert, C#)
+
+**Refyntra: Generate…** (Alt+Insert in the `visualStudio` and `resharper` presets, Cmd+N on macOS; C# editors only)
+lists what applies to the class, struct or record at the cursor, then the members to use (multi-select, sensible
+preselection) and, for equality, the options. The C# host writes the code with Roslyn: semantic types, missing
+`using` directives added, members of every part of a partial type, the document's `.editorconfig` formatting, and a
+**refusal when the file would get a new compiler error** (for example a constructor with the same signature). The
+result is one editor change (one Undo), applied only to the document version it was computed for.
+
+| Kind | Generates |
+|---|---|
+| Constructor | `public T(...)` assigning the chosen fields / auto-properties (readonly members without initializer preselected); `protected` in abstract classes |
+| Properties from fields | `public T Name => _name;` (readonly fields) or `{ get => _name; set => _name = value; }` |
+| Missing members | stubs (`throw new NotImplementedException()`) for unimplemented interface members and abstract base members |
+| Overriding members | `override` of virtual / abstract base members (`base.M(...)` calls) |
+| Delegating members | members of a field's type that forward to it (pick the field, then its members) |
+| Equality members | `Equals(object)`, `GetHashCode()` with `HashCode.Combine`; options `IEquatable<T>` and `==` / `!=` |
+| Formatting members | `ToString()` returning `$"{nameof(A)}: {A}, …"` |
+
+**Generate Constructor** (`refyntra.ctor.generate`, the lightbulb on a class) uses the same Roslyn generation when the
+host is available and falls back to the text-based helper otherwise. Limits: one document (no new files); records get
+no equality members (they have value equality) and positional records / primary constructors no extra constructor;
+static abstract interface members and ref returns are not generated; a constructor does not pass arguments to a base
+constructor that needs them (the compile check refuses it).
 
 ## Commands
 
@@ -714,6 +765,7 @@ object initializer, using declaration, async) and Fix in scope.
 | `refyntra.safeDelete` | Delete the symbol at the cursor only when nothing uses it (preview, then apply, Undo) |
 | `refyntra.extractMethod` | Extract the selected statements or expression into a new method (name prompt, preview, then apply) |
 | `refyntra.changeSignature` | Add, remove, reorder or rename parameters and update every call (editor, preview, then apply) |
+| `refyntra.generate` | Generate… (Alt+Insert): constructor, equality, ToString, properties, missing / overriding / delegating members (C#) |
 | `refyntra.showHealth` | The Health page: is Refyntra working, what it means, the fix, projects by state |
 | `refyntra.showHealthText` | The same report as a Markdown document, technical details included |
 | `refyntra.restartBackend` | Restart the .NET host |

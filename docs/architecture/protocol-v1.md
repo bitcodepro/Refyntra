@@ -184,6 +184,43 @@ a test class. It is not part of `initialize.capabilities`.
   (`NotApplicable`, `CompilationErrors` — the document would get a compiler error it did not have —, `SideEffects`,
   `EvaluationOrder`, `VariableWritten`, `ReadOnlyFile`, …). Never writes files; the client applies the edits as one
   undo step only while the document version is the one the request was made for. Sent only to hosts with minor ≥ 9.
+- 1.10 (additive, postfix templates and Generate):
+  - request `code/postfix` `{traceId, workspaceId, snapshotId, uri, position}` → `{items: [{name, detail, snippet}],
+    expressionRange?, typeName?, snapshotId}`. `position` is right after a dot or after the part of a template name
+    typed after it (`list.fo`). The host replaces the dot and the typed name with `;` in a copy of the document (so
+    `list.` followed by more code parses as the statement `list;`), takes the largest expression that ends at the dot
+    (the right side of an assignment) and lists the templates its type allows: `if`/`while` (bool statement), `not`
+    (bool), `ifn`/`notnull` (reference, nullable value or unconstrained type parameter), `var`, `foreach` (arrays,
+    strings, `IEnumerable`, `GetEnumerator()`), `for`/`forr` (arrays, strings, an `int` indexer with `Count`/`Length`),
+    `await` (a `GetAwaiter()`), `return` (a member that returns a value, not an iterator), `throw` (exceptions),
+    `new` and `nameof` (type names; `new` only for creatable classes and structs), `par`, `cast`, `arg`, `using`
+    (`IDisposable`, `await using` for `IAsyncDisposable` only), `lock` (reference types), `switch`, `nameof` (locals,
+    parameters, members), `yield` (methods returning an enumerable or enumerator). Statement templates are offered
+    only when the expression is a whole expression statement; they are formatted with the document's options in place
+    of that statement and returned with the statement's own indentation removed (the editor re-indents snippet lines).
+    `snippet` is VS Code snippet syntax (`$`, `\` escaped; `${1:name}` tab stops with mirrors, `$0` the final cursor)
+    that replaces `expressionRange.start` … `position`; local names come from the expression (member or method name
+    without `Get`, singular for `foreach`) or its type and are unique in the member. Nothing in comments, strings,
+    namespaces, after `?.`/`..`, a space before the dot, number literals or `void` calls. No compilation; never writes
+    files.
+  - request `code/generate` `{traceId, workspaceId, snapshotId, uri, position, kind?, members?, equatable?,
+    operators?}` → `{typeName?, kinds: [{kind, title, members: [{id, name, detail, picked, group?}]}], edits?,
+    documentHash?, reasonCode?, message?, snapshotId}`. Without `kind` it lists what applies to the class, struct or
+    record at `position` (interfaces and static classes: nothing): `constructor` (instance fields and auto-properties
+    of every part; no primary constructor), `equality` (not records), `toString`, `properties` (fields without a
+    property of the PascalCase name), `implement` (interface members without an implementation and, for a
+    non-abstract type, abstract members of the base types), `overrides` (virtual / abstract / override members of the
+    base types not overridden yet, most derived only) and `delegating` (public members of the types of the instance
+    fields and properties, `group` = the field). Member ids are member names, documentation comment ids, or
+    `field|id` for delegating. With `kind` the host writes the members (types fully qualified, then the needed usings
+    are added and the names simplified), inserts them into the part at the cursor (constructor: after the fields,
+    constructors and properties; otherwise at the end), formats them with the document options and returns the
+    minimal edits with the SHA-256 of the text, or a refusal: `NoType`, `NotApplicable`, `UnknownMember`, `NoMembers`,
+    `CompilationErrors` (a compiler error the document did not have, e.g. a constructor with the same signature),
+    `ReadOnlyFile`. Equality: `equatable` adds `IEquatable<T>` and `Equals(T)`, `operators` adds `==`/`!=`;
+    `GetHashCode` uses `HashCode.Combine` (more than 8 members: `HashCode.Add`). `members` absent = the preselected
+    ones. Never writes files; the client applies the edits as one undo step only to the same document version.
+    Both are sent only to hosts with minor ≥ 10.
 - Additive (EF Core): relation kinds `efcore.*` and group `data` (above); `SearchFilters.entity?: boolean` ("entity:")
   and `SearchFilters.table?: string` ("table:NAME") return EF Core entities as symbol items. Older hosts ignore the
   filters (they return a normal symbol search); older clients render the kinds and the group generically. The
@@ -243,6 +280,8 @@ issuing semantic requests.
 | `code/hierarchy` | req | `HierarchyParams` `{…, symbolId, direction}` | `HierarchyResult` (since 1.7; call and type hierarchy) |
 | `workspace/runnableProjects` | req | `WorkspaceParams` | `RunnableProjectsResult` (since 1.8; Run and Debug, no barrier) |
 | `code/editActions` | req | `EditActionsParams` `{…, uri, range, actionId?}` | `EditActionsResult` (since 1.9; Convert / Inline / Introduce) |
+| `code/postfix` | req | `PostfixParams` `{…, uri, position}` | `PostfixResult` (since 1.10; postfix templates) |
+| `code/generate` | req | `GenerateParams` `{…, uri, position, kind?, members?, equatable?, operators?}` | `GenerateResult` (since 1.10; Generate) |
 | `workspace/didDeleteFiles` | notif | `{workspaceId, sequence, workspaceRevision, files: [{uri}]}` | – (since 1.6; consumes a document sequence) |
 | `analysis/run` | req | `AnalysisRunParams` `{traceId, workspaceId, snapshotId, uri?}` | `AnalysisRunResult` (since 1.1, additive; see "Analysis") |
 | `$/cancelRequest` | notif | `{id}` | – |
