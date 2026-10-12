@@ -141,6 +141,8 @@ exports.cases = ({ api, csharp, waitFor }) => {
       const r = await a.engine.prepareRename({ uri: doc.uri.toString(), position: { line: pos.line, character: pos.character } }, 'CreateOrder');
       assert.equal(r.kind, 'preview', JSON.stringify(r));
       assert.ok(r.plan.writeSet.every((c) => c.kind === 'text'));
+      // Minimal edits, one per occurrence (the preview lists them), never one whole-document replacement.
+      assert.ok(r.plan.writeSet.every((c) => c.edits.every((e) => e.range.start.line === e.range.end.line && !e.newText.includes('\n'))), JSON.stringify(r.plan.writeSet.map((c) => c.edits.length)));
       const out = await throughPreview(a.engine.applyRename(r.planId, undefined, { confirmation: { label: 'Refyntra: rename' } }), 'refactorPreview.apply');
       assert.equal(out.status, 'applied', out.message);
       assert.ok(out.files.every((f) => f.status === 'confirmed'));

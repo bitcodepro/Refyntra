@@ -1,10 +1,27 @@
 import type { HealthSummary } from '@refyntra/domain';
 import { projectCounts } from '@refyntra/domain';
-import { type HealthAction, type HealthPageModel, ICON_GLYPH } from './healthPageModel';
+import { type HealthAction, type HealthPageModel, type StatusIcon } from './healthPageModel';
 import { describeReason } from './terminology';
 
 // HTML of the Health webview (pure). Every value is escaped; there is no inline script or style attribute handler:
 // buttons carry only data-key (looked up in the extension's own model), and the page script (nonce) posts that key.
+
+/**
+ * Status icons of the page as inline SVG (16x16, filled with the theme color of the state). Emoji glyphs depend on an
+ * emoji font: on a Linux desktop without one they render as empty boxes. The text export keeps the glyphs.
+ */
+export const ICON_SVG: Record<StatusIcon, string> = {
+  ok: '<svg viewBox="0 0 16 16" width="16" height="16"><path d="M8 1a7 7 0 1 1 0 14A7 7 0 0 1 8 1zm3.1 4.3L7 9.4 4.9 7.3l-.9.9 3 3 5-5z"/></svg>',
+  warning: '<svg viewBox="0 0 16 16" width="16" height="16"><path d="M8 1.5 15.5 14.5h-15zM7.3 6v4.2h1.4V6zm0 5.3v1.4h1.4v-1.4z"/></svg>',
+  error: '<svg viewBox="0 0 16 16" width="16" height="16"><path d="M8 1a7 7 0 1 1 0 14A7 7 0 0 1 8 1zM5.5 4.6l-.9.9L7.1 8l-2.5 2.5.9.9L8 8.9l2.5 2.5.9-.9L8.9 8l2.5-2.5-.9-.9L8 7.1z"/></svg>',
+  locked: '<svg viewBox="0 0 16 16" width="16" height="16"><path d="M8 1.5a3.5 3.5 0 0 1 3.5 3.5V7H13v7.5H3V7h1.5V5A3.5 3.5 0 0 1 8 1.5zM8 3a2 2 0 0 0-2 2v2h4V5a2 2 0 0 0-2-2z"/></svg>',
+  loading: '<svg viewBox="0 0 16 16" width="16" height="16"><path d="M3.5 1.5h9V3h-1v2.2L9.2 8l2.3 2.8V13h1v1.5h-9V13h1v-2.2L6.8 8 4.5 5.2V3h-1zM6 3v1.7L8 7.2l2-2.5V3z"/></svg>',
+  info: '<svg viewBox="0 0 16 16" width="16" height="16"><path d="M8 1a7 7 0 1 1 0 14A7 7 0 0 1 8 1zm-.7 6v5h1.4V7zm0-2.8v1.4h1.4V4.2z"/></svg>',
+};
+
+function iconSpan(icon: StatusIcon): string {
+  return `<span class="icon ${icon}" aria-hidden="true">${ICON_SVG[icon]}</span>`;
+}
 
 export function escapeHtml(s: string): string {
   return s.replace(/[&<>"'`]/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -36,11 +53,11 @@ export function renderHealthBody(m: HealthPageModel, h: HealthSummary, extra: { 
   const out: string[] = ['<h1 id="page-title" tabindex="-1">Refyntra Health</h1>'];
   if (m.restoreBanner) {
     const b = m.restoreBanner;
-    out.push(`<div class="banner ${b.icon}"><span class="icon" aria-hidden="true">${ICON_GLYPH[b.icon]}</span> <span>${e(b.text)}</span>${b.action ? ` ${button(b.action, false)}` : ''}</div>`);
+    out.push(`<div class="banner ${b.icon}">${iconSpan(b.icon)} <span>${e(b.text)}</span>${b.action ? ` ${button(b.action, false)}` : ''}</div>`);
   }
   for (const s of m.sections) {
     out.push(`<section class="lang ${s.icon}" aria-labelledby="h-${e(s.adapterId)}">`);
-    out.push(`<h2 id="h-${e(s.adapterId)}" class="${s.icon}"><span class="icon" aria-hidden="true">${ICON_GLYPH[s.icon]}</span> ${e(s.headline)}</h2>`);
+    out.push(`<h2 id="h-${e(s.adapterId)}" class="${s.icon}">${iconSpan(s.icon)} ${e(s.headline)}</h2>`);
     if (s.meaning) out.push(`<p class="meaning">${e(s.meaning)}</p>`);
     if (s.primary || s.more.length) out.push(`<div class="actions">${s.primary ? button(s.primary, true) : ''}${s.more.map((a) => button(a, false)).join('')}</div>`);
     if (s.groups.length) {
@@ -116,6 +133,11 @@ h3{font-size:1.05em;margin:14px 0 4px}
 h4{margin:12px 0 4px}
 .sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .icon{display:inline-block;min-width:1.4em}
+.icon svg{fill:currentColor;vertical-align:-2px}
+.icon.ok{color:var(--vscode-testing-iconPassed,var(--vscode-foreground))}
+.icon.warning{color:var(--vscode-editorWarning-foreground,var(--vscode-foreground))}
+.icon.error{color:var(--vscode-errorForeground)}
+.icon.info,.icon.locked,.icon.loading{color:var(--vscode-descriptionForeground)}
 .meaning{margin:4px 0 10px}
 .actions{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 12px}
 button{font-family:inherit;font-size:inherit;min-height:24px;padding:5px 12px;border-radius:2px;cursor:pointer;border:1px solid var(--vscode-button-border,transparent)}

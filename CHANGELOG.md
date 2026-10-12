@@ -4,6 +4,26 @@ All notable changes are listed here. The project is alpha; nothing has been rele
 
 ## Unreleased
 
+### Added (visual tests)
+
+- `pnpm test:visual` (`scripts/test/linux-visual.sh`): screenshot tests of Refyntra's UI in VS Code 1.90.2, headless in
+  Docker only (Xvfb 1600x1000x24), in Default Dark Modern and Default Light Modern: CodeLens, Ctrl+. refactorings,
+  the editor context submenu, Refactor Preview, Change Signature, Related, Stack Trace, Task Context, the status bar
+  menu, Health, the MediatR hover and Find. Compared with `tests/visual/baselines` (pixelmatch + pngjs, root
+  devDependencies, not in the VSIX), masks in `tests/visual/masks.json`, an HTML report in
+  `test-results/visual/report.html`; `--update` regenerates the baselines. The e2e image adds imagemagick, xdotool and
+  fonts-dejavu-core.
+- VNC watch mode for the Docker VS Code runs: `REFYNTRA_VNC=1` or `--vnc` on `linux-visual.sh` and `linux-e2e.sh`
+  (fixed Xvfb `:99`, view-only x11vnc on 127.0.0.1:5900, noVNC on http://localhost:6080/vnc.html,
+  `REFYNTRA_VNC_PAUSE_MS` to slow down); x11vnc, novnc, websockify and x11-utils in the test image only.
+
+### Fixed (found by the visual tests)
+
+- Rename plans carry minimal edits (one per occurrence) instead of one whole-document replacement per file, so the
+  Refactor Preview lists each renamed occurrence instead of striking through the whole file.
+- The Health page draws its status icons as inline SVG in the theme colors; the emoji glyphs rendered as empty boxes on
+  Linux desktops without an emoji font.
+
 ### Added (native VS Code integration, protocol 1.7)
 
 - **Code actions** for C# (lightbulb, Ctrl+., Refactor…, Source Action…): `refactor.extract.method`,

@@ -11,3 +11,4 @@ TestResults/
 tests/fixtures/**/bin/
 tests/fixtures/**/obj/
 .cache/
+test-results/

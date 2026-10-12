@@ -6,7 +6,9 @@
 # The repo is copied to /work inside the container (no node_modules/bin/obj/dist/.vscode-test), so the checkout is untouched.
 # Docker volumes keep the downloaded VS Code (refyntra-vscode-test) and the NuGet cache (refyntra-nuget) between runs.
 # REFYNTRA_TEST_VSCODE_VERSION (default 1.90.2) is passed through.
+# REFYNTRA_VNC=1 (or --vnc): watch the run live, see scripts/test/lib/display.sh and the README.
 set -uo pipefail
+. "$(dirname "${BASH_SOURCE[0]}")/lib/display.sh"
 
 if [ "${1:-}" != "--inside" ]; then
   repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -19,11 +21,18 @@ FROM refyntra-linux-smoke
 RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
       xvfb xauth dbus dbus-x11 procps libglib2.0-bin \
       libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libgtk-3-0t64 libgbm1 libasound2t64 libxkbfile1 libsecret-1-0 \
-      libxss1 libdrm2 libxcomposite1 libxdamage1 libxrandr2 libxshmfence1 libcups2t64 >/dev/null \
+      libxss1 libdrm2 libxcomposite1 libxdamage1 libxrandr2 libxshmfence1 libcups2t64 \
+      imagemagick xdotool fonts-dejavu-core x11-utils x11vnc novnc websockify >/dev/null \
  && rm -rf /var/lib/apt/lists/*
 DOCKERFILE
+  # imagemagick (import -window root), xdotool (keys, window size) and one fixed font family serve linux-visual.sh;
+  # x11-utils, x11vnc, novnc and websockify the VNC watch mode (REFYNTRA_VNC=1 or --vnc, scripts/test/lib/display.sh).
+  [ "${1:-}" = "--build-image-only" ] && exit 0 # used by linux-visual.sh, which runs on this image
+  [ "${1:-}" = "--vnc" ] && export REFYNTRA_VNC=1
+  mapfile -t vnc_args < <(vnc_docker_args)
+  vnc_note
   # --init: a real init reaps orphans (see linux.sh).
-  exec docker run --rm --init -v "$repo:/src:ro" -v refyntra-vscode-test:/cache/vscode-test -v refyntra-nuget:/root/.nuget/packages \
+  exec docker run --rm --init ${vnc_args[@]+"${vnc_args[@]}"} -v "$repo:/src:ro" -v refyntra-vscode-test:/cache/vscode-test -v refyntra-nuget:/root/.nuget/packages \
     -e DOTNET_CLI_TELEMETRY_OPTOUT=1 -e DOTNET_NOLOGO=1 -e REFYNTRA_TEST_VSCODE_VERSION="${REFYNTRA_TEST_VSCODE_VERSION:-1.90.2}" \
     refyntra-linux-e2e bash /src/scripts/test/linux-e2e.sh --inside
 fi
@@ -57,11 +66,12 @@ run "pnpm test:unit"                 pnpm test:unit
 run "pnpm test:architecture"         pnpm test:architecture
 run "dotnet build (Release)"         dotnet build src/dotnet/Refyntra.sln -c Release
 run "dotnet test (Release)"          dotnet test src/dotnet/Refyntra.sln -c Release --no-build --blame-hang-timeout 600s --blame-hang-dump-type none
-run "xvfb-run pnpm test:integration" xvfb-run -a pnpm test:integration
-run "xvfb-run pnpm test:e2e"         xvfb-run -a pnpm test:e2e
+display_start
+run "xvfb-run pnpm test:integration" xrun -- pnpm test:integration
+run "xvfb-run pnpm test:e2e"         xrun -- pnpm test:e2e
 run "no host/BuildHost left (e2e)"   orphans
 run "pnpm package:vsix"              pnpm package:vsix
-run "xvfb-run pnpm test:install"     xvfb-run -a pnpm test:install
+run "xvfb-run pnpm test:install"     xrun -- pnpm test:install
 run "no host/BuildHost left (end)"   orphans
 
 step "summary"

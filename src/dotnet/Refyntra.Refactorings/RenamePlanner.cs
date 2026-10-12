@@ -197,7 +197,12 @@ public static class RenamePlanner
             var oldText = await oldDoc.GetTextAsync(ct).ConfigureAwait(false);
             if (TargetGuard(session, oldDoc.FilePath, oldText) is { } targetGuard) return targetGuard;
             var newText = await newDoc.GetTextAsync(ct).ConfigureAwait(false);
-            var edits = newText.GetTextChanges(oldText).OrderBy(c => c.Span.Start)
+            // Minimal edits (one per renamed occurrence, as the Refactor Preview lists them); SourceText.GetTextChanges
+            // gives one change over the whole document for Renamer output. It stays the fallback when they do not add up.
+            var minimalEdits = (await newDoc.GetTextChangesAsync(oldDoc, ct).ConfigureAwait(false)).OrderBy(c => c.Span.Start).ToList();
+            if (oldText.WithChanges(minimalEdits).ToString() != newText.ToString())
+                minimalEdits = newText.GetTextChanges(oldText).OrderBy(c => c.Span.Start).ToList();
+            var edits = minimalEdits
                 .Select(c => new PlannedEdit(oldText.Lines.GetLinePositionSpan(c.Span), c.NewText ?? "")).ToList();
             for (var i = 1; i < edits.Count; i++)
                 if (edits[i].Range.Start < edits[i - 1].Range.End)

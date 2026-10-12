@@ -49,7 +49,7 @@ vi.mock('vscode', () => {
 });
 
 import { buildHealthPage, ICON_GLYPH, type RestoreRun } from '../../src/healthPageModel';
-import { healthAnnouncement, renderHealthBody, renderHealthHtml, HEALTH_CSS } from '../../src/healthPageHtml';
+import { healthAnnouncement, renderHealthBody, renderHealthHtml, HEALTH_CSS, ICON_SVG } from '../../src/healthPageHtml';
 import { renderHealth } from '../../src/healthText';
 import { MAIN_MENU } from '../../src/gettingStarted';
 import { RelatedViewProvider } from '../../src/related';
@@ -179,7 +179,7 @@ export function axeLikeViolations(html: string): string[] {
   const withoutHidden = html.replace(/<span[^>]*aria-hidden="true"[^>]*>.*?<\/span>/g, '');
   const body = withoutHidden.slice(withoutHidden.indexOf('<body'));
   for (const g of Object.values(ICON_GLYPH)) if (body.includes(g)) v.push(`glyph ${g} outside aria-hidden`);
-  for (const m of html.matchAll(/<span class="icon" aria-hidden="true">[^<]*<\/span>(.{0,120})/g)) if (!plain(m[1]!.replace(/<\/?(?:button|div|h2)[^>]*>/g, ' ')).length) v.push('icon without adjacent text');
+  for (const m of html.matchAll(/<span class="icon[^"]*" aria-hidden="true">(?:<svg[^]*?<\/svg>|[^<]*)<\/span>(.{0,120})/g)) if (!plain(m[1]!.replace(/<\/?(?:button|div|h2)[^>]*>/g, ' ')).length) v.push('icon without adjacent text');
   // CSP: no inline script/style without nonce, no unsafe-inline
   if (/unsafe-inline|unsafe-eval/.test(html)) v.push('unsafe CSP');
   if (/<script(?![^>]*nonce=)/.test(html) || /<style(?![^>]*nonce=)/.test(html)) v.push('script/style without nonce');
@@ -213,7 +213,7 @@ describe('Health page HTML: axe-like checks in every state', () => {
       const { m, html } = pageHtml(health, restore);
       for (const s of m.sections) {
         expect(s.headline.trim().length).toBeGreaterThan(3);
-        expect(html).toContain(`<span class="icon" aria-hidden="true">${ICON_GLYPH[s.icon]}</span> ${s.headline.replace(/&/g, '&amp;')}`.replace(/'/g, '&#39;'));
+        expect(html).toContain(`<span class="icon ${s.icon}" aria-hidden="true">${ICON_SVG[s.icon]}</span> ${s.headline.replace(/&/g, '&amp;')}`.replace(/'/g, '&#39;'));
       }
     }
   });

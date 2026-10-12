@@ -1,5 +1,6 @@
 // Runs the extension inside a real VS Code Extension Host (@vscode/test-electron).
 //   node test/runTest.mjs          integration scenarios (no .NET host needed)
+//   node test/runTest.mjs --visual screenshots (Docker/Xvfb only, scripts/test/linux-visual.sh): REFYNTRA_HOST_PATH, REFYNTRA_VISUAL_OUT=<dir>
 //   node test/runTest.mjs --e2e    against the real host: REFYNTRA_HOST_PATH=<Refyntra.Host.dll> [REFYNTRA_E2E_WORKSPACE=<folder>]
 // VS Code version: REFYNTRA_TEST_VSCODE_VERSION (default: the minimum supported engine, 1.90.2).
 import { runTests } from '@vscode/test-electron';
@@ -17,7 +18,8 @@ const repo = path.resolve(extensionDevelopmentPath, '..', '..');
 const cachePath = path.join(repo, '.vscode-test');
 const version = process.env.REFYNTRA_TEST_VSCODE_VERSION || '1.90.2';
 const extensionTestsPath = path.join(here, 'suite', 'index.cjs');
-const e2e = process.argv.includes('--e2e');
+const visual = process.argv.includes('--visual');
+const e2e = process.argv.includes('--e2e') || visual;
 
 function userDataDir(name, settings) {
   const dir = path.join(cachePath, 'user-data', name);
@@ -128,7 +130,58 @@ function fixtureCopy(name, fixture, sln) {
   return { workspace: dest, cleanup: () => fs.rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }) };
 }
 
-const scenarios = e2e
+/**
+ * Visual scenarios: fixed theme, font, zoom and layout; no animations, cursor blink, minimap, tips, welcome page or
+ * telemetry. One scenario per theme; screenshots go to $REFYNTRA_VISUAL_OUT/<theme>/.
+ */
+const visualSettings = {
+  'window.titleBarStyle': 'custom',
+  'window.zoomLevel': 0,
+  'window.commandCenter': false,
+  'window.restoreWindows': 'none',
+  'workbench.reduceMotion': 'on',
+  'workbench.tips.enabled': false,
+  'workbench.enableExperiments': false,
+  'workbench.layoutControl.enabled': false,
+  'workbench.editor.enablePreview': false,
+  'workbench.list.smoothScrolling': false,
+  'editor.fontFamily': "'DejaVu Sans Mono', monospace",
+  'editor.fontSize': 14,
+  'editor.lineHeight': 20,
+  'editor.fontLigatures': false,
+  'editor.cursorBlinking': 'solid',
+  'editor.cursorSmoothCaretAnimation': 'off',
+  'editor.smoothScrolling': false,
+  'editor.minimap.enabled': false,
+  'editor.occurrencesHighlight': 'off',
+  'editor.selectionHighlight': false,
+  'editor.matchBrackets': 'never',
+  'editor.hover.delay': 300,
+  'editor.hover.sticky': true,
+  'editor.lightbulb.enabled': 'on',
+  'editor.accessibilitySupport': 'off',
+  'editor.codeLens': true,
+  'extensions.ignoreRecommendations': true,
+  'git.enabled': false,
+  'scm.diffDecorations': 'none',
+  'files.autoSave': 'off',
+  'refyntra.rename.apply': true,
+  'refyntra.preview.style': 'native',
+};
+const visualThemes = { dark: 'Default Dark Modern', light: 'Default Light Modern' };
+
+const scenarios = visual
+  ? Object.entries(visualThemes).map(([theme, colorTheme]) => ({
+      name: `visual-${theme}`,
+      copy: `visual-${theme}`,
+      trusted: true,
+      settings: { ...visualSettings, 'workbench.colorTheme': colorTheme },
+      // Software rendering: without it the GPU process fails under Xvfb and webviews do not load ("Could not register
+      // service worker"); it also keeps the pixels the same from run to run.
+      launchArgs: ['--disable-gpu'],
+      env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '', REFYNTRA_VISUAL_OUT: path.join(process.env.REFYNTRA_VISUAL_OUT || path.join(repo, 'test-results', 'visual', 'actual'), theme) },
+    }))
+  : e2e
   ? [
       {
         name: 'e2e',
@@ -372,6 +425,7 @@ for (const s of scenarios.filter((x) => only.length === 0 || only.includes(x.nam
   if (s.builtinExtensions) fs.rmSync(extensionsDir, { recursive: true, force: true });
   const launchArgs = [s.workspace, ...(s.builtinExtensions ? [] : ['--disable-extensions']), `--extensions-dir=${extensionsDir}`, '--skip-welcome', '--skip-release-notes', `--user-data-dir=${userDataDir(s.name, { ...baseSettings, ...(s.settings ?? {}) })}`];
   if (s.trusted) launchArgs.push('--disable-workspace-trust');
+  if (s.launchArgs) launchArgs.push(...s.launchArgs);
   try {
     await runTests({
       version,

@@ -1541,6 +1541,9 @@ scenarios['web-frameworks-restricted'] = require('./webFrameworks.cjs').restrict
 scenarios['task-context'] = require('./taskContext.cjs').cases({ api, csharp, waitFor });
 // Native VS Code UI: code actions, CodeLens, Call/Type Hierarchy, hover, Refactor Preview, Change Signature dialog (test/suite/nativeUi.cjs).
 scenarios['native-ui'] = require('./nativeUi.cjs').cases({ api, csharp, waitFor });
+// Visual (screenshot) scenarios, Docker/Xvfb only (test/suite/visual.cjs, scripts/test/linux-visual.sh).
+scenarios['visual-dark'] = require('./visual.cjs').cases({ api, csharp, waitFor });
+scenarios['visual-light'] = require('./visual.cjs').cases({ api, csharp, waitFor });
 
 exports.run =async function run() {
   const name = process.env.REFYNTRA_TEST_SCENARIO;
@@ -1555,6 +1558,9 @@ exports.run =async function run() {
       console.log(`  ✗ ${title}\n    ${e && e.stack ? e.stack : e}`);
       failures.push(title);
     }
+    // VNC watch mode (scripts/test/lib/display.sh): a pause after each case so a person can follow.
+    const pause = Number(process.env.REFYNTRA_VNC_PAUSE_MS || 0);
+    if (pause > 0) await new Promise((r) => setTimeout(r, pause));
   }
   if (failures.length) throw new Error(`${failures.length} test(s) failed in scenario ${name}`);
 };

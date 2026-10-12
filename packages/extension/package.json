@@ -1043,6 +1043,7 @@
     "build": "node scripts/build.mjs",
     "test:integration": "node scripts/build.mjs && node test/runTest.mjs",
     "test:e2e": "node scripts/build.mjs && node test/runTest.mjs --e2e",
+    "test:visual": "node scripts/build.mjs && node test/runTest.mjs --visual",
     "package": "node scripts/package.mjs"
   },
   "devDependencies": {

@@ -650,6 +650,13 @@ command and the same pipeline (plan → preview → revalidate → one EditAppli
 
 More in [docs/support/troubleshooting.md](docs/support/troubleshooting.md).
 
+## Testing
+
+- `pnpm test:unit`, `pnpm test:architecture`, `pnpm test:host`: unit, layering and .NET host tests.
+- `pnpm test:integration`, `pnpm test:e2e`: the extension inside a real VS Code; on Linux in Docker with `bash scripts/test/linux-e2e.sh` (see [docs/support/linux-smoke.md](docs/support/linux-smoke.md)).
+- `pnpm test:visual`: screenshot tests of Refyntra's UI in VS Code 1.90.2, **only headless in Docker** (Xvfb 1600x1000, `scripts/test/linux-visual.sh`; it never opens a window on your desktop). Both Default Dark Modern and Default Light Modern, fixed DejaVu fonts and zoom, no animations, cursor blink, tips or welcome page, on a temp copy of `tests/fixtures/Shop`. Scenarios: CodeLens, the Ctrl+. refactor menu on a selection, the editor context menu's Refyntra submenu, the Refactor Preview of a rename, the Change Signature dialog, the Related, Stack Trace and Task Context views, the status bar menu, the Health page, the MediatR hover and the Find QuickPick. Screenshots are compared with `tests/visual/baselines/<theme>/<scenario>.png` (pixelmatch, threshold 0.1, at most 0.05 % differing pixels; masked regions in `tests/visual/masks.json`). Results: `test-results/visual/report.html` (baseline, actual and diff side by side) plus `actual/` and `diff/` PNGs. `pnpm test:visual --update` regenerates the baselines; review the new PNGs before committing them.
+- Watch the Docker runs live: `REFYNTRA_VNC=1 pnpm test:visual` (or `pnpm test:visual --vnc`, `bash scripts/test/linux-e2e.sh --vnc`) runs a fixed Xvfb display `:99` with x11vnc and noVNC in the container. Open http://localhost:6080/vnc.html (or a VNC viewer on `localhost:5900`) once the build step is done. The ports listen on 127.0.0.1 only and the session is view-only without a password. `REFYNTRA_VNC_PAUSE_MS=1500` pauses after each test case so you can follow. Without the variable nothing changes (xvfb-run, no ports).
+
 ## Status and feedback
 
 Alpha: commands, settings and output may change. Issues and contributions are welcome, see [CONTRIBUTING.md](CONTRIBUTING.md). Changes are listed in [CHANGELOG.md](CHANGELOG.md).
