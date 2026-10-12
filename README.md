@@ -543,6 +543,51 @@ no telemetry. Workspace files are stored relative to their folder. Limits: 50 co
 characters per note, about 1 MB in total; imports up to 2 MB. A rename outside Refyntra that also changes other lines
 of the file is not proven, so the item becomes ambiguous or missing instead of following it.
 
+## In VS Code's own places
+
+Refyntra plugs into the editor's built-in UI wherever VS Code has a place for it; every entry runs the same Refyntra
+command and the same pipeline (plan → preview → revalidate → one EditApplier). Nothing depends on another extension.
+
+- **Lightbulb, Ctrl+. and Refactor… / Source Action…** (C#; Rename also for TS/JS, Python and Rust): code actions with
+  proper kinds — `refactor.extract.method` (Extract Method), `refactor.rewrite.signature` (Change Signature),
+  `refactor.move.typeToFile` (Move Type to File), `refactor.rewrite.safeDelete` (Safe Delete), `refactor.rewrite.rename`
+  (Rename with preview), `refactor.rewrite.generateHandler` (MediatR) and `source.refyntra.cleanup` (Code Cleanup of the
+  file). The automatic lightbulb never asks the backend: it only offers Extract Method for a selection that passes a
+  cheap text check (balanced brackets, complete statements or one expression, no declaration). Ctrl+. and the Refactor
+  menu ask the C# route which actions apply at the cursor (cached briefly per document version); actions that do not
+  apply are listed greyed out with the reason.
+- **Editor context menu → Refyntra**: one submenu grouped *Navigate* (Related, Find, Find Handler / Endpoint / DI
+  Registration), *Refactor* (Rename, Extract Method, Change Signature, Move Type to File, Safe Delete, Generate
+  Handler, Code Cleanup) and *Context* (add to the task context, Actions). C#-only entries appear only in C# files.
+- **Refactor Preview**: text-only plans (Rename, Extract Method, Change Signature, Safe Delete of members, Code Cleanup)
+  open in VS Code's Refactor Preview panel, grouped per file and labelled with the plan and its open points; apply or
+  discard there. Refyntra revalidates the plan **before** the panel opens and checks every file's text again right
+  before handing the edit over; while the panel is open VS Code refuses to apply if one of the files changes; afterwards
+  every file is checked against the planned result and reported (a discarded panel changes nothing, unchecked files are
+  named). Plans that create, rename or delete files keep the QuickPick preview. `refyntra.preview.style: "quickPick"`
+  uses the QuickPick for everything. Details: ADR-004 Amendment 6.
+- **CodeLens** above C# types and methods: "N references · N implementations · N tests", MediatR requests
+  "→ Handler: X" and handlers "← sent from N places", endpoints "GET /api/orders/{id} · N frontend calls", EF Core
+  "→ configuration · N migrations". A click opens VS Code's peek view (or Related). Lenses are resolved lazily (only
+  visible ones, one Related request per declaration and document version, cancelled with the request); the text scan
+  that places them takes about 1 ms per 1,000 lines (9 ms for 20,000 lines measured), so typing is not slowed.
+  `refyntra.codeLens.enabled` and one switch per kind.
+- **Call Hierarchy and Type Hierarchy** (Shift+Alt+H, *Peek Call Hierarchy*, *Show Type Hierarchy*) for C#, answered by
+  Refyntra's own Roslyn host (protocol 1.7): incoming and outgoing calls with their call sites, supertypes and
+  subtypes. Only code declared in the solution is listed (a library method has no file to open).
+- **Hover** on a MediatR request: "handled by X" with a link that opens the handler (`refyntra.hover.mediatr`).
+- **Change Signature dialog**: a parameter table (drag, the ↑/↓ buttons or Alt+Up/Down to reorder; name, type, value
+  at call sites and default for new parameters), a live preview of the new signature, the number of affected call sites
+  and validation messages; then the normal preview. `refyntra.changeSignature.editor: "quickPick"` keeps the step-by-step
+  QuickPick.
+- **Status bar**: one item with the state — a spinner and progress while the solution loads (also as window progress),
+  a check when ready, a warning on a problem. A click opens a menu that leads with what helps now (on a problem: Health,
+  Restart, Select Solution).
+- **Related view**: an icon per relation kind (handler, endpoint, test, DI, EF Core, HTTP client, implementation,
+  reference), groups with their counts, the file and line in the description, the code line in the tooltip, and a header
+  line naming the symbol shown and whether the view is pinned. **Stack trace**: opening a frame highlights its line
+  briefly; frames of your own code have a coloured stack-frame icon, external frames a library icon.
+
 ## Commands
 
 | Command | Purpose |
@@ -562,7 +607,8 @@ of the file is not proven, so the item becomes ambiguous or missing instead of f
 | `refyntra.restartBackend` | Restart the .NET host |
 | `refyntra.exportDebugBundle` | Save a redacted, previewed debug bundle to a local file (opt-in, nothing is sent) |
 | `refyntra.selectSolution` | Choose the solution or project to load |
-| `refyntra.showMenu` | The menu of main commands (also a click on the status bar item) |
+| `refyntra.showMenu` | The menu of all main commands |
+| `refyntra.statusMenu` | The status bar menu: the current state, then what helps now (a click on the status bar item) |
 | `refyntra.getStarted` | Open the *Get started with Refyntra* walkthrough |
 | `refyntra.keyboardShortcuts` | Open the `refyntra.keybindings.preset` setting |
 | `refyntra.openStackTrace` | Read a pasted stack trace (.NET, JavaScript/TypeScript, Python, Rust) and open its frames |
@@ -584,6 +630,11 @@ of the file is not proven, so the item becomes ambiguous or missing instead of f
 | `refyntra.http.basePaths` | list of path prefixes, default empty | Frontend ↔ backend links: prefixes that client URLs add but the routes do not have (tried only when the exact match finds nothing) |
 | `refyntra.http.origins` | list of origins, default empty | Frontend ↔ backend links: absolute origins (`https://localhost:5001`) that are this backend; other absolute URLs are never linked |
 | `refyntra.rules.OR1001` | `off`, `information`, `warning` (default) | Severity of the experimental OR1001 rule in the Problems view |
+| `refyntra.preview.style` | `native` (default), `quickPick` | Where previews are shown: VS Code's Refactor Preview for text-only plans, or the QuickPick preview for every plan |
+| `refyntra.changeSignature.editor` | `dialog` (default), `quickPick` | Change Signature edits the parameters in a dialog or in QuickPick steps |
+| `refyntra.codeLens.enabled` | boolean, default on | CodeLens above C# types and methods |
+| `refyntra.codeLens.references` / `.mediatr` / `.endpoints` / `.efCore` | boolean, default on | One switch per CodeLens kind |
+| `refyntra.hover.mediatr` | boolean, default on | Hover on a MediatR request shows its handler |
 | `refyntra.trace.level` | `info` (default) and other levels | Detail of the Refyntra output log. Source text is never logged |
 
 ## Troubleshooting

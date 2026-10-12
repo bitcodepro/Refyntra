@@ -207,6 +207,8 @@ export class FixtureEngine {
         return this.prepare(p as never);
       case 'refactor/revalidate':
         return this.revalidate(String(p.planId));
+      case 'code/hierarchy':
+        return this.hierarchy(p as never);
       default:
         throw new RpcError(ErrorCodes.MethodNotFound, `Method ${method} not supported by the fixture engine`);
     }
@@ -291,6 +293,17 @@ export class FixtureEngine {
       if (pos.character >= m.index && pos.character <= m.index + m[0].length) return m[0];
     }
     return undefined;
+  }
+
+  /** code/hierarchy (protocol 1.7): incoming = every other occurrence of the name (a "caller" per occurrence); others empty. */
+  private hierarchy(p: { symbolId: string; direction: string; snapshotId: string }): import('@refyntra/contracts').HierarchyResult {
+    const d = this.resolve({ symbolId: p.symbolId });
+    if (!d) throw new RpcError(ErrorCodes.UnknownSymbol, 'unknown symbol', { reasonCode: 'UnknownSymbol', message: 'Unknown symbol' });
+    const ref = this.symbolRef(d);
+    const items = p.direction !== 'incoming' ? [] : this.occurrences(d.name)
+      .filter((l) => !(l.uri === ref.location?.uri && l.range.start.line === ref.location?.range.start.line))
+      .map((l) => ({ symbol: { ...ref, symbolId: undefined, name: `caller@${l.range.start.line + 1}`, location: l }, fromRanges: [l.range], fromUri: l.uri }));
+    return { items, completeness: 'complete', truncated: false, snapshotId: p.snapshotId };
   }
 
   private symbolAt(uri: string, pos: Position): SymbolRef | null {

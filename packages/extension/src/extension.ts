@@ -39,6 +39,12 @@ import { runCleanup, undoCleanup } from './cleanup';
 import { runChangeSignature, runExtractMethod, runSafeDelete, undoCode } from './codeRefactor';
 import { CSHARP_GENERATE_HANDLER_ACTION, CSHARP_MOVE_TYPE_ACTION } from '@refyntra/contracts';
 import { runRestore } from './restore';
+import { registerCodeActions } from './codeActions';
+import { type RefyntraCodeLensProvider, registerCodeLens } from './codeLens';
+import { registerHierarchy } from './hierarchy';
+import { registerMediatRHover } from './hover';
+import { ChangeSignatureDialog } from './changeSignaturePanel';
+import { parseCodeActionTarget } from './codeActionsModel';
 import { SolutionService } from './solution';
 import { STACK_TRACE_VIEW, StackTraceViewProvider, runOpenStackTrace } from './stackTrace';
 import { type TaskContextViewProvider, registerTaskContext } from './taskContext';
@@ -102,9 +108,21 @@ export interface RefyntraTestApi {
   taskContext: TaskContextViewProvider;
   /** React / Next.js / Angular web worker: status and process launches (e2e). */
   webFrameworks: { status(): ReturnType<import('@refyntra/web-frameworks').WebFrameworkService['status']>; launches(): { command: string; args: string[] }[] };
+  /** CodeLens provider (e2e resolves lenses and reads scan times). */
+  codeLens: RefyntraCodeLensProvider;
+  /** The open Change Signature dialog (e2e drives it through the same message path as the page). */
+  changeSignatureDialog(): ChangeSignatureDialog | undefined;
+  /** Status bar state: loading / ready / problem / idle. */
+  statusKind(): string;
 }
 
 let engineRef: RefyntraEngine | undefined;
+
+/** A code action's target ({uri, position}) or undefined (the command then uses the active editor). */
+function atTarget(arg: unknown): { uri: string; position: { line: number; character: number } } | undefined {
+  const t = parseCodeActionTarget(arg);
+  return t ? { uri: t.uri, position: t.position } : undefined;
+}
 
 export async function activate(context: vscode.ExtensionContext): Promise<RefyntraTestApi> {
   const output = vscode.window.createOutputChannel('Refyntra');
@@ -274,6 +292,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
   );
   // Task context: named lists of symbols, files and pinned relations, stored locally in workspaceState (taskContext.ts).
   const taskContext = registerTaskContext(engine, context.workspaceState, related);
+  const codeLens = registerCodeLens(engine);
+  context.subscriptions.push(codeLens.disposable);
   context.subscriptions.push(taskContext.disposable);
   void vscode.commands.executeCommand('setContext', 'refyntra.relatedPinned', false);
   // Welcome text of the Related view follows trust / solution / backend state (package.json viewsWelcome).
@@ -317,12 +337,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     vscode.commands.registerCommand('refyntra.related.refresh', () => related.refresh()),
     vscode.commands.registerCommand('refyntra.actions', () => runActions(engine)),
     vscode.commands.registerCommand('refyntra.rename', () => runRename(engine, previews)),
-    vscode.commands.registerCommand('refyntra.moveTypeToFile', () => runCreateAction(engine, previews, editApplier, CSHARP_MOVE_TYPE_ACTION)),
-    vscode.commands.registerCommand('refyntra.generateHandler', () => runCreateAction(engine, previews, editApplier, CSHARP_GENERATE_HANDLER_ACTION)),
+    // Code actions (lightbulb, Ctrl+., Refactor…) pass a {uri, position, range?} target; the palette passes nothing.
+    vscode.commands.registerCommand('refyntra.moveTypeToFile', (arg?: unknown) => runCreateAction(engine, previews, editApplier, CSHARP_MOVE_TYPE_ACTION, atTarget(arg))),
+    vscode.commands.registerCommand('refyntra.generateHandler', (arg?: unknown) => runCreateAction(engine, previews, editApplier, CSHARP_GENERATE_HANDLER_ACTION, atTarget(arg))),
     vscode.commands.registerCommand('refyntra.cleanup', (uri?: unknown) => runCleanup(engine, previews, editApplier, uri)),
-    vscode.commands.registerCommand('refyntra.safeDelete', () => runSafeDelete(engine, previews, editApplier)),
-    vscode.commands.registerCommand('refyntra.extractMethod', () => runExtractMethod(engine, previews, editApplier)),
-    vscode.commands.registerCommand('refyntra.changeSignature', () => runChangeSignature(engine, previews, editApplier)),
+    vscode.commands.registerCommand('refyntra.safeDelete', (arg?: unknown) => runSafeDelete(engine, previews, editApplier, atTarget(arg))),
+    vscode.commands.registerCommand('refyntra.extractMethod', (arg?: unknown) => {
+      const t = parseCodeActionTarget(arg);
+      return runExtractMethod(engine, previews, editApplier, t?.range ? { uri: t.uri, range: t.range } : undefined);
+    }),
+    vscode.commands.registerCommand('refyntra.changeSignature', (arg?: unknown) => runChangeSignature(engine, previews, editApplier, atTarget(arg))),
+    registerCodeActions(engine),
+    registerHierarchy(engine), // built-in Call / Type Hierarchy for C# (protocol 1.7)
+    registerMediatRHover(engine),
+    vscode.commands.registerCommand('refyntra.statusMenu', () => statusBar.showMenu()),
     vscode.commands.registerCommand('refyntra.nativeRename', (uri?: unknown, position?: unknown) => runNativeRename(uri, position)),
     vscode.commands.registerCommand('refyntra.runRestore', (target: unknown) => runRestore(isTrusted, target)),
     vscode.commands.registerCommand('refyntra.showHealth', () => healthPage.show()),
@@ -382,6 +410,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     stackTrace,
     taskContext: taskContext.provider,
     webFrameworks: { status: () => web.service.status(), launches: () => web.launches.map((l) => ({ command: l.command, args: [...l.args] })) },
+    codeLens: codeLens.provider,
+    changeSignatureDialog: () => ChangeSignatureDialog.current,
+    statusKind: () => statusBar.kind(),
   };
 }
 

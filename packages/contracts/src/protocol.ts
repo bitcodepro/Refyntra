@@ -10,8 +10,9 @@ export const PROTOCOL_MAJOR = 1;
  * 1.4: stack frames, Code Cleanup. 1.5: EF Core migrations in a rename (`PrepareParams.generatedEdits`, `efMigrations`).
  * 1.6: Safe Delete, Extract Method, Change Signature (`PrepareParams.range`/`signature`, `PlannedChange` kind `delete`,
  * `fileDelete`, `code/signature`, `workspace/didDeleteFiles`).
+ * 1.7: call and type hierarchy (`code/hierarchy`).
  */
-export const PROTOCOL_MINOR = 6;
+export const PROTOCOL_MINOR = 7;
 
 /** Zero-based line, UTF-16 code unit character. */
 export interface Position {
@@ -460,6 +461,32 @@ export interface SignatureInfo {
   snapshotId: string;
 }
 
+/** code/hierarchy (protocol 1.7): which neighbours of the subject. */
+export type HierarchyDirection = 'incoming' | 'outgoing' | 'supertypes' | 'subtypes';
+
+export interface HierarchyParams extends WorkspaceParams {
+  snapshotId: string;
+  symbolId: string;
+  direction: HierarchyDirection;
+}
+
+export interface HierarchyItem {
+  /** The neighbour (always with a source location). */
+  symbol: SymbolRef;
+  /** Call sites (in the caller for incoming, in the subject for outgoing); empty for the type hierarchy. */
+  fromRanges: Range[];
+  /** Document of `fromRanges`. */
+  fromUri?: string | null;
+}
+
+export interface HierarchyResult {
+  items: HierarchyItem[];
+  completeness: 'complete' | 'partial' | 'unknown';
+  /** True when the host cut the list (500 items). */
+  truncated: boolean;
+  snapshotId: string;
+}
+
 /** The files a plan deletes (protocol 1.6, Safe Delete). */
 export interface FileDeleteOffer {
   files: string[];
@@ -693,6 +720,8 @@ export interface MethodMap {
   'code/resolveFrame': [ResolveFrameParams, ResolveFrameResult];
   /** Protocol 1.6. */
   'code/signature': [SymbolQueryParams, SignatureInfo];
+  /** Protocol 1.7. */
+  'code/hierarchy': [HierarchyParams, HierarchyResult];
   'code/references': [SymbolQueryParams, LocationsResult];
   'code/implementations': [SymbolQueryParams, LocationsResult];
   'refactor/prepare': [PrepareParams, PrepareResult];

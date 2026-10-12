@@ -141,6 +141,11 @@ export interface LanguageAdapter {
   filesDeleted?(uris: readonly string[], workspaceRevision: number): boolean;
   /** Optional (protocol 1.6): the parameters of the method at a position (Change Signature). Null when there is no symbol. */
   signatureAt?(uri: string, position: Position, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').SignatureInfo | null>>;
+  /**
+   * Optional (protocol 1.7): call or type hierarchy at a position (symbolAt, then code/hierarchy). `subject` is null when
+   * there is no symbol; `result` is null when the host is too old.
+   */
+  hierarchy?(uri: string, position: Position, direction: import('@refyntra/contracts').HierarchyDirection | 'subject', token?: CancellationToken): Promise<RouteResult<{ subject: SymbolRef | null; result: import('@refyntra/contracts').HierarchyResult | null }>>;
   dispose(): Promise<void>;
   /** Present on delegated routes (descriptor.ownership 'delegated') that offer rename. */
   readonly delegatedRename?: DelegatedRenamePort;

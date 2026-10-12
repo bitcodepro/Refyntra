@@ -1,5 +1,5 @@
 import type { PlannedChange, PlannedTextChange } from '@refyntra/contracts';
-import type { CapturedEdit, Clock, CommitResult, Disposable, EditApplier, LogLevel, Logger } from '@refyntra/application';
+import type { CaptureOptions, CapturedEdit, Clock, CommitResult, Disposable, EditApplier, LogLevel, Logger } from '@refyntra/application';
 import type { AnyRelation } from '@refyntra/domain';
 import type { FrameworkAdapter, FrameworkRelatedInput } from '@refyntra/application';
 import { applyTextEdits, sha256 } from './fixtureEngine';
@@ -64,6 +64,8 @@ export class WorldEditApplier implements EditApplier {
   rejectApply = false;
   /** Fault injection: the editor reports success but one target ends with other text. */
   corruptUri: string | undefined;
+  /** The options of every capture (tests check that the Refactor Preview confirmation is passed through). */
+  readonly captureOptions: (CaptureOptions | undefined)[] = [];
 
   constructor(
     private readonly world: { readonly files: Map<string, string> },
@@ -75,7 +77,8 @@ export class WorldEditApplier implements EditApplier {
     return this.currentText(uri) ?? this.world.files.get(uri);
   }
 
-  async capture(writeSet: readonly PlannedChange[]): Promise<CapturedEdit | { ok: false; reason: string; uri?: string }> {
+  async capture(writeSet: readonly PlannedChange[], options?: CaptureOptions): Promise<CapturedEdit | { ok: false; reason: string; uri?: string }> {
+    this.captureOptions.push(options);
     for (const change of writeSet) {
       if (change.kind !== 'text') return { ok: false, reason: 'resource operations are not supported' };
       if (this.text(change.uri) === undefined) return { ok: false, reason: `${change.uri} is missing`, uri: change.uri };

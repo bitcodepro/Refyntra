@@ -34,6 +34,9 @@ import { currentText } from './createFile';
 import type { VsCodeEditApplier } from './editApplier';
 import type { PreviewContentProvider, StoredPreview } from './rename';
 import { previewFile, sha256 } from './textEdits';
+import { applyInRefactorPreview, usesRefactorPreview } from './nativePreview';
+import { ChangeSignatureDialog } from './changeSignaturePanel';
+import { summarize } from './codeLensModel';
 
 // Safe Delete, Extract Method and Change Signature: prepare → preview (diffs, deleted files as a diff to empty) →
 // confirm (a limited plan asks again) → revalidate → apply through the single EditApplier → honest report, Undo.
@@ -65,27 +68,31 @@ export async function runSafeDelete(engine: EngineClient, previews: PreviewConte
   await runCodePlan(engine, previews, applier, title, (token) => engine.prepareAction(t, CSHARP_SAFE_DELETE_ACTION, token), () => runSafeDelete(engine, previews, applier, t));
 }
 
-/** Extract Method of the editor selection (or of `seed`). */
-export async function runExtractMethod(engine: EngineClient, previews: PreviewContentProvider, applier: VsCodeEditApplier, seed?: { uri: string; range: Range; name: string }): Promise<void> {
+/** Extract Method of the editor selection (or of `seed`; without a name the name is asked for). */
+export async function runExtractMethod(engine: EngineClient, previews: PreviewContentProvider, applier: VsCodeEditApplier, seed?: { uri: string; range: Range; name?: string }): Promise<void> {
   const title = 'Extract Method';
-  let req = seed;
-  if (!req) {
+  let target: { uri: string; range: Range } | undefined = seed;
+  if (!target) {
     const ed = activeCSharp(title);
     if (!ed) return;
     if (ed.selection.isEmpty) {
       void vscode.window.showInformationMessage('Refyntra Extract Method: select the statements or the expression to extract first.');
       return;
     }
-    const name = await vscode.window.showInputBox({
+    target = { uri: ed.document.uri.toString(), range: { start: toPosition(ed.selection.start), end: toPosition(ed.selection.end) } };
+  }
+  let name = seed?.name;
+  if (!name) {
+    const entered = await vscode.window.showInputBox({
       title: 'Refyntra: Extract Method',
       prompt: 'Name of the new method (private, in the same type)',
       value: 'ExtractedMethod',
       validateInput: (v) => identifierProblem(v.trim()),
     });
-    if (!name) return;
-    req = { uri: ed.document.uri.toString(), range: { start: toPosition(ed.selection.start), end: toPosition(ed.selection.end) }, name: name.trim() };
+    if (!entered) return;
+    name = entered.trim();
   }
-  const r = req;
+  const r = { ...target, name };
   await runCodePlan(engine, previews, applier, title, (token) => engine.prepareAction({ uri: r.uri, position: r.range.start }, CSHARP_EXTRACT_METHOD_ACTION, token, { range: r.range, newName: r.name }), () =>
     runExtractMethod(engine, previews, applier, r),
   );
@@ -113,11 +120,36 @@ export async function runChangeSignature(engine: EngineClient, previews: Preview
     if (e instanceof CancelledError) return;
     throw e;
   }
-  const rows = seed?.rows ?? (await editSignature(info));
+  const rows = seed?.rows ?? (signatureEditor() === 'dialog' ? await editSignatureInDialog(engine, t, info) : await editSignature(info));
   if (!rows) return;
   await runCodePlan(engine, previews, applier, title, (token) => engine.prepareAction(t, CSHARP_CHANGE_SIGNATURE_ACTION, token, { signature: { parameters: toSpec(rows) } }), () =>
     runChangeSignature(engine, previews, applier, { ...t, rows }),
   );
+}
+
+/** `refyntra.changeSignature.editor`: the dialog (default) or the QuickPick steps. */
+function signatureEditor(): 'dialog' | 'quickPick' {
+  return vscode.workspace.getConfiguration('refyntra').get<string>('changeSignature.editor', 'dialog') === 'quickPick' ? 'quickPick' : 'dialog';
+}
+
+/** The Change Signature dialog (webview); the call-site count is filled in when Related answers. */
+async function editSignatureInDialog(engine: EngineClient, t: CodeTarget, info: SignatureInfo): Promise<SignatureRow[] | undefined> {
+  const dialog = new ChangeSignatureDialog(info);
+  const cts = new vscode.CancellationTokenSource();
+  void engine
+    .related(t, cts.token)
+    .then((o) => {
+      if (o.kind !== 'related') return;
+      const s = summarize(!!o.subject, o.groups.flatMap((g) => g.relations));
+      dialog.setCallSites({ count: s.references.count, more: s.references.more });
+    })
+    .catch(() => undefined);
+  try {
+    return await dialog.result;
+  } finally {
+    cts.cancel();
+    cts.dispose();
+  }
 }
 
 /** The parameter list editor (QuickPick loop). Returns the new rows, or undefined when cancelled. */
@@ -230,6 +262,23 @@ async function runCodePlan(
   await vscode.window.showTextDocument(summaryDoc, { preview: true, preserveFocus: true });
 
   const plan = outcome.plan;
+  if (usesRefactorPreview(outcome, outcome.applyEnabled && !stored.invalid)) {
+    // The editor's Refactor Preview (setting refyntra.preview.style): revalidated first, every hash checked again.
+    try {
+      const native = await applyInRefactorPreview(engine, outcome, title);
+      if (!native.result) return;
+      if (native.discarded) {
+        void vscode.window.showInformationMessage(`Refyntra ${title}: ${native.result.message}`);
+        return;
+      }
+      await reportCodeApply(engine, applier, plan.writeSet as readonly PlannedChange[], new Map(), native.result, again);
+      if (native.note) void vscode.window.showWarningMessage(`Refyntra ${title}: ${native.note}`);
+    } catch (e) {
+      if (e instanceof CancelledError) return;
+      void vscode.window.showErrorMessage(`Refyntra ${title} failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    return;
+  }
   const limited = plan.validation.status === 'limited';
   const deletes = new Set((plan.writeSet as readonly PlannedChange[]).flatMap((c) => (c.kind === 'delete' ? [c.uri] : [])));
   type Pick = vscode.QuickPickItem & { action: 'diff' | 'apply' | 'disabled'; index?: number };

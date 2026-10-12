@@ -332,6 +332,32 @@ public sealed class SymbolQueryParams : WorkspaceParams
     public string SymbolId { get; set; } = "";
 }
 
+/// <summary>code/hierarchy (protocol 1.7): call or type hierarchy neighbours of the subject.</summary>
+public sealed class HierarchyParams : WorkspaceParams
+{
+    public string SnapshotId { get; set; } = "";
+    public string SymbolId { get; set; } = "";
+    /// <summary>"incoming" | "outgoing" | "supertypes" | "subtypes".</summary>
+    public string Direction { get; set; } = "";
+}
+
+public sealed class HierarchyItemDto
+{
+    public SymbolRefDto Symbol { get; set; } = new();
+    /// <summary>Call sites: in the caller (incoming) or in the subject (outgoing). Empty for type hierarchy.</summary>
+    public List<RangeDto> FromRanges { get; set; } = new();
+    /// <summary>Document of FromRanges (the caller for incoming, the subject for outgoing).</summary>
+    public string? FromUri { get; set; }
+}
+
+public sealed class HierarchyResultDto
+{
+    public List<HierarchyItemDto> Items { get; set; } = new();
+    public string Completeness { get; set; } = "complete";
+    public bool Truncated { get; set; }
+    public string SnapshotId { get; set; } = "";
+}
+
 public sealed class LocationsResultDto
 {
     public List<LocationWithPreviewDto> Locations { get; set; } = new();

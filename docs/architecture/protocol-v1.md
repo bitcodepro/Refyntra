@@ -152,6 +152,16 @@ a test class. It is not part of `initialize.capabilities`.
   1.6 answers `unavailable` / `UnsupportedAction` (and `MethodNotFound` for `code/signature`, which a client sends only
   to a host that reported minor ≥ 6); a 1.6 client sends `workspace/didDeleteFiles` only to a host that reported
   minor ≥ 6 and restarts the route otherwise.
+- 1.7 (additive, call and type hierarchy): request `code/hierarchy` `{traceId, workspaceId, snapshotId, symbolId,
+  direction: "incoming" | "outgoing" | "supertypes" | "subtypes"}` → `{items: [{symbol: SymbolRef, fromRanges: Range[],
+  fromUri?}], completeness, truncated, snapshotId}`. Incoming: the callers (Roslyn `FindCallers`; calls inside lambdas
+  and local functions belong to the containing member; a type's callers are those of its constructors), `fromRanges`
+  the call sites in the caller's document. Outgoing: the methods and constructors called from the subject's body, with
+  the call sites in the subject's document. Supertypes: the direct base class (not `object`/`ValueType`/`Enum`) and the
+  direct interfaces; subtypes: direct derived classes, implementations and derived interfaces. Only neighbours declared
+  in source are returned (an item needs a document); at most 500 (`truncated`). An unknown direction is
+  `InvalidParams`. A client sends it only to a host that reported minor ≥ 7; the extension resolves the subject with
+  `code/symbolAt` on the same snapshot first and keeps only positions in its items (symbol ids are per snapshot).
 - Additive (EF Core): relation kinds `efcore.*` and group `data` (above); `SearchFilters.entity?: boolean` ("entity:")
   and `SearchFilters.table?: string` ("table:NAME") return EF Core entities as symbol items. Older hosts ignore the
   filters (they return a normal symbol search); older clients render the kinds and the group generically. The
@@ -208,6 +218,7 @@ issuing semantic requests.
 | `refactor/revalidate` | req | `{traceId, workspaceId, planId, snapshotId}` | `RevalidateResult` |
 | `refactor/discard` | notif | `{workspaceId, planId}` | – |
 | `code/signature` | req | `SymbolQueryParams` | `SignatureInfo` (since 1.6; Change Signature) |
+| `code/hierarchy` | req | `HierarchyParams` `{…, symbolId, direction}` | `HierarchyResult` (since 1.7; call and type hierarchy) |
 | `workspace/didDeleteFiles` | notif | `{workspaceId, sequence, workspaceRevision, files: [{uri}]}` | – (since 1.6; consumes a document sequence) |
 | `analysis/run` | req | `AnalysisRunParams` `{traceId, workspaceId, snapshotId, uri?}` | `AnalysisRunResult` (since 1.1, additive; see "Analysis") |
 | `$/cancelRequest` | notif | `{id}` | – |

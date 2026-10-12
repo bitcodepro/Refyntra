@@ -4,6 +4,39 @@ All notable changes are listed here. The project is alpha; nothing has been rele
 
 ## Unreleased
 
+### Added (native VS Code integration, protocol 1.7)
+
+- **Code actions** for C# (lightbulb, Ctrl+., Refactor…, Source Action…): `refactor.extract.method`,
+  `refactor.rewrite.signature`, `refactor.move.typeToFile`, `refactor.rewrite.safeDelete`, `refactor.rewrite.rename`
+  (also TS/JS, Python, Rust), `refactor.rewrite.generateHandler`, `source.refyntra.cleanup`. The automatic lightbulb
+  uses only a text check (Extract Method for an extractable-looking selection); explicit requests ask the route and list
+  inapplicable actions disabled with the reason. Each action runs the existing command with the target position.
+- **Refactor Preview**: text-only plans open in VS Code's Refactor Preview (`WorkspaceEditEntryMetadata`
+  `needsConfirmation`, label = plan, description = open points). Revalidation and the synchronous hash checks happen
+  before the hand-over; the post-state is reconciled per file; discarded / partly applied outcomes are reported; edits
+  elsewhere while the panel is open are noted. `refyntra.preview.style` (`native` default, `quickPick`). ADR-004
+  Amendment 6. `ApplyOptions.confirmation`, `EditApplier.capture(writeSet, {confirmation})`.
+- **CodeLens** above C# types and methods (references · implementations · tests; MediatR handler / sent from; endpoint
+  route · frontend calls; EF Core configuration · migrations), lazily resolved from Related, cached per document
+  version, peek on click; `refyntra.codeLens.enabled` plus per-kind switches. Text scan: ~9 ms for 20,000 lines.
+- **Call Hierarchy and Type Hierarchy** providers for C# backed by the host: request `code/hierarchy` (protocol 1.7:
+  incoming / outgoing calls with call sites, supertypes, subtypes; source declarations only, at most 500).
+- **Change Signature dialog** (webview, strict CSP with nonce, theme variables, no external files): parameter table with
+  drag, ↑/↓ buttons and Alt+Up/Down, name/type/value-at-call-sites/default fields, live signature preview, affected
+  call-site count, validation; then the normal preview. `refyntra.changeSignature.editor` (`dialog` default, `quickPick`).
+- **Hover** on MediatR requests naming the handler with a link (`refyntra.hover.mediatr`).
+- **Status bar**: state icon (spinner / check / warning), solution loading as window progress, a state-aware menu on
+  click (`refyntra.statusMenu`).
+- **Related view**: icons per relation kind and group, header message with the shown symbol and the pinned state, the
+  code line of the target in the tooltip (read lazily; no document is opened), empty groups never shown.
+- **Stack trace**: the line of an opened frame is highlighted briefly; own frames get a coloured stack-frame icon.
+- Editor context submenu **Refyntra** grouped Navigate / Refactor / Context with every action (C#-only entries only in
+  C# files).
+- Tests: host tests `HierarchyTests` (incoming/outgoing calls, supertypes/subtypes, invalid direction), engine tests for
+  the confirmation pass-through, the stale refusal before the panel and `hierarchy`; vitest `nativeUi.test.ts`; e2e
+  scenario `native-ui` (code action kinds, CodeLens resolve, hierarchy providers, hover, Refactor Preview apply / discard
+  / stale refused, Change Signature dialog) and the stack-trace highlight.
+
 ### Added (code refactorings, protocol 1.6)
 
 - **Safe Delete** (`csharp.safeDelete`, command `refyntra.safeDelete`): deletes a type, method, constructor, property,

@@ -700,6 +700,20 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
     });
   }
 
+  /** Call / type hierarchy (protocol 1.7): symbolAt, then code/hierarchy on the same snapshot ("subject" only resolves). */
+  hierarchy(uri: string, position: Position, direction: import('@refyntra/contracts').HierarchyDirection | 'subject', token?: CancellationToken): Promise<RouteResult<{ subject: SymbolRef | null; result: import('@refyntra/contracts').HierarchyResult | null }>> {
+    return this.semantic('code/hierarchy', token, async (s, snapshotId, traceId) => {
+      const sym = await s.transport.request('code/symbolAt', { traceId, workspaceId: this.opts.workspaceId, snapshotId, uri, position }, token);
+      const subject = sym && typeof sym === 'object' && typeof sym.name === 'string' ? sym : null;
+      if (!subject || direction === 'subject' || s.protocolMinor < 7 || !subject.symbolId) return { subject, result: null };
+      const r = await s.transport.request('code/hierarchy', { traceId, workspaceId: this.opts.workspaceId, snapshotId, symbolId: subject.symbolId, direction }, token);
+      const items = Array.isArray(r?.items)
+        ? r.items.filter((i) => i && i.symbol && typeof i.symbol.name === 'string' && i.symbol.location && typeof i.symbol.location.uri === 'string').map((i) => ({ ...i, fromRanges: Array.isArray(i.fromRanges) ? i.fromRanges : [] }))
+        : [];
+      return { subject, result: { items, completeness: r?.completeness ?? 'unknown', truncated: !!r?.truncated, snapshotId: r?.snapshotId ?? snapshotId } };
+    });
+  }
+
   discard(planId: string): void {
     try {
       this.session?.transport.notify('refactor/discard', { workspaceId: this.opts.workspaceId, planId });

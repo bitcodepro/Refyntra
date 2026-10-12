@@ -76,6 +76,10 @@ exports.cases = ({ api, csharp, waitFor }) => {
         assert.ok(sameFile(at.path, file('Orders/OrderService.cs').fsPath), at.path);
         assert.equal(at.line, 7);
         assert.equal(await lineOf('Orders/OrderService.cs', 'public int Load(int id)'), 7);
+        // The target line is highlighted briefly (decoration on the opened editor, 0-based line).
+        const flash = a.stackTrace.lastHighlight();
+        assert.ok(flash && sameFile(vscode.Uri.parse(flash.uri).fsPath, file('Orders/OrderService.cs').fsPath), JSON.stringify(flash));
+        assert.equal(flash.line, 6);
       },
     ],
     [

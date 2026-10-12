@@ -68,6 +68,15 @@ export class StackTraceViewProvider implements vscode.TreeDataProvider<Node>, vs
 
   dispose(): void {
     this.changed.dispose();
+    if (flashTimer) clearTimeout(flashTimer);
+    flashTimer = undefined;
+    flashType?.dispose();
+    flashType = undefined;
+  }
+
+  /** e2e: the line the last opened frame highlighted. */
+  lastHighlight(): { uri: string; line: number } | undefined {
+    return lastFlash;
   }
 
   /** Parses the text and matches the frames' files to workspace files. Returns the number of frames found. */
@@ -165,7 +174,8 @@ export class StackTraceViewProvider implements vscode.TreeDataProvider<Node>, vs
     const e = node.entry;
     const item = new vscode.TreeItem(e.frame.function, vscode.TreeItemCollapsibleState.None);
     item.description = frameDescription(e.frame, e.status);
-    item.iconPath = new vscode.ThemeIcon(FRAME_ICON[e.status]);
+    // Own code stands out (stack frame colour); package/framework frames are a library icon.
+    item.iconPath = new vscode.ThemeIcon(FRAME_ICON[e.status], e.status === 'user' || e.status === 'bySymbol' ? new vscode.ThemeColor('debugIcon.breakpointCurrentStackframeForeground') : undefined);
     item.accessibilityInformation = { label: frameAccessibleLabel(e.frame, { index: e.indexInGroup, count: e.group.frames.length, status: e.status }) };
     item.tooltip = new vscode.MarkdownString().appendCodeblock(e.frame.raw, 'text');
     item.contextValue = e.status === 'external' && !e.frame.file ? 'refyntra.stackFrame.external' : 'refyntra.stackFrame';
@@ -224,7 +234,8 @@ export class StackTraceViewProvider implements vscode.TreeDataProvider<Node>, vs
     const text = doc.lineAt(l).text;
     const c = column !== undefined ? Math.min(Math.max(0, column - 1), text.length) : text.length - text.trimStart().length;
     const pos = new vscode.Position(l, c);
-    await vscode.window.showTextDocument(doc, { selection: new vscode.Range(pos, pos), preview: true });
+    const ed = await vscode.window.showTextDocument(doc, { selection: new vscode.Range(pos, pos), preview: true });
+    flashLine(ed, l);
     return { kind: 'opened', uri: doc.uri.toString(), line: l + 1 };
   }
 
@@ -262,7 +273,8 @@ export class StackTraceViewProvider implements vscode.TreeDataProvider<Node>, vs
     const loc = fromLocation(chosen.location);
     if (loc.uri.scheme !== 'file') return { kind: 'none', message: 'The backend returned a non-file location.' };
     const doc = await vscode.workspace.openTextDocument(loc.uri);
-    await vscode.window.showTextDocument(doc, { selection: new vscode.Range(loc.range.start, loc.range.start), preview: true });
+    const ed = await vscode.window.showTextDocument(doc, { selection: new vscode.Range(loc.range.start, loc.range.start), preview: true });
+    flashLine(ed, loc.range.start.line);
     const notes = [movedNotice, chosen.confidence === 'likely' ? `${f.function} was matched by name only (likely, not proven): ${chosen.reason}` : undefined].filter((x): x is string => !!x);
     if (notes.length) this.notice(notes.join(' '));
     return { kind: 'opened', uri: doc.uri.toString(), line: loc.range.start.line + 1, confidence: chosen.confidence, ...(notes.length ? { notice: notes.join(' ') } : {}) };
@@ -277,6 +289,32 @@ export class StackTraceViewProvider implements vscode.TreeDataProvider<Node>, vs
   clear(): void {
     void this.load('');
   }
+}
+
+/** How long the target line of an opened frame stays highlighted. */
+export const FLASH_MS = 1500;
+let flashType: vscode.TextEditorDecorationType | undefined;
+let flashTimer: NodeJS.Timeout | undefined;
+/** Last highlighted line (e2e checks it). */
+export let lastFlash: { uri: string; line: number } | undefined;
+
+/** Highlights one line briefly (whole line, also in the overview ruler); a later flash replaces it. Visual only. */
+export function flashLine(editor: vscode.TextEditor, line: number): void {
+  flashType ??= vscode.window.createTextEditorDecorationType({
+    isWholeLine: true,
+    backgroundColor: new vscode.ThemeColor('editor.rangeHighlightBackground'),
+    overviewRulerColor: new vscode.ThemeColor('editorOverviewRuler.rangeHighlightForeground'),
+    overviewRulerLane: vscode.OverviewRulerLane.Full,
+  });
+  const type = flashType;
+  if (flashTimer) clearTimeout(flashTimer);
+  for (const ed of vscode.window.visibleTextEditors) if (ed !== editor) ed.setDecorations(type, []);
+  editor.setDecorations(type, [new vscode.Range(line, 0, line, 0)]);
+  lastFlash = { uri: editor.document.uri.toString(), line };
+  flashTimer = setTimeout(() => {
+    flashTimer = undefined;
+    for (const ed of vscode.window.visibleTextEditors) ed.setDecorations(type, []);
+  }, FLASH_MS);
 }
 
 const FRAME_ICON: Readonly<Record<FrameStatus, string>> = {

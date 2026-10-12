@@ -48,7 +48,22 @@ export interface EditApplier {
    * (open buffers are read synchronously in `commit`). Must not open documents (that would be an editor event).
    * Resolves `{ ok: false }` for a non-text change, a non-file target or an unreadable file.
    */
-  capture(writeSet: readonly PlannedChange[]): Promise<CapturedEdit | { ok: false; reason: string; uri?: string }>;
+  capture(writeSet: readonly PlannedChange[], options?: CaptureOptions): Promise<CapturedEdit | { ok: false; reason: string; uri?: string }>;
+}
+
+/**
+ * The editor's own Refactor Preview (ADR-004 Amendment 6): the text edit is handed to the editor marked "needs
+ * confirmation", so the editor shows its preview panel and applies only what the user confirms there. Text-only plans.
+ */
+export interface EditConfirmation {
+  /** Category shown in the preview panel (the plan title). */
+  label: string;
+  /** Shown next to the label (e.g. warnings). */
+  description?: string;
+}
+
+export interface CaptureOptions {
+  confirmation?: EditConfirmation;
 }
 
 export interface CapturedEdit {

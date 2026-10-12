@@ -4,6 +4,7 @@ import { AdapterRegistry, CancellationSource, CancelledError, DocumentTracker, d
 
 const A = 'file:///ws/a.fixture';
 const B = 'file:///ws/b.fixture';
+const AT_HIER = { uri: A, position: { line: 0, character: 9 } };
 let w: FixtureWorkspace | undefined;
 
 afterEach(async () => {
@@ -237,6 +238,26 @@ describe('rename plan state machine and apply', () => {
     expect(ws.applier.applied).toHaveLength(2);
   });
 
+  it('passes the Refactor Preview confirmation to the EditApplier after revalidation (ADR-004 Amendment 6)', async () => {
+    const ws = make({ applyRenameEnabled: true });
+    const p = await prepared(ws);
+    const ok = await ws.engine.applyRename(p.planId, undefined, { confirmation: { label: 'Rename', description: '1 warning' } });
+    expect(ok.status).toBe('applied');
+    expect(ws.applier.captureOptions.at(-1)).toEqual({ confirmation: { label: 'Rename', description: '1 warning' } });
+    const q = await prepared(ws);
+    await ws.engine.applyRename(q.planId);
+    expect(ws.applier.captureOptions.at(-1)).toBeUndefined();
+  });
+
+  it('refuses a stale plan before the Refactor Preview is shown', async () => {
+    const ws = make({ applyRenameEnabled: true });
+    const p = await prepared(ws);
+    ws.engine.documentChanged(A, 'fixture', 99, (ws.world.files.get(A) ?? '') + ' // edit', true);
+    const r = await ws.engine.applyRename(p.planId, undefined, { confirmation: { label: 'Rename' } });
+    expect(r.status).toBe('stale');
+    expect(ws.applier.applied).toHaveLength(0);
+  });
+
   it('revalidates with the backend after confirmation, before anything is written', async () => {
     const ws = make({ applyRenameEnabled: true });
     const p = await prepared(ws);
@@ -327,5 +348,26 @@ describe('rename plan state machine and apply', () => {
     expect(p2.applyEnabled).toBe(false);
     expect((await ws.engine.applyRename(p2.planId)).status).toBe('disabled');
     expect(ws.applier.applied).toHaveLength(0);
+  });
+});
+
+describe('hierarchy (protocol 1.7)', () => {
+  it('resolves the subject and returns the incoming calls from the owned route', async () => {
+    const ws = make();
+    const r = await ws.engine.hierarchy(AT_HIER, 'incoming');
+    if (r.kind !== 'hierarchy') throw new Error(JSON.stringify(r));
+    expect(r.subject.name).toBe('GetOrder');
+    expect(r.items.length).toBeGreaterThan(0);
+    expect(r.items.every((i) => i.fromRanges.length === 1)).toBe(true);
+    const subject = await ws.engine.hierarchy(AT_HIER, 'subject');
+    expect(subject.kind === 'hierarchy' && subject.items.length === 0).toBe(true);
+  });
+
+  it('is unavailable where there is no symbol or no owned route', async () => {
+    const ws = make();
+    const none = await ws.engine.hierarchy({ uri: A, position: { line: 0, character: 0 } }, 'incoming');
+    expect(none.kind).toBe('unavailable');
+    const other = await ws.engine.hierarchy({ uri: 'file:///ws/x.txt', position: { line: 0, character: 0 } }, 'incoming');
+    expect(other.kind === 'unavailable' && other.reasonCode).toBe('ActionNotSupported');
   });
 });

@@ -10,7 +10,8 @@ checked, and what has **not** been checked by a person with assistive technology
 ### Keyboard
 
 - Every command is in the Command Palette as **Refyntra: ...**. Only four internal commands are hidden (`openLocation`,
-  `runRestore`, `related.open`, `nativeRename`); they are run by buttons and tree items.
+  `runRestore`, `related.open`, `nativeRename`, and the stack-trace, task-context and CodeLens helpers such as
+  `codeLens.related`); they are run by buttons, tree items and lenses.
 - The status bar item is a button (screen-reader role `button`). Focus it (F6 cycles through the workbench parts, or run
   **Focus Status Bar** from the palette; arrow keys move between items) and press Enter for the Refyntra menu. The menu lists Find, Related, Actions,
   Rename, Find Handler, Find Endpoint, Find DI Registration, Show Health, Show Health (text), Select Solution, Restart
@@ -60,6 +61,34 @@ checked, and what has **not** been checked by a person with assistive technology
 - Reflow: text wraps (`overflow-wrap:anywhere`), buttons wrap in a flex row, tables scroll inside their own region, sizes
   are in `em`. The layout has no fixed widths, so zoom to 200 % keeps a single column. Buttons and disclosure rows are at
   least 24 px high (WCAG 2.2 target size).
+
+### Native VS Code places (code actions, Refactor Preview, CodeLens, hierarchy, Change Signature dialog)
+
+- Code actions: Ctrl+. and **Refactor…** (Ctrl+Shift+R) list Refyntra's refactorings with plain titles ("Safe Delete
+  (Refyntra, only when unused)"); actions that do not apply are listed disabled **with the reason as text**, which VS
+  Code reads. The lightbulb is optional: every action is also in the Command Palette, the editor context submenu
+  **Refyntra** and the status bar menu.
+- Refactor Preview: VS Code's panel (a tree with check boxes, keyboard: arrows, Space to toggle, **Apply** /
+  **Discard** buttons, Ctrl+Enter applies). Refyntra's preview summary still opens next to it without taking focus. Users
+  who prefer one list with diff rows and an Apply row choose `refyntra.preview.style: "quickPick"`; both paths run the
+  same checks and say the result in a notification.
+- CodeLens: VS Code makes lenses reachable with **Show CodeLens Commands For Current Line** (palette); every title is
+  plain words ("3 references · 1 implementation"), arrows are decorative and the peek view is the standard one.
+- Call / Type Hierarchy: VS Code's own views and peek (Shift+Alt+H); items read name, kind and containing type.
+- Change Signature dialog (webview): a real table with a caption and column headers; every input has a label naming the
+  parameter ("Name of parameter 2"); read-only fields say so; the ↑/↓/✕ buttons have labels ("Move total up"), Alt+Up /
+  Alt+Down move the focused row, drag-and-drop is optional. Validation messages are linked to the field
+  (`aria-describedby`, `aria-invalid`) and the overall problem is a `role="alert"` paragraph; moves and additions are
+  announced in a polite live region with the new signature. Esc cancels; focus stays on the moved control. VS Code
+  theme colours only, no external files, strict CSP. `refyntra.changeSignature.editor: "quickPick"` keeps the
+  QuickPick steps.
+- Status bar: the item text has a word for every state (Ready / Loading / Partial / Failed) next to the icon; its
+  screen-reader label is the sentence described above; loading also shows as window progress. Enter opens the status
+  menu, whose first row states the situation in words.
+- Related view: relation icons now name the kind (globe = endpoint, beaker = test, …) but are decorative — the label
+  and description carry the kind and confidence in words; the view's header message says which symbol is shown and
+  whether the view is pinned. Stack trace: the line highlight of an opened frame is visual only (the cursor is on that
+  line, which a screen reader reads).
 
 ## Glossary (the same word on every surface)
 
@@ -161,6 +190,10 @@ Write down anything that is spoken twice, not spoken, or spoken with a raw id or
 in `terminology.ts` or `healthPageHtml.ts`.
 
 ## Known limits
+
+- The Refactor Preview panel is VS Code's; Refyntra cannot add a reading order or announcements to it. The QuickPick
+  preview is the fallback. The Change Signature dialog was checked with automated structure tests (labels, roles, CSP),
+  not yet with NVDA or Narrator.
 
 - The evidence of a Related item ("why is this a handler") is in the hover tooltip only. VS Code does not show tree
   tooltips on keyboard focus. The label carries kind, name, project, confidence and limitations; a keyboard-reachable

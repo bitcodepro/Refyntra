@@ -154,9 +154,19 @@ export interface ActionPrepareOptions {
 /** Change Signature: the parameters of the method at the cursor, or why there are none. */
 export type SignatureOutcome = { kind: 'signature'; info: import('@refyntra/contracts').SignatureInfo } | Unavailable;
 
+/** Call / type hierarchy (protocol 1.7) at a position of an owned route. */
+export type HierarchyOutcome =
+  | { kind: 'hierarchy'; subject: import('@refyntra/contracts').SymbolRef; items: import('@refyntra/contracts').HierarchyItem[]; completeness: 'complete' | 'partial' | 'unknown'; truncated: boolean }
+  | Unavailable;
+
 export interface ApplyOptions {
   /** The user explicitly confirmed the limitations of a plan whose validation is `limited`. */
   acceptLimited?: boolean;
+  /**
+   * Show the revalidated text edit in the editor's Refactor Preview and apply what the user confirms there
+   * (ADR-004 Amendment 6). Text-only plans; the EditApplier still checks every hash right before handing it over.
+   */
+  confirmation?: import('./ports').EditConfirmation;
 }
 
 /** Boundary between presentation and application. In-process implementation: RefyntraEngine. */
@@ -189,6 +199,11 @@ export interface EngineClient {
    */
   prepareCleanup(cleanup: import('@refyntra/contracts').CleanupParams, token?: CancellationToken, adapterId?: string): Promise<RenameOutcome>;
   applyRename(planId: string, token?: CancellationToken, options?: ApplyOptions): Promise<ApplyOutcome>;
+  /**
+   * Call / type hierarchy (owned route, protocol 1.7): the symbol at the position and its neighbours in `direction`
+   * ('subject' resolves only the symbol, with no items).
+   */
+  hierarchy(target: DocumentTarget, direction: import('@refyntra/contracts').HierarchyDirection | 'subject', token?: CancellationToken): Promise<HierarchyOutcome>;
   discardPlan(planId: string): void;
   planState(planId: string): PlanState | undefined;
   /** Rule analysis (`analysis/run`) of every route that offers it; one outcome per route, never throws except on cancel. */
@@ -652,6 +667,23 @@ export class RefyntraEngine implements EngineClient {
     }
   }
 
+  async hierarchy(target: DocumentTarget, direction: import('@refyntra/contracts').HierarchyDirection | 'subject', token?: CancellationToken): Promise<HierarchyOutcome> {
+    const adapter = this.o.registry.routeFor(target.uri);
+    if (!adapter || adapter.descriptor.ownership !== 'owned-semantic' || typeof adapter.hierarchy !== 'function') {
+      return { kind: 'unavailable', reasonCode: 'ActionNotSupported', message: 'Call and type hierarchy are not provided for this file by Refyntra.', recoveryActions: [] };
+    }
+    try {
+      const r = await this.withStaleRetry(() => adapter.hierarchy!(target.uri, target.position, direction, token), token);
+      const { subject, result } = r.value;
+      if (!subject) return { kind: 'unavailable', reasonCode: 'NoSymbol', message: 'There is no symbol at the cursor.', recoveryActions: [] };
+      if (direction !== 'subject' && !result) return { kind: 'unavailable', reasonCode: 'ProtocolTooOld', message: 'The C# host is too old for the hierarchy; update the extension.', recoveryActions: [] };
+      return { kind: 'hierarchy', subject, items: result?.items ?? [], completeness: result?.completeness ?? 'complete', truncated: result?.truncated ?? false };
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      return this.toUnavailable(adapter, e);
+    }
+  }
+
   async prepareCleanup(cleanup: import('@refyntra/contracts').CleanupParams, token?: CancellationToken, adapterId = 'csharp'): Promise<RenameOutcome> {
     const adapter = this.o.registry.languageAdapters().find((a) => a.descriptor.adapterId === adapterId && a.descriptor.ownership === 'owned-semantic');
     if (!adapter) return { kind: 'unavailable', reasonCode: 'ActionNotSupported', message: 'Code Cleanup is not provided by a Refyntra route here.', recoveryActions: [] };
@@ -792,7 +824,7 @@ export class RefyntraEngine implements EngineClient {
       } else if (verdict.status !== 'valid') {
         return finish('Failed', { status: 'failed', message: verdict.message ?? `Revalidation: ${verdict.status}`, canReprepare: true });
       }
-      const captured = await this.o.editApplier.capture(plan.writeSet);
+      const captured = await this.o.editApplier.capture(plan.writeSet, options.confirmation ? { confirmation: options.confirmation } : undefined);
       // ---------------- no awaits from here until the editor apply has started ----------------
       if (token?.isCancellationRequested) return finish('Cancelled', { status: 'cancelled', message: 'Rename cancelled. No file was changed.' });
       if (!captured.ok) return stale(`The code changed since the preview (${captured.reason}).`);

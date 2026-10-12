@@ -162,3 +162,42 @@ after renames (Amendment 1) and creates (Amendment 2), with its own order and ch
   removes the documents of paths that no longer exist on disk. An older host or an unknown outcome restarts the route.
 - **Undo.** Edited files are undone with the editor's Undo while they still have the applied text; a deleted file is
   created again with its previewed text only while it is absent, followed by a route restart (the host dropped it).
+
+## Amendment 6: the editor's Refactor Preview as the plan preview
+
+Status: Accepted
+
+Plans can be shown in VS Code's own Refactor Preview panel (`refyntra.preview.style`: `native`, the default, or
+`quickPick`). The public API opens the panel only when an edit entry has `needsConfirmation`, and such entries start
+**unchecked**. So the planned edits are plain entries (pre-checked; label = the plan title, description = its open
+points: "partly validated", limitations, warnings; one category per file) and one empty edit at the start of the first
+file — no text change whether it is applied or not — carries `needsConfirmation` with the label "Refyntra: checked
+before this preview". After the user's confirmation **VS Code** applies the checked entries; Refyntra cannot run code
+between the confirmation and the write. The safety model is kept by moving every Refyntra check in front of the hand-over and by checking the result:
+
+- **Before the panel opens** (unchanged order of `applyRename`): the plan lease (same epoch and workspace revision), a
+  limited plan's explicit confirmation (the same modal as the QuickPick flow, before anything else), the host
+  revalidation of the whole read set, the disk read of closed targets, and then — synchronously, with no await — the
+  `expectedHash` and `resultHash` check of every target in the EditApplier. Only then is the edit (with metadata)
+  handed to the editor. A stale plan is refused exactly as before and the panel never opens.
+- **While the panel is open**: the editor's own conflict detection refuses to apply when a file of the edit changes
+  (it disables Apply and says the refactoring is no longer valid). Refyntra records any other handled document that
+  changes meanwhile and, after an apply, tells the user that code outside the edited files changed after the
+  validation (Undo reverts it). The semantic revalidation is therefore as old as the moment the panel opened.
+- **After the panel closes**: the EditApplier reconciles every target against `resultHash`/`expectedHash` as for a
+  direct apply. A discarded panel resolves `false` with every file unchanged and is reported as "discarded, no file was
+  changed". Files the user unchecked are `unchanged` and reported by name ("left out; the code may not compile"); any
+  other difference is `unknown` and reported. No save, no automatic rollback (unchanged).
+- **Only text-only plans.** The panel shows one `WorkspaceEdit`; created, renamed and deleted files need their own
+  ordered steps (Amendments 1, 2 and 5), so such plans — and plans with choices only the QuickPick offers (the file
+  rename toggle, the EF Core migrations mode, delegated plans with their provider confirmation) — keep the QuickPick
+  preview. The EditApplier refuses a confirmation request for a plan with resource operations.
+- **Fallback and accessibility.** The QuickPick preview stays (setting `quickPick`); it lists every file with its diff
+  and Apply in one keyboard list and is the documented choice for users who prefer it with a screen reader.
+
+Rejected: applying from Refyntra after reading the user's choices out of the panel (no API exists); showing the panel
+for review only and applying ourselves afterwards (two confirmations, and the panel would apply on its own Apply
+button); keeping the previous semantic snapshot "alive" during the panel (a hold on the host would block typing).
+
+Residual risk, stated in the README: a semantic change elsewhere (another file that changes what a name binds to) made
+while the panel is open is noticed only after the apply (reported, Undo offered), not prevented.

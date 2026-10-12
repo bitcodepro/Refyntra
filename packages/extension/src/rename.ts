@@ -6,6 +6,7 @@ import { runRecovery } from './actions';
 import { shortPath, toPosition } from './convert';
 import { delegatedSource, efMigrationItems, fileRenameItems, identifierPattern, previewTitle, renamePreviewSummary } from './renameSummary';
 import { type PreviewFileModel, decodeUtf8, previewFile } from './textEdits';
+import { applyInRefactorPreview, usesRefactorPreview } from './nativePreview';
 
 export const PREVIEW_SCHEME = 'refyntra-preview';
 const MAX_PREVIEWS = 5;
@@ -180,6 +181,25 @@ export async function runRename(engine: EngineClient, previews: PreviewContentPr
   const summaryDoc = await vscode.workspace.openTextDocument(previews.summaryUri(planId));
   await vscode.languages.setTextDocumentLanguage(summaryDoc, 'markdown');
   await vscode.window.showTextDocument(summaryDoc, { preview: true, preserveFocus: true });
+
+  const extraChoices = efMigrationItems(outcome.plan).length > 0 || fileRenameItems(outcome.plan).length > 0;
+  // Delegated plans (provider-managed coverage) keep the QuickPick: their extra confirmation text lives there.
+  if (outcome.plan.kind !== 'delegated' && usesRefactorPreview(outcome, outcome.applyEnabled && !stored.invalid, extraChoices)) {
+    try {
+      const native = await applyInRefactorPreview(engine, outcome, 'Rename');
+      if (!native.result) return;
+      if (native.discarded) {
+        void vscode.window.showInformationMessage(`Refyntra Rename: ${native.result.message}`);
+        return;
+      }
+      await reportApply(engine, previews, req, native.result);
+      if (native.note) void vscode.window.showWarningMessage(`Refyntra Rename: ${native.note}`);
+    } catch (e) {
+      if (e instanceof CancelledError) return;
+      void vscode.window.showErrorMessage(`Refyntra Rename failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    return;
+  }
 
   type Pick = vscode.QuickPickItem & { action: 'diff' | 'apply' | 'disabled' | 'toggleFile' | 'fileInfo' | 'efMode' | 'efInfo'; index?: number; mode?: 'efMigrations' | 'none' };
   const items: Pick[] = [];

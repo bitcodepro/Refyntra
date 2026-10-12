@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type { EngineClient } from '@refyntra/application';
 import { formatAdapterHealth, formatStatusBar, worstState } from '@refyntra/domain';
+import type { HealthSummary } from '@refyntra/domain';
 import { randomBytes } from 'node:crypto';
 import * as path from 'node:path';
 import { renderHealth } from './healthText';
@@ -11,6 +12,7 @@ import { RESTORE_TASK_TYPE, runRestore } from './restore';
 
 export { renderHealth };
 import { runRecovery } from './actions';
+import { type StatusKind, loadingMessage, statusKind, statusMenu } from './statusModel';
 
 export const HEALTH_SCHEME = 'refyntra-health';
 export const HEALTH_TEXT_COMMAND = 'refyntra.showHealthText';
@@ -214,10 +216,12 @@ export class StatusBar implements vscode.Disposable {
   private readonly item = vscode.window.createStatusBarItem('refyntra.status', vscode.StatusBarAlignment.Left, 50);
   private readonly sub: vscode.Disposable;
   private visible = false;
+  /** Resolves the running "loading the solution" progress (window.withProgress) when loading ends. */
+  private progress: { report: (message: string | undefined) => void; done: () => void } | undefined;
 
   constructor(private readonly engine: EngineClient) {
     this.item.name = 'Refyntra';
-    this.item.command = 'refyntra.showMenu';
+    this.item.command = 'refyntra.statusMenu';
     this.sub = engine.onDidChangeHealth(() => this.update());
     this.update();
   }
@@ -236,19 +240,58 @@ export class StatusBar implements vscode.Disposable {
     return this.item.accessibilityInformation?.label ?? '';
   }
 
+  /** loading / ready / problem / idle (tests). */
+  kind(): StatusKind {
+    return statusKind(this.engine.health());
+  }
+
   update(): void {
     const h = this.engine.health();
+    const kind = statusKind(h);
     const worst = worstState(h);
-    const icon = worst === 'Loading' || worst === 'Restarting' ? '$(sync~spin) ' : worst === 'Ready' ? '' : '$(warning) ';
+    const icon = kind === 'loading' ? '$(sync~spin) ' : kind === 'problem' ? '$(warning) ' : kind === 'ready' ? '$(check) ' : '';
     this.item.text = `${icon}${formatStatusBar(h)}`;
-    this.item.tooltip = [...h.adapters.map(formatAdapterHealth), h.workspaceTrusted ? '' : 'Restricted Mode: the C# host is not started.', 'Click for the Refyntra menu (Find, Related, Actions, Rename, Health, …)'].filter(Boolean).join('\n');
+    this.item.tooltip = [...h.adapters.map(formatAdapterHealth), h.workspaceTrusted ? '' : 'Restricted Mode: the C# host is not started.', kind === 'problem' ? 'Click for the fixes (Health, Restart, Select Solution)' : 'Click for the Refyntra menu'].filter(Boolean).join('\n');
     this.item.accessibilityInformation = { label: statusBarLabel(h), role: 'button' };
     this.item.backgroundColor = worst === 'Failed' ? new vscode.ThemeColor('statusBarItem.errorBackground') : worst === 'TrustRequired' || worst === 'Partial' ? new vscode.ThemeColor('statusBarItem.warningBackground') : undefined;
     if (this.visible) this.item.show();
     else this.item.hide();
+    this.updateProgress(h, kind);
+  }
+
+  /** Solution loading as window progress (status bar spinner with the message), once per loading phase. */
+  private updateProgress(h: HealthSummary, kind: StatusKind): void {
+    if (kind === 'loading' && this.visible) {
+      const message = loadingMessage(h);
+      if (this.progress) {
+        this.progress.report(message);
+        return;
+      }
+      void vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: 'Refyntra' }, (p) => {
+        p.report({ message: message ?? 'loading' });
+        return new Promise<void>((resolve) => {
+          this.progress = { report: (m) => p.report({ message: m ?? 'loading' }), done: resolve };
+        });
+      });
+      return;
+    }
+    const p = this.progress;
+    this.progress = undefined;
+    p?.done();
+  }
+
+  /** Status bar click: the state in words, then what helps now (statusModel.ts). */
+  async showMenu(): Promise<void> {
+    const m = statusMenu(this.engine.health());
+    const items: (vscode.QuickPickItem & { command?: string })[] = [{ label: m.header, kind: vscode.QuickPickItemKind.Separator }, ...m.items.map((i) => ({ label: i.label, detail: i.detail, command: i.command }))];
+    const pick = await vscode.window.showQuickPick(items, { title: 'Refyntra', placeHolder: m.header });
+    if (pick?.command) await vscode.commands.executeCommand(pick.command);
   }
 
   dispose(): void {
+    const p = this.progress;
+    this.progress = undefined;
+    p?.done();
     this.sub.dispose();
     this.item.dispose();
   }

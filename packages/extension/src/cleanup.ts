@@ -8,6 +8,7 @@ import { shortPath } from './convert';
 import type { PreviewContentProvider, StoredPreview } from './rename';
 import { decodeUtf8, previewFile, sha256 } from './textEdits';
 import type { VsCodeEditApplier } from './editApplier';
+import { applyInRefactorPreview, usesRefactorPreview } from './nativePreview';
 
 // Code Cleanup: scope (file / folder / project / solution) → fixes (profile + per-run toggle) → prepare → preview
 // (summary with per-fix counts and skipped files, per-file diffs) → confirm → revalidate → apply (one EditApplier, not
@@ -117,6 +118,24 @@ export async function runCleanup(engine: EngineClient, previews: PreviewContentP
   const summaryDoc = await vscode.workspace.openTextDocument(previews.summaryUri(planId, 'Code Cleanup preview.md'));
   await vscode.languages.setTextDocumentLanguage(summaryDoc, 'markdown');
   await vscode.window.showTextDocument(summaryDoc, { preview: true, preserveFocus: true });
+
+  if (usesRefactorPreview(outcome, outcome.applyEnabled && !stored.invalid)) {
+    try {
+      const undo = undoEntries((outcome.plan.writeSet as readonly PlannedChange[]).filter((c): c is PlannedTextChange => c.kind === 'text'), stored);
+      const native = await applyInRefactorPreview(engine, outcome, 'Code Cleanup');
+      if (!native.result) return;
+      if (native.discarded) {
+        void vscode.window.showInformationMessage(`Refyntra Code Cleanup: ${native.result.message}`);
+        return;
+      }
+      await reportCleanupApply(engine, previews, applier, { scopeUris, fixes }, undo, native.result);
+      if (native.note) void vscode.window.showWarningMessage(`Refyntra Code Cleanup: ${native.note}`);
+    } catch (e) {
+      if (e instanceof CancelledError) return;
+      void vscode.window.showErrorMessage(`Refyntra Code Cleanup failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    return;
+  }
 
   type Pick = vscode.QuickPickItem & { action: 'diff' | 'apply' | 'disabled'; index?: number };
   const report = cleanupReport(outcome.plan);

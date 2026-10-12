@@ -23,8 +23,9 @@ public sealed class Engine : IRpcHandler, IDisposable
     /// 1.5: PrepareParams.generatedEdits ("efMigrations" | "none") and plan.efMigrations (EF Core migrations in a rename).
     /// 1.6: actions csharp.safeDelete / csharp.extractMethod / csharp.changeSignature, PrepareParams.range / signature,
     /// PlannedChange kind "delete", plan.fileDelete, code/signature, workspace/didDeleteFiles.
+    /// 1.7: code/hierarchy (call and type hierarchy).
     /// </summary>
-    public const int ProtocolMinor = 6;
+    public const int ProtocolMinor = 7;
     /// <summary>How long workspace/snapshotBarrier waits for a missing document sequence (tests shorten it).</summary>
     public TimeSpan BarrierTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
@@ -104,6 +105,8 @@ public sealed class Engine : IRpcHandler, IDisposable
                 return Revalidate(Params<RevalidateParams>(p), ct);
             case "code/signature":
                 return await SignatureAsync(Params<SymbolQueryParams>(p), ct).ConfigureAwait(false);
+            case "code/hierarchy":
+                return await HierarchyAsync(Params<HierarchyParams>(p), ct).ConfigureAwait(false);
             case "code/resolveFrame":
                 return await ResolveFrameAsync(Params<ResolveFrameParams>(p), ct).ConfigureAwait(false);
             case "analysis/run":
@@ -571,6 +574,27 @@ public sealed class Engine : IRpcHandler, IDisposable
             }
         }
         return list;
+    }
+
+    private async Task<HierarchyResultDto> HierarchyAsync(HierarchyParams p, CancellationToken ct)
+    {
+        if (Array.IndexOf(HierarchyService.Directions, p.Direction) < 0)
+            throw new EngineException(ErrorCodes.InvalidParams, "InvalidParams", "direction must be incoming, outgoing, supertypes or subtypes.");
+        var snap = RequireSnapshot(p.WorkspaceId, p.SnapshotId);
+        var (symbol, project) = await SymbolIds.ResolveAsync(snap, p.SymbolId, ct).ConfigureAwait(false);
+        var model = await HierarchyService.QueryAsync(snap, symbol, p.Direction, ct).ConfigureAwait(false);
+        var mapper = new Mapper(snap, project, ct);
+        return new HierarchyResultDto
+        {
+            Items = model.Items.Select(h =>
+            {
+                var ranges = h.FromLocations.Select(Mapper.Location).Where(l => l != null).ToList();
+                return new HierarchyItemDto { Symbol = mapper.Symbol(h.Symbol), FromRanges = ranges.Select(l => l!.Range).ToList(), FromUri = ranges.FirstOrDefault()?.Uri };
+            }).ToList(),
+            Completeness = model.Completeness,
+            Truncated = model.Truncated,
+            SnapshotId = snap.Id,
+        };
     }
 
     private async Task<SignatureInfoDto> SignatureAsync(SymbolQueryParams p, CancellationToken ct)

@@ -98,7 +98,7 @@ const common = [
         assert.ok(fsx.existsSync(px.join(ext.extensionPath, st.media.markdown)), st.media.markdown);
         assert.match(st.description, /\(command:refyntra\.[A-Za-z.]+\)/, `${st.id} has a command button`);
       }
-      assert.deepEqual(pkg.contributes.menus['refyntra.editorContext'].map((m) => m.command), ['refyntra.related', 'refyntra.actions', 'refyntra.find', 'refyntra.rename', 'refyntra.taskContext.addSymbol', 'refyntra.taskContext.addFile']);
+      assert.deepEqual(pkg.contributes.menus['refyntra.editorContext'].map((m) => m.command), ['refyntra.related', 'refyntra.find', 'refyntra.findHandler', 'refyntra.findEndpoint', 'refyntra.findRegistration', 'refyntra.rename', 'refyntra.extractMethod', 'refyntra.changeSignature', 'refyntra.moveTypeToFile', 'refyntra.safeDelete', 'refyntra.generateHandler', 'refyntra.cleanup', 'refyntra.taskContext.addSymbol', 'refyntra.taskContext.addFile', 'refyntra.actions']);
       assert.match(pkg.contributes.menus['editor/context'][0].when, /csharp\|typescript/);
       const whens = pkg.contributes.viewsWelcome.map((v) => v.when);
       for (const v of ['ready', 'untrusted', 'noSolution', 'hostFailed']) assert.equal(whens.filter((x) => x.includes(`refyntra.welcome == ${v}`)).length, 1, v);
@@ -1357,7 +1357,7 @@ scenarios['ts-delegated'] = [
 
 // ---- accessibility -----------------------------------------------------------------------------------
 // Internal commands: invoked by buttons and tree items, hidden from the Command Palette on purpose.
-const INTERNAL_COMMANDS = ['refyntra.openLocation', 'refyntra.runRestore', 'refyntra.related.open', 'refyntra.nativeRename', 'refyntra.stackTrace.openFrame', 'refyntra.stackTrace.related', 'refyntra.taskContext.addFindItem', 'refyntra.taskContext.addFromRelated'];
+const INTERNAL_COMMANDS = ['refyntra.openLocation', 'refyntra.runRestore', 'refyntra.related.open', 'refyntra.nativeRename', 'refyntra.stackTrace.openFrame', 'refyntra.stackTrace.related', 'refyntra.taskContext.addFindItem', 'refyntra.taskContext.addFromRelated', 'refyntra.codeLens.related'];
 
 common.push([
   'keyboard: every user command is in the Command Palette and the status bar menu leads to the main ones',
@@ -1539,6 +1539,8 @@ scenarios['web-frameworks'] = require('./webFrameworks.cjs').cases({ api, waitFo
 scenarios['web-frameworks-restricted'] = require('./webFrameworks.cjs').restricted({ api, waitFor });
 // Task context (test/suite/taskContext.cjs).
 scenarios['task-context'] = require('./taskContext.cjs').cases({ api, csharp, waitFor });
+// Native VS Code UI: code actions, CodeLens, Call/Type Hierarchy, hover, Refactor Preview, Change Signature dialog (test/suite/nativeUi.cjs).
+scenarios['native-ui'] = require('./nativeUi.cjs').cases({ api, csharp, waitFor });
 
 exports.run =async function run() {
   const name = process.env.REFYNTRA_TEST_SCENARIO;

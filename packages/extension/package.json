@@ -333,6 +333,16 @@
         "title": "Resolve Task Context Again",
         "category": "Refyntra",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "refyntra.statusMenu",
+        "title": "Status Menu",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.codeLens.related",
+        "title": "Open Related from CodeLens",
+        "category": "Refyntra"
       }
     ],
     "taskDefinitions": [
@@ -446,6 +456,10 @@
         {
           "command": "refyntra.taskContext.refresh",
           "when": "refyntra.taskContextActive"
+        },
+        {
+          "command": "refyntra.codeLens.related",
+          "when": "false"
         }
       ],
       "view/title": [
@@ -624,16 +638,57 @@
           "group": "1_navigate@1"
         },
         {
-          "command": "refyntra.actions",
+          "command": "refyntra.find",
           "group": "1_navigate@2"
         },
         {
-          "command": "refyntra.find",
+          "command": "refyntra.findHandler",
+          "when": "editorLangId == csharp",
           "group": "1_navigate@3"
+        },
+        {
+          "command": "refyntra.findEndpoint",
+          "when": "editorLangId == csharp",
+          "group": "1_navigate@4"
+        },
+        {
+          "command": "refyntra.findRegistration",
+          "when": "editorLangId == csharp",
+          "group": "1_navigate@5"
         },
         {
           "command": "refyntra.rename",
           "group": "2_refactor@1"
+        },
+        {
+          "command": "refyntra.extractMethod",
+          "when": "editorLangId == csharp && editorHasSelection",
+          "group": "2_refactor@2"
+        },
+        {
+          "command": "refyntra.changeSignature",
+          "when": "editorLangId == csharp",
+          "group": "2_refactor@3"
+        },
+        {
+          "command": "refyntra.moveTypeToFile",
+          "when": "editorLangId == csharp",
+          "group": "2_refactor@4"
+        },
+        {
+          "command": "refyntra.safeDelete",
+          "when": "editorLangId == csharp",
+          "group": "2_refactor@5"
+        },
+        {
+          "command": "refyntra.generateHandler",
+          "when": "editorLangId == csharp",
+          "group": "2_refactor@6"
+        },
+        {
+          "command": "refyntra.cleanup",
+          "when": "editorLangId == csharp",
+          "group": "2_refactor@7"
         },
         {
           "command": "refyntra.taskContext.addSymbol",
@@ -642,6 +697,10 @@
         {
           "command": "refyntra.taskContext.addFile",
           "group": "3_context@2"
+        },
+        {
+          "command": "refyntra.actions",
+          "group": "3_context@3"
         }
       ]
     },
@@ -870,6 +929,62 @@
           ],
           "default": "warning",
           "markdownDescription": "Experimental rule OR1001 \"scoped service captured by a singleton\": reported only for a proven constructor path inside one composition root ([docs](https://github.com/refyntra/refyntra/blob/main/docs/rules/OR1001.md)). When it cannot prove a path it stays silent; the reason is shown by the code action *Refyntra: why OR1001 did not check this registration*, never in Problems."
+        },
+        "refyntra.preview.style": {
+          "type": "string",
+          "enum": [
+            "native",
+            "quickPick"
+          ],
+          "enumDescriptions": [
+            "Show text-only plans in the editor's Refactor Preview panel (grouped per file; apply or discard there). Refyntra revalidates before showing it and checks every file again before handing the edit over; plans that create, rename or delete files use the QuickPick preview.",
+            "Show every plan as a summary document with a QuickPick of per-file diffs and an Apply item (one list, fully keyboard and screen-reader operable)."
+          ],
+          "default": "native",
+          "description": "Where Refyntra shows a refactoring preview before anything is applied."
+        },
+        "refyntra.changeSignature.editor": {
+          "type": "string",
+          "enum": [
+            "dialog",
+            "quickPick"
+          ],
+          "enumDescriptions": [
+            "A dialog with the parameter table (drag or Alt+Up/Down to reorder, live signature preview).",
+            "QuickPick steps (one parameter at a time)."
+          ],
+          "default": "dialog",
+          "description": "How Change Signature edits the parameter list."
+        },
+        "refyntra.codeLens.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show CodeLens above C# types and methods (references, implementations, tests, MediatR, endpoints, EF Core). Resolved lazily only for visible lines."
+        },
+        "refyntra.codeLens.references": {
+          "type": "boolean",
+          "default": true,
+          "description": "CodeLens: \"N references · N implementations · N tests\"."
+        },
+        "refyntra.codeLens.mediatr": {
+          "type": "boolean",
+          "default": true,
+          "description": "CodeLens: MediatR \"→ Handler: X\" on requests and \"← sent from N places\" on handlers."
+        },
+        "refyntra.codeLens.endpoints": {
+          "type": "boolean",
+          "default": true,
+          "description": "CodeLens: ASP.NET Core endpoints (\"GET /api/... · N frontend calls\")."
+        },
+        "refyntra.codeLens.efCore": {
+          "type": "boolean",
+          "default": true,
+          "description": "CodeLens: EF Core \"→ configuration · N migrations\"."
+        },
+        "refyntra.hover.mediatr": {
+          "type": "boolean",
+          "default": true,
+          "description": "Hover on a MediatR request shows its handler with a link."
         }
       }
     },

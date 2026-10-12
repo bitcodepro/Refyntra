@@ -5,11 +5,12 @@ import { type MergedRelation, relationGroupTitle, relationLocation } from '@refy
 import { isAllowedRecoveryCommand, runRecovery } from './actions';
 import { openLocation, shortPath, toPosition } from './convert';
 import { RelatedViewState, findSameRelation } from './relatedState';
+import { groupIcon, languageOfUri, previewLine, relatedHeader, relationIcon } from './relatedPresentation';
 import { scopeLines } from './scopePresentation';
 import { describeReason, groupAccessibleLabel, messageAccessibleLabel, relationAccessibleLabel, relationDescription, relationKindLabel } from './terminology';
 
 type Node =
-  | { kind: 'group'; title: string; relations: MergedRelation[] }
+  | { kind: 'group'; group: string; title: string; relations: MergedRelation[] }
   | { kind: 'relation'; relation: MergedRelation }
   | { kind: 'message'; text: string; icon: string; recovery?: RecoveryAction; tooltip?: string };
 
@@ -148,6 +149,8 @@ export class RelatedViewProvider implements vscode.TreeDataProvider<Node>, vscod
     const subject = o?.kind === 'related' ? o.subject?.name : undefined;
     const status = this.state.loading ? 'loading…' : this.state.stale ? 'outdated — refreshing' : undefined;
     this.view.description = [subject, status, this.pinned ? 'pinned' : undefined].filter(Boolean).join(' · ') || undefined;
+    const subjectName = o?.kind === 'related' ? o.subject?.displayName ?? o.subject?.name : undefined;
+    this.view.message = relatedHeader(subjectName, this.pinned, vscode.workspace.getConfiguration('refyntra').get<boolean>('related.followCursor', true));
   }
 
   getTreeItem(node: Node): vscode.TreeItem {
@@ -155,6 +158,7 @@ export class RelatedViewProvider implements vscode.TreeDataProvider<Node>, vscod
       case 'group': {
         const item = new vscode.TreeItem(node.title, vscode.TreeItemCollapsibleState.Expanded);
         item.description = String(node.relations.length);
+        item.iconPath = new vscode.ThemeIcon(groupIcon(node.group));
         item.contextValue = 'refyntra.relatedGroup';
         item.accessibilityInformation = { label: groupAccessibleLabel(node.title, node.relations.length) };
         return item;
@@ -173,7 +177,8 @@ export class RelatedViewProvider implements vscode.TreeDataProvider<Node>, vscod
         item.tooltip = md;
         // The tooltip is not reachable by keyboard: everything essential is in the label and the description.
         item.accessibilityInformation = { label: relationAccessibleLabel(r, place) };
-        item.iconPath = r.confidence === 'proven' ? new vscode.ThemeIcon('arrow-right') : new vscode.ThemeIcon('question', new vscode.ThemeColor('list.warningForeground'));
+        // The icon says what kind of relation it is; an unproven one is tinted (its confidence is in the description).
+        item.iconPath = new vscode.ThemeIcon(relationIcon(r.relationKind, r.group), r.confidence === 'proven' ? undefined : new vscode.ThemeColor('list.warningForeground'));
         if (loc) item.command = { command: 'refyntra.related.open', title: 'Open', arguments: [r] };
         item.contextValue = 'refyntra.relatedRelation';
         return item;
@@ -189,6 +194,21 @@ export class RelatedViewProvider implements vscode.TreeDataProvider<Node>, vscod
     }
   }
 
+  /** On hover: the tooltip gets the code line of the target (read lazily; never opens a document). */
+  async resolveTreeItem(item: vscode.TreeItem, node: Node, token: vscode.CancellationToken): Promise<vscode.TreeItem> {
+    if (node.kind !== 'relation') return item;
+    const loc = relationLocation(node.relation);
+    if (!loc) return item;
+    const line = previewLine(await lineAt(loc.uri, loc.range.start.line));
+    if (token.isCancellationRequested || !line || !(item.tooltip instanceof vscode.MarkdownString)) return item;
+    const md = new vscode.MarkdownString(undefined, false);
+    md.appendText(`${shortPath(loc.uri)}:${loc.range.start.line + 1}`);
+    md.appendCodeblock(line, languageOfUri(loc.uri));
+    md.appendMarkdown(item.tooltip.value);
+    item.tooltip = md;
+    return item;
+  }
+
   getChildren(node?: Node): Node[] {
     if (node?.kind === 'group') return node.relations.map((relation) => ({ kind: 'relation', relation }));
     if (node) return [];
@@ -201,7 +221,7 @@ export class RelatedViewProvider implements vscode.TreeDataProvider<Node>, vscod
     }
     const nodes: Node[] = [...head];
     if (!o.subject) nodes.push({ kind: 'message', text: 'No symbol at the cursor.', icon: 'info' });
-    for (const g of o.groups) nodes.push({ kind: 'group', title: relationGroupTitle(g.group), relations: g.relations });
+    for (const g of o.groups) if (g.relations.length > 0) nodes.push({ kind: 'group', group: g.group, title: relationGroupTitle(g.group), relations: g.relations });
     if (o.subject && o.groups.length === 0) nodes.push({ kind: 'message', text: 'No relations found.', icon: 'info' });
     // Plain-language scope notes, only when relevant (scopePresentation.ts).
     for (const l of scopeLines(o, { trusted: this.isTrusted() })) {
@@ -269,4 +289,19 @@ export async function runRelatedGroupPick(engine: EngineClient, group: 'handlers
     { placeHolder: title },
   );
   if (pick) await openLocation(relationLocation(pick.relation));
+}
+
+/** One line of a file: from an open document, else from disk (no document is opened: that would be an editor event). */
+async function lineAt(uri: string, line: number): Promise<string | undefined> {
+  try {
+    const open = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri && !d.isClosed);
+    if (open) return line < open.lineCount ? open.lineAt(line).text : undefined;
+    const target = vscode.Uri.parse(uri, true);
+    if (target.scheme !== 'file') return undefined;
+    const bytes = await vscode.workspace.fs.readFile(target);
+    if (bytes.byteLength > 4 * 1024 * 1024) return undefined;
+    return new TextDecoder('utf-8').decode(bytes).split(/\r\n|\r|\n/)[line];
+  } catch {
+    return undefined;
+  }
 }

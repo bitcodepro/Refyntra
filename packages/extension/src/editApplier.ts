@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { PlannedChange, PlannedFileCreate, PlannedFileDelete, PlannedFileRename, PlannedTextChange } from '@refyntra/contracts';
-import type { ApplyFileReport, ApplyReport, ApplyResourceReport, CapturedEdit, CommitResult, EditApplier } from '@refyntra/application';
+import type { ApplyFileReport, ApplyReport, ApplyResourceReport, CaptureOptions, CapturedEdit, CommitResult, EditApplier, EditConfirmation } from '@refyntra/application';
 import { applyTextEditsToText, decodeUtf8, sha256 } from './textEdits';
 
 export { applyTextEditsToText, decodeUtf8, sha256 } from './textEdits';
@@ -59,6 +59,29 @@ function diskExists(uri: vscode.Uri): boolean {
   }
 }
 
+/** Entry metadata of the planned edits in the Refactor Preview: pre-checked, grouped by the plan title per file. */
+export function confirmationMetadata(confirmation: EditConfirmation, editCount: number): vscode.WorkspaceEditEntryMetadata {
+  return {
+    needsConfirmation: false,
+    label: confirmation.label,
+    description: confirmation.description ?? `${editCount} edit${editCount === 1 ? '' : 's'}`,
+    iconPath: new vscode.ThemeIcon('tools'),
+  };
+}
+
+/**
+ * The editor opens its Refactor Preview only for an edit with an entry that "needs confirmation", and such entries start
+ * unchecked. So the planned edits are plain (pre-checked) entries and one empty edit (no text change, at the start of the
+ * first file) carries the confirmation: it opens the panel and changes nothing whether it is checked or not
+ * (ADR-004 Amendment 6).
+ */
+export const PREVIEW_ANCHOR: vscode.WorkspaceEditEntryMetadata = {
+  needsConfirmation: true,
+  label: 'Refyntra: checked before this preview',
+  description: 'no change — apply or discard the edits above',
+  iconPath: new vscode.ThemeIcon('shield'),
+};
+
 /**
  * The only place that calls workspace.applyEdit. No save, no rollback.
  *
@@ -104,7 +127,10 @@ export class VsCodeEditApplier implements EditApplier {
     beforeDelete: undefined,
   };
 
-  async capture(writeSet: readonly PlannedChange[]): Promise<CapturedEdit | { ok: false; reason: string; uri?: string }> {
+  async capture(writeSet: readonly PlannedChange[], options?: CaptureOptions): Promise<CapturedEdit | { ok: false; reason: string; uri?: string }> {
+    const confirmation = options?.confirmation;
+    // The Refactor Preview shows and applies one text edit; resource operations keep their own ordered steps.
+    if (confirmation && writeSet.some((c) => c.kind !== 'text')) return { ok: false, reason: 'the Refactor Preview handles text changes only' };
     const targets: Target[] = [];
     const renames: RenameTarget[] = [];
     const creates: CreateTarget[] = [];
@@ -152,11 +178,11 @@ export class VsCodeEditApplier implements EditApplier {
       }
       targets.push({ change, uri, diskText });
     }
-    return { ok: true, commit: () => this.commit(targets, renames, creates, deletes) };
+    return { ok: true, commit: () => this.commit(targets, renames, creates, deletes, confirmation) };
   }
 
   /** Builds the text edit after checking every target synchronously; a string is the reason it cannot be applied. */
-  private textEdit(targets: Target[]): vscode.WorkspaceEdit | { started: false; reason: string; uri?: string } {
+  private textEdit(targets: Target[], confirmation?: EditConfirmation): vscode.WorkspaceEdit | { started: false; reason: string; uri?: string } {
     const edit = new vscode.WorkspaceEdit();
     for (const t of targets) {
       const doc = openDocument(t.uri);
@@ -170,9 +196,13 @@ export class VsCodeEditApplier implements EditApplier {
         return { started: false, reason: `the edits do not fit ${label(t.uri)}`, uri: t.change.uri };
       }
       if (sha256(result) !== t.change.resultHash) return { started: false, reason: `the edits do not produce the previewed result for ${label(t.uri)}`, uri: t.change.uri };
+      const metadata = confirmation ? confirmationMetadata(confirmation, t.change.edits.length) : undefined;
       for (const e of t.change.edits) {
-        edit.replace(t.uri, new vscode.Range(e.range.start.line, e.range.start.character, e.range.end.line, e.range.end.character), e.newText);
+        const range = new vscode.Range(e.range.start.line, e.range.start.character, e.range.end.line, e.range.end.character);
+        if (metadata) edit.replace(t.uri, range, e.newText, metadata);
+        else edit.replace(t.uri, range, e.newText);
       }
+      if (confirmation && t === targets[0]) edit.insert(t.uri, new vscode.Position(0, 0), '', PREVIEW_ANCHOR);
     }
     return edit;
   }
@@ -184,13 +214,15 @@ export class VsCodeEditApplier implements EditApplier {
       this.faults.rejectNextApply = false;
       return Promise.resolve(false);
     }
+    // With entry metadata "needsConfirmation" the editor opens its Refactor Preview and applies only what the user
+    // confirms there (ADR-004 Amendment 6); the post-state is reconciled below exactly as for a direct apply.
     // Plain text edit (no isRefactoring metadata: that may trigger files.refactoring.autoSave).
     return vscode.workspace.applyEdit(edit);
   }
 
   /** Synchronous check of every target, then the first editor apply is started with no await in between. */
-  private commit(targets: Target[], renames: RenameTarget[], creates: CreateTarget[], deletes: DeleteTarget[] = []): CommitResult {
-    const edit = this.textEdit(targets);
+  private commit(targets: Target[], renames: RenameTarget[], creates: CreateTarget[], deletes: DeleteTarget[] = [], confirmation?: EditConfirmation): CommitResult {
+    const edit = this.textEdit(targets, confirmation);
     if (!(edit instanceof vscode.WorkspaceEdit)) return edit;
     // The absence precondition once more, synchronously: a target that appeared means nothing is applied at all.
     for (const r of renames) {
