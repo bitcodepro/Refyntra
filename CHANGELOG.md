@@ -4,6 +4,15 @@ All notable changes are listed here. The project is alpha; nothing has been rele
 
 ## Unreleased
 
+### Added (Inline Method, Field and Parameter)
+
+- Edit actions (`code/editActions`, no protocol change): **Inline Method** at a call site or at all call sites with the
+  declaration removed (expression bodies and single-`return` bodies; arguments with side effects or used more than once
+  are evaluated once into temporaries before the statement), **Inline Field / Constant** (`const`, or `readonly` with a
+  side-effect-free constant initializer) and **Inline Parameter** (every caller passes the same side-effect-free value).
+  Refused: recursion, `ref`/`out` parameters, several returns, virtual/interface members, method groups and delegates,
+  references in other files. Tests: .NET (positive and refusals), unit glue, e2e (Inline Method all call sites).
+
 ### Added (postfix templates and Generate for C#, protocol 1.10)
 
 - **`code/postfix`** (protocol minor 10): after `expr.` the C# host lists Rider's postfix templates that fit the

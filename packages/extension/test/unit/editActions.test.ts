@@ -59,4 +59,15 @@ describe('edit actions (code/editActions glue)', () => {
     expect(KEYBOARD_ACTIONS['refyntra.inlineVariable']).toMatchObject({ actionId: 'csharp.edit.inlineVariable', needsSelection: false });
     expect(EDIT_ACTION_COMMAND).toBe('refyntra.editAction');
   });
+  it('offers the inline member actions (method, field, parameter) under refactor.inline', () => {
+    const inline = [
+      { actionId: 'csharp.edit.inlineMethod', title: 'Inline method (this call site)', kind: 'refactor.inline.refyntra.methodCall' },
+      { actionId: 'csharp.edit.inlineMethodAll', title: 'Inline method (all call sites, remove declaration)', kind: 'refactor.inline.refyntra.method' },
+      { actionId: 'csharp.edit.inlineField', title: 'Inline constant', kind: 'refactor.inline.refyntra.field' },
+      { actionId: 'csharp.edit.inlineParameter', title: 'Inline parameter', kind: 'refactor.inline.refyntra.parameter' },
+    ];
+    expect(offerEditActions(inline, 'refactor.inline').map((i) => i.actionId)).toEqual(inline.map((i) => i.actionId));
+    expect(offerEditActions(inline, 'refactor.extract')).toEqual([]);
+    expect(parseEditActionTarget({ uri: 'file:///a.cs', range: { start: { line: 1, character: 2 }, end: { line: 1, character: 2 } }, actionId: 'csharp.edit.inlineMethodAll', version: 3 })?.actionId).toBe('csharp.edit.inlineMethodAll');
+  });
 });

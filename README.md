@@ -692,11 +692,15 @@ only while the document is still the version the action was computed for.
 | Merge nested `if` / Split `if` at `&&` | `refactor.rewrite.refyntra.mergeIf` / `.splitIf` | `if` without `else` | comments between the two `if`s |
 | Convert to interpolated string | `refactor.rewrite.refyntra.interpolatedString` | string `+` chains with a plain string literal | verbatim/raw literals; constant contexts |
 | Inline Variable | `refactor.inline.refyntra.variable` | a local with one initializer | the variable is written; an initializer with side effects used more than once, not in the next statement, conditionally, or after other side effects; comments on the declaration |
+| Inline Method (this call site / all call sites) | `refactor.inline.refyntra.methodCall` / `.method` | a call or the declaration of a non-virtual method with an expression body or a single `return` (void: a single statement); arguments with side effects or used more than once go into temporaries | recursion, `ref`/`out`/`in`/`params` parameters, several statements or returns, virtual/abstract/override/interface members, generic/async/extension methods, method-group or delegate use (*all*), calls on another object, default arguments, names that would mean something else at the call site |
+| Inline Field / Constant | `refactor.inline.refyntra.field` | a `const`, or a `readonly` field whose initializer is side-effect free and made of constants; every read is replaced and the declaration removed | assignments outside the initializer, other initializers, reads on another object, `nameof` |
+| Inline Parameter | `refactor.inline.refyntra.parameter` | a parameter for which every caller passes the same side-effect-free value (constants, static readonly members); removed from the declaration and all calls | different values, caller locals or instance members in the value, method-group use, virtual/interface members |
 | Introduce Variable (this / all occurrences) | `refactor.extract.refyntra.variable` / `.variableAll` | a selected expression in a statement of a block | conditional or repeated evaluation (`&&`, `?:`, lambdas, loop heads), `ref`/`out` arguments, an earlier side effect in the statement; *all occurrences* needs a value that cannot change |
 
 In the `resharper` preset **Ctrl+Alt+V** runs Introduce Variable on the selection and **Ctrl+Alt+N** Inline Variable at
 the cursor (C# editors only; VS Code has no default binding for these keys). Protocol 1.9 (`code/editActions`).
-Not yet available: Inline Method/Field/Parameter, Introduce Field/Constant/Parameter, the remaining Convert actions (switch, LINQ, primary constructor, record, full property,
+Inline Method, Field and Parameter change one document: every call or read must be in the file of the action
+(otherwise refused with *CrossFile*). Not yet available: Introduce Field/Constant/Parameter, the remaining Convert actions (switch, LINQ, primary constructor, record, full property,
 object initializer, using declaration, async) and Fix in scope.
 
 ### Postfix templates (C#)

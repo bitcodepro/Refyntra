@@ -26,7 +26,7 @@ public sealed record EditActionOutcome(IReadOnlyList<(LinePositionSpan Range, st
 /// (the document's .editorconfig options), and refuses when the document gets a compiler error it did not have.
 /// Never writes files: the client applies the returned edits as one undo step while the document is unchanged.
 /// </summary>
-public static class EditActionsPlanner
+public static partial class EditActionsPlanner
 {
     public const string Prefix = "csharp.edit.";
     public const string ToBlockBody = Prefix + "toBlockBody";
@@ -157,6 +157,7 @@ public static class EditActionsPlanner
             Add(SplitIf, "Split 'if' at '&&'", Rewrite + "splitIf", Split(c));
             Add(ToInterpolated, "Convert to interpolated string", Rewrite + "interpolatedString", Interpolate(c));
             Add(InlineLocal, "Inline variable", "refactor.inline.refyntra.variable", Inline(c));
+            AddInlineMembers(c, Add);
         }
         else
         {

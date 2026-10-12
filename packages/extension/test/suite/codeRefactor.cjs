@@ -208,6 +208,24 @@ exports.cases = ({ api, csharp, waitFor }) => {
         assert.ok(doc.getText().includes('var value = a * b;'));
         await vscode.commands.executeCommand('undo');
         assert.equal(doc.getText(), original);
+        // Inline Method (all call sites, declaration removed) in another document; one Undo step.
+        const inlineUri = lib('EditActions/InlineSamples.cs');
+        const idoc = await vscode.workspace.openTextDocument(inlineUri);
+        await vscode.window.showTextDocument(idoc);
+        const iOriginal = idoc.getText();
+        const addPos = idoc.positionAt(idoc.getText().indexOf('var x = Add(') + 8);
+        let methodActions = [];
+        await waitFor(async () => {
+          methodActions = ((await vscode.commands.executeCommand('vscode.executeCodeActionProvider', inlineUri, new vscode.Range(addPos, addPos), 'refactor.inline')) ?? [])
+            .filter((x) => x.command?.command === 'refyntra.editAction');
+          return methodActions.some((x) => x.kind.value === 'refactor.inline.refyntra.method');
+        }, 'inline method actions', 120000);
+        const inlineAll = methodActions.find((x) => x.kind.value === 'refactor.inline.refyntra.method');
+        assert.equal(await vscode.commands.executeCommand(inlineAll.command.command, ...inlineAll.command.arguments), true);
+        assert.ok(idoc.getText().includes('var x = 1 + 2;'), idoc.getText());
+        assert.ok(!idoc.getText().includes('int Add('), 'the declaration is removed');
+        await vscode.commands.executeCommand('undo');
+        assert.equal(idoc.getText(), iOriginal);
         await revertAll();
       },
     ],
