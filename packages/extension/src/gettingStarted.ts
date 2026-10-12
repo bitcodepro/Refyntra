@@ -53,6 +53,9 @@ export const MAIN_MENU: readonly MenuEntry[] = [
   { label: '$(flame) Run with Hot Reload', detail: 'dotnet watch for the selected .NET project', command: 'refyntra.runWatch' },
   { label: '$(list-selection) Select What to Run', detail: 'Project, launch profile, target framework and configuration for Run and Debug', command: 'refyntra.selectRunTarget' },
   { label: '$(new-file) Generate launch.json', detail: 'Write the run and debug configurations of this workspace to .vscode/launch.json', command: 'refyntra.generateLaunchJson' },
+  { label: '$(terminal) Immediate Window', detail: 'Evaluate expressions and assignments in the stopped frame while debugging (Visual Studio-like)', command: 'refyntra.showImmediate' },
+  { label: '$(symbol-constructor) Generate Constructor', detail: 'Create a constructor from chosen fields and properties of the class at the cursor', command: 'refyntra.ctor.generate' },
+  { label: '$(symbol-parameter) Add Parameters to Constructor', detail: 'Initialise unassigned fields from the existing constructor', command: 'refyntra.ctor.addParameters' },
 ];
 
 /** Walkthrough id as VS Code addresses it: <publisher>.<name>#<walkthrough id>. */

@@ -40,6 +40,9 @@ import { runChangeSignature, runExtractMethod, runSafeDelete, undoCode } from '.
 import { CSHARP_GENERATE_HANDLER_ACTION, CSHARP_MOVE_TYPE_ACTION } from '@refyntra/contracts';
 import { runRestore } from './restore';
 import { registerCodeActions } from './codeActions';
+import { registerConstructorActions } from './constructorActions';
+import { type ImmediateViewProvider, registerImmediate } from './immediate';
+import { type CSharpEvaluatableExpressionProvider, type CSharpInlineValuesProvider, registerInlineValues } from './inlineValues';
 import { type RefyntraCodeLensProvider, registerCodeLens } from './codeLens';
 import { registerHierarchy } from './hierarchy';
 import { registerMediatRHover } from './hover';
@@ -117,6 +120,10 @@ export interface RefyntraTestApi {
   statusKind(): string;
   /** Run and Debug (e2e: targets, sessions, opened URLs, debug exit codes, pickers). */
   run: RunService;
+  /** Inline debug values / hover chains for C# (e2e: asks the providers directly while stopped). */
+  inlineValues: { values: CSharpInlineValuesProvider; hover: CSharpEvaluatableExpressionProvider };
+  /** The Immediate Window (e2e: evaluates, expands, reads entries). */
+  immediate: ImmediateViewProvider;
 }
 
 let engineRef: RefyntraEngine | undefined;
@@ -269,6 +276,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
 
   // Run and Debug (ADR-008): bundled netcoredbg / debugpy, the host's runnable-project model, js-debug configurations.
   const run = registerRun(context, engine, isTrusted);
+  const inlineValues = registerInlineValues();
+  const immediate = registerImmediate();
   context.subscriptions.push(run.disposable);
   const debugStatus = () => run.service.debuggers.status();
   const health = new HealthDocument(engine, () => solutions.selected(), debugStatus);
@@ -355,6 +364,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     }),
     vscode.commands.registerCommand('refyntra.changeSignature', (arg?: unknown) => runChangeSignature(engine, previews, editApplier, atTarget(arg))),
     registerCodeActions(engine),
+    registerConstructorActions(engine, editApplier), // constructor / DI helpers (constructorActions.ts)
+    inlineValues.disposable, // C# inline debug values and hover member chains (inlineValues.ts)
+    immediate.disposable, // Refyntra Immediate panel (immediate.ts)
     registerHierarchy(engine), // built-in Call / Type Hierarchy for C# (protocol 1.7)
     registerMediatRHover(engine),
     vscode.commands.registerCommand('refyntra.statusMenu', () => statusBar.showMenu()),
@@ -421,6 +433,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     changeSignatureDialog: () => ChangeSignatureDialog.current,
     statusKind: () => statusBar.kind(),
     run: run.service,
+    inlineValues: { values: inlineValues.values, hover: inlineValues.hover },
+    immediate: immediate.provider,
   };
 }
 

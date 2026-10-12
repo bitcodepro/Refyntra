@@ -175,6 +175,39 @@ exports.cases = ({ api, csharp, waitFor }) => {
           // An expression in the paused frame (netcoredbg evaluates with the bundled Roslyn).
           const ev = await session.customRequest('evaluate', { expression: 'count + 1', frameId: at.frame.id, context: 'watch' });
           assert.equal(ev.result, '42');
+
+          // Inline values (Rider-like): the provider evaluates the names of the stopped method up to the stopped line.
+          const doc = await vscode.workspace.openTextDocument(uri);
+          await vscode.window.showTextDocument(doc);
+          const none = new vscode.CancellationTokenSource().token;
+          const inline = await a.inlineValues.values.provideInlineValues(doc, new vscode.Range(0, 0, doc.lineCount - 1, 0), { frameId: at.frame.id, stoppedLocation: new vscode.Range(line, 0, line, 0) }, none);
+          const texts = inline.map((v) => v.text);
+          assert.ok(texts.includes('greeting = "Hello Run"'), texts.join(' | '));
+          assert.ok(texts.includes('count = 41'), texts.join(' | '));
+          assert.ok(texts.some((t) => /^version = \{(System\.Version|1\.2)\}$/.test(t)), texts.join(' | '));
+          assert.ok(inline.every((v) => v.range.start.line <= line), 'nothing after the stopped line');
+          // Hover evaluates the whole member chain (args.Length), never a call.
+          const lenLine = await lineOf(rel, 'args.Length');
+          const lenCol = doc.lineAt(lenLine).text.indexOf('Length') + 2;
+          assert.equal(a.inlineValues.hover.provideEvaluatableExpression(doc, new vscode.Position(lenLine, lenCol)).expression, 'args.Length');
+          // Immediate Window: an expression, an assignment (restored so the exit code stays 7), an expanded object.
+          await vscode.commands.executeCommand('refyntra.showImmediate');
+          await waitFor(() => a.immediate.frame(), 'the Immediate Window bound to the stopped frame', 10000);
+          const plus = await a.immediate.evaluate('count + 1');
+          assert.equal(plus.result?.value, '42', JSON.stringify(plus));
+          const assign = await a.immediate.evaluate('count = 5');
+          assert.ok(!assign.error, assign.error);
+          assert.equal((await a.immediate.evaluate('count')).result?.value, '5');
+          await a.immediate.evaluate('count = 41');
+          const obj = await a.immediate.evaluate('version');
+          assert.ok(obj.result && obj.result.ref > 0, `version is expandable: ${JSON.stringify(obj)}`);
+          const members = await a.immediate.expand(obj.result.id);
+          const byName = Object.fromEntries(members.map((m) => [m.label, m.value]));
+          assert.equal(byName.Major, '1', JSON.stringify(members));
+          assert.equal(byName.Minor, '2');
+          const bad = await a.immediate.evaluate('noSuchName');
+          assert.ok(bad.error, 'an unknown name is an error entry');
+          await vscode.commands.executeCommand('workbench.action.closePanel');
           await session.customRequest('continue', { threadId: at.threadId });
           await Promise.race([done, new Promise((_, rej) => setTimeout(() => rej(new Error('session did not end')), 60000))]);
           const exited = eventsOf(session, 'exited')[0];
@@ -185,6 +218,48 @@ exports.cases = ({ api, csharp, waitFor }) => {
           assert.match(out, /Hello Run 41/);
         } finally {
           vscode.debug.removeBreakpoints([bp]);
+        }
+      },
+    ],
+    [
+      'constructor: Create and initialize field from a constructor parameter, Undo restores the file',
+      async () => {
+        const p = file('Svc.cs');
+        const original = ['namespace Demo;', '', 'public interface IRepo { }', '', 'public class Svc', '{', '    private readonly IRepo _other;', '', '    public Svc(IRepo other, IRepo repo)', '    {', '        _other = other;', '    }', '}', ''].join('\n');
+        fs.writeFileSync(p, original);
+        try {
+          const uri = vscode.Uri.file(p);
+          const doc = await vscode.workspace.openTextDocument(uri);
+          await vscode.window.showTextDocument(doc);
+          const at = doc.positionAt(original.indexOf('repo)') + 1);
+          const actions = await vscode.commands.executeCommand('vscode.executeCodeActionProvider', uri, new vscode.Range(at, at), undefined, 50);
+          const titles = actions.map((x) => x.title);
+          assert.ok(titles.includes("Create and initialize property 'Repo'"), titles.join(' | '));
+          assert.ok(titles.includes("Register 'IRepo' in DI…"), titles.join(' | '));
+          const create = actions.find((x) => x.title === "Create and initialize field '_repo'");
+          assert.ok(create, titles.join(' | '));
+          assert.equal(await vscode.commands.executeCommand(create.command.command, ...create.command.arguments), true);
+          const text = doc.getText();
+          assert.ok(text.includes('    private readonly IRepo _other;\n    private readonly IRepo _repo;\n'), text);
+          assert.ok(text.includes('        _other = other;\n        _repo = repo;\n    }'), text);
+          await vscode.window.showTextDocument(doc);
+          await vscode.commands.executeCommand('undo');
+          assert.equal(doc.getText(), original, 'one Undo restores the file');
+          // On an unassigned readonly field: Initialize from constructor (creates the constructor).
+          const field = ['namespace Demo;', 'public class W', '{', '    private readonly IRepo _repo;', '}', ''].join('\n');
+          const edit = new vscode.WorkspaceEdit();
+          edit.replace(uri, new vscode.Range(0, 0, doc.lineCount, 0), field);
+          await vscode.workspace.applyEdit(edit);
+          const onField = doc.positionAt(field.indexOf('_repo') + 1);
+          const fa = await vscode.commands.executeCommand('vscode.executeCodeActionProvider', uri, new vscode.Range(onField, onField), undefined, 50);
+          const init = fa.find((x) => x.title === "Initialize '_repo' from constructor");
+          assert.ok(init, fa.map((x) => x.title).join(' | '));
+          assert.equal(await vscode.commands.executeCommand(init.command.command, ...init.command.arguments), true);
+          assert.ok(doc.getText().includes('    public W(IRepo repo)\n    {\n        _repo = repo;\n    }'), doc.getText());
+          await vscode.commands.executeCommand('workbench.action.files.revert');
+        } finally {
+          await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+          fs.rmSync(p, { force: true });
         }
       },
     ],

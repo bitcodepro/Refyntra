@@ -629,6 +629,52 @@ output to the Debug Console (`console: integratedTerminal` behaves like `interna
 from stdin while it is debugged; use Run for that. `"type": "refyntra-python"`: `program` or `module`, `python`, `args`,
 `cwd`, `env`, `console` (`integratedTerminal` by default), `justMyCode`, `stopOnEntry`; attach: `connect`.
 
+### While debugging C# (inline values, hover, Immediate Window)
+
+- **Inline values** (like Rider): while a `refyntra-dotnet` session is stopped, the names declared, assigned or used on
+  the lines of the stopped method (parameters, locals, `foreach` and `out var` variables, assigned fields, `this.X`)
+  show `name = value` after the line, up to the stopped line and only in the visible part of the editor; top-level
+  `Program.cs` statements too. A fast syntax pass picks the names (no host request); the values come from netcoredbg's
+  `evaluate` in the `watch` context, shortened to 60 characters. Only names and member access are evaluated, never a
+  method call; netcoredbg may still run **property getters** for `this.X` (as the Watch view does). Names inside
+  string interpolations are not read. Turn it off with `refyntra.debug.inlineValues`; VS Code shows provider values when
+  `debug.inlineValues` is `auto` (default) or `on`.
+- **Hover** over `order.Customer.Address` evaluates the whole member chain up to the hovered member (not just the word);
+  over a call (`Get(x)`, `.Find(`) nothing is evaluated.
+- **Refyntra: Show Immediate Window** (Ctrl+Alt+I in the `visualStudio` preset while debugging) opens the
+  *Refyntra Immediate* panel bound to the selected stack frame (Call Stack selection) of the active `refyntra-dotnet`
+  or `refyntra-python` session. Enter evaluates (DAP `evaluate`, context `repl`), Shift+Enter adds a line (lines are
+  joined into one expression), Up/Down recall the history, Ctrl+Space or `.` asks the debugger for completions (DAP
+  `completions`, when the debugger supports them; netcoredbg does not, so C# shows none). Here **assignments and method
+  calls are allowed** (`count = 5`, `list.Clear()`): you typed them. Results are trees (expand loads the members), each
+  with **Copy** and **Watch** (adds it to VS Code's Watch view); **Clear** in the panel title.
+
+### Constructor and DI helpers (C#)
+
+Ctrl+. (or the lightbulb) offers, depending on the cursor:
+
+| Cursor | Actions |
+|---|---|
+| Constructor parameter `public A(B b)` | **Create and initialize field '_b'** (`private readonly B _b;` next to the other fields + `_b = b;`), **Create and initialize property 'B'** (get-only), **Initialize field '_x'** when an unassigned field of type `B` exists, **Initialize all unassigned parameters from constructor**, **Register 'B' in DI…** |
+| Primary constructor parameter `class A(B b)` | **Create field '_b' from primary constructor parameter** (`private readonly B _b = b;`), property |
+| Unassigned `private readonly B _b;` | **Initialize '_b' from constructor** (adds `B b` and `_b = b;`, creates the constructor if there is none), **Initialize all readonly fields from constructor** |
+| Undeclared `_repo` in `_repo.Get(id)` | **Create field '_repo' and inject via constructor**: the type is inferred for well-known names (`_logger` → `ILogger<A>`, `_mediator`, `_configuration`, …) or chosen from the solution's types (interfaces first, typed text accepted); then offers the DI registration when the type is not registered |
+| Class name | **Generate constructor…** (multi-select picker; readonly, not initialised members preselected), **Add parameters to constructor…** |
+
+Naming follows `.editorconfig` (`dotnet_naming_rule` for private fields: `required_prefix`; `dotnet_style_qualification_for_field`),
+else the class's (or file's) existing private fields (`_camel`, `m_camel`, or `camel` with `this.`), else `_camelCase`.
+These edits only touch the current document, so they are applied directly as one editor change (one **Undo**), like
+VS Code's own quick fixes, without a preview; the C# diagnostics then show any compile error. Adding parameters to an
+**existing** constructor is refused when the class is created with `new` anywhere in the workspace (those calls would
+break; use Change Signature, which updates them); classes created by the DI container need no call-site change.
+**Register in DI** checks Refyntra's DI relations (Related → registrations; text search as a fallback), asks the
+lifetime (Scoped/Transient/Singleton), pairs an interface with its only implementation (or lets you choose), and
+inserts `AddScoped<IB, B>()` after the last registration of the composition root: top-level `builder.Services` in
+`Program.cs`, a `this IServiceCollection` extension method or `ConfigureServices`. Several roots: you choose; none:
+nothing is changed and the message says so. That edit is in another file, so it goes through VS Code's Refactor Preview.
+Limits: a syntax pass (no semantic model), so types are copied as written; a partial class is seen only in the current
+file; a class with a primary constructor gets no explicit constructor (it would need `: this(...)`).
+
 ## Commands
 
 | Command | Purpose |
@@ -661,6 +707,8 @@ from stdin while it is debugged; use Run for that. `"type": "refyntra-python"`: 
 | `refyntra.runWatch` | Run the selected .NET project with `dotnet watch run` (hot reload) |
 | `refyntra.stop` / `refyntra.restart` | Stop or restart what Refyntra started (Run view, view title) |
 | `refyntra.selectRunTarget` | Choose project, launch profile, target framework and configuration (the status bar item) |
+| `refyntra.showImmediate` | The Refyntra Immediate panel for the stopped frame (Ctrl+Alt+I in the `visualStudio` preset while debugging) |
+| `refyntra.ctor.generate` / `refyntra.ctor.addParameters` | Generate a constructor from chosen fields and properties / add them to the existing constructor (also Ctrl+. on the class name) |
 | `refyntra.generateLaunchJson` | Write the run and debug configurations to `.vscode/launch.json` |
 | `refyntra.nativeRename` | (not in the palette) The editor's own Rename, offered when a TS/JS rename cannot be confirmed safe; not validated by Refyntra |
 
@@ -685,6 +733,7 @@ from stdin while it is debugged; use Run for that. `"type": "refyntra-python"`: 
 | `refyntra.run.editorButtons` | boolean, default on | Run and Debug buttons in the editor title |
 | `refyntra.run.statusBar` | boolean, default on | The run target in the status bar |
 | `refyntra.run.view` | boolean, default on | The Refyntra Run view |
+| `refyntra.debug.inlineValues` | boolean, default on | C# inline values after the lines of the stopped method (shown when `debug.inlineValues` is `auto` or `on`) |
 | `refyntra.trace.level` | `info` (default) and other levels | Detail of the Refyntra output log. Source text is never logged |
 
 ## Troubleshooting

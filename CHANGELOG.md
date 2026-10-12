@@ -4,6 +4,31 @@ All notable changes are listed here. The project is alpha; nothing has been rele
 
 ## Unreleased
 
+### Added (debugging like Rider and Visual Studio; constructor and DI helpers)
+
+- **Inline debug values for C#** (`refyntra.debug.inlineValues`, default on): an InlineValuesProvider shows
+  `name = value` for parameters, locals, `foreach`/`out var` variables, assigned fields and `this.X` on the lines of the
+  stopped method up to the stopped line (visible range only; top-level statements too). A fast syntax pass, values via
+  DAP `evaluate` (watch context), shortened; no method calls are evaluated. An EvaluatableExpressionProvider makes
+  hover evaluate the whole member chain (`a.B.C`). No protocol change (the host is not asked).
+- **Refyntra Immediate** panel (webview view in the panel, strict CSP, theme variables): evaluates in the selected
+  frame of the active `refyntra-dotnet`/`refyntra-python` session (`repl` context: assignments and calls allowed),
+  multi-line input, history, expandable result trees, Copy, Add to Watch, Clear, DAP completions where supported;
+  keyboard and screen reader accessible. **Refyntra: Show Immediate Window** (Ctrl+Alt+I in the `visualStudio` preset
+  while debugging).
+- **Constructor and DI code actions** (C#): Create and initialize field/property from a constructor parameter,
+  Initialize an existing field, Initialize all unassigned parameters, fields from primary-constructor parameters,
+  Initialize readonly field(s) from constructor, Generate constructor… (multi-select), Add parameters to constructor…
+  (refused when `new` call sites exist), Create field '_x' and inject via constructor (type inferred or picked from the
+  solution), Register in DI (lifetime, interface → single implementation, composition root in `Program.cs` or an
+  `IServiceCollection` extension; asks when several, explains when none). Naming from `.editorconfig`, then existing
+  fields. Current-file edits apply directly as one Undo step; the DI registration goes through the Refactor Preview.
+- Tests: unit tests for the inline-value syntax pass, hover chains, the Immediate Window model and the constructor/DI
+  planner (naming styles, existing fields, records, primary constructors, expression bodies, Program.cs and
+  extension-method roots); the e2e `run-debug` checks inline values, the hover chain, Immediate evaluate/assign/expand
+  and the field code action with Undo; visual baselines `inline-values`, `immediate`, `ctor-actions`,
+  `generate-constructor`.
+
 ### Added (Run and debug, protocol 1.8, ADR-008)
 
 - Refyntra runs and debugs projects without other extensions. **.NET**: the bundled Samsung **netcoredbg 3.2.0-1092**

@@ -39,7 +39,8 @@
     "onDebugResolve:refyntra-dotnet",
     "onDebugResolve:refyntra-python",
     "onDebugResolve:refyntra-lldb",
-    "onDebugDynamicConfigurations"
+    "onDebugDynamicConfigurations",
+    "onView:refyntra.immediateView"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -410,6 +411,29 @@
         "title": "Refresh Run Targets",
         "category": "Refyntra",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "refyntra.showImmediate",
+        "title": "Show Immediate Window",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.immediate.clear",
+        "title": "Clear Immediate Window",
+        "category": "Refyntra",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "refyntra.ctor.generate",
+        "title": "Generate Constructor…",
+        "category": "Refyntra",
+        "enablement": "editorLangId == csharp"
+      },
+      {
+        "command": "refyntra.ctor.addParameters",
+        "title": "Add Parameters to Constructor…",
+        "category": "Refyntra",
+        "enablement": "editorLangId == csharp"
       }
     ],
     "taskDefinitions": [
@@ -563,6 +587,18 @@
         {
           "command": "refyntra.runWatch",
           "when": "refyntra.run.available"
+        },
+        {
+          "command": "refyntra.immediate.clear",
+          "when": "false"
+        },
+        {
+          "command": "refyntra.ctor.generate",
+          "when": "editorLangId == csharp"
+        },
+        {
+          "command": "refyntra.ctor.addParameters",
+          "when": "editorLangId == csharp"
         }
       ],
       "view/title": [
@@ -670,6 +706,11 @@
           "command": "refyntra.stop",
           "when": "view == refyntra.runView && refyntra.run.running",
           "group": "navigation@0"
+        },
+        {
+          "command": "refyntra.immediate.clear",
+          "when": "view == refyntra.immediateView",
+          "group": "navigation"
         }
       ],
       "view/item/context": [
@@ -892,6 +933,13 @@
           "title": "Refyntra",
           "icon": "media/refyntra.svg"
         }
+      ],
+      "panel": [
+        {
+          "id": "refyntraImmediate",
+          "title": "Refyntra Immediate",
+          "icon": "media/refyntra.svg"
+        }
       ]
     },
     "views": {
@@ -915,6 +963,14 @@
         {
           "id": "refyntra.taskContextView",
           "name": "Refyntra Task Context",
+          "contextualTitle": "Refyntra"
+        }
+      ],
+      "refyntraImmediate": [
+        {
+          "type": "webview",
+          "id": "refyntra.immediateView",
+          "name": "Immediate",
           "contextualTitle": "Refyntra"
         }
       ]
@@ -1196,6 +1252,11 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Show the **Refyntra Run** view (runnable projects with Run, Debug and Stop) in the Refyntra side bar."
+        },
+        "refyntra.debug.inlineValues": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show values of C# locals, parameters and assigned fields after the lines of the stopped method (up to the stopped line) while debugging with `refyntra-dotnet`. Only names and `this.member` are evaluated (watch context), never method calls; netcoredbg may run property getters. VS Code shows them when `#debug.inlineValues#` is `auto` (the default, which uses language providers like this one) or `on`."
         }
       }
     },
@@ -1247,6 +1308,12 @@
         "key": "ctrl+shift+g",
         "mac": "cmd+shift+g",
         "when": "config.refyntra.keybindings.preset == 'resharper' && editorTextFocus && editorLangId =~ /^(csharp|typescript|typescriptreact|javascript|javascriptreact|python|rust)$/"
+      },
+      {
+        "command": "refyntra.showImmediate",
+        "key": "ctrl+alt+i",
+        "mac": "cmd+alt+i",
+        "when": "config.refyntra.keybindings.preset == 'visualStudio' && inDebugMode"
       }
     ],
     "breakpoints": [

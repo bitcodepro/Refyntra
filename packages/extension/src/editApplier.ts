@@ -365,6 +365,18 @@ export class VsCodeEditApplier implements EditApplier {
     }
   }
 
+  /**
+   * Small code-action edits (constructor and DI helpers): applied as one editor change, not saved, one Undo step.
+   * Entries with needsConfirmation metadata open VS Code's Refactor Preview first. Returns false when not applied.
+   */
+  async applyCodeActionEdit(edit: vscode.WorkspaceEdit): Promise<boolean> {
+    try {
+      return await vscode.workspace.applyEdit(edit);
+    } catch {
+      return false;
+    }
+  }
+
   /** Why a planned delete must not happen now (its text changed, unsaved changes, unreadable), or undefined. Synchronous. */
   private deleteProblem(d: DeleteTarget): string | undefined {
     let text: string | undefined;

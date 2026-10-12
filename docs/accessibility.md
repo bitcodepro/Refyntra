@@ -106,6 +106,20 @@ checked, and what has **not** been checked by a person with assistive technology
   debug toolbar), which Refyntra does not change. Program output of a .NET debug session is in the Debug Console
   (netcoredbg has no terminal mode); Run uses a terminal that screen readers read as any VS Code terminal.
 
+### Inline values, Immediate Window and constructor helpers
+
+- Inline values are VS Code's own inline decorations; screen readers reach them with the line in **Accessible View**
+  (Alt+F2), the same values are in the Variables view, and `refyntra.debug.inlineValues` turns them off.
+- **Refyntra Immediate** (Refyntra: Show Immediate Window, Ctrl+Alt+I in the `visualStudio` preset): the input is a
+  labelled multi-line text box (a combobox for completions, `aria-activedescendant` on the suggestion); Enter
+  evaluates, Shift+Enter adds a line, Up/Down history, Ctrl+Space completions (Up/Down, Tab or Enter accepts, Escape
+  closes). Each result is an ARIA tree (Up/Down move, Right expands, Left collapses or goes to the parent, Enter/Space
+  toggles, Ctrl+C copies the value, Escape returns to the input); an item reads "name = value, type". New results and
+  errors are announced in a polite live region. Without a stopped session the input is disabled and the status text
+  says why. Colours come from VS Code theme variables (high contrast works); no external files, strict CSP.
+- Constructor and DI helpers are ordinary code actions (Ctrl+., the lightbulb, the Refactor menu); their choices
+  (members, lifetime, implementation, composition root, type of a new field) are QuickPicks.
+
 ## Glossary (the same word on every surface)
 
 Defined once in `packages/extension/src/terminology.ts` (`GLOSSARY`, `STATE_PHRASE`, `REASON_PHRASE`,

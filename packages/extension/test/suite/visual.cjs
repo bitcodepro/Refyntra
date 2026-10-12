@@ -348,6 +348,82 @@ exports.cases = ({ api, csharp, waitFor }) => {
         }
       },
     ],
+    [
+      'visual: inline-values — values after the lines of Program.cs while stopped, then the Immediate Window with an expanded object',
+      async () => {
+        const a = await ready();
+        await reset();
+        const api = (await a.run.refresh()).find((t) => t.label === 'Shop.Api');
+        const doc = await vscode.workspace.openTextDocument(file(PROGRAM));
+        const line = doc.getText().split(/\r?\n/).findIndex((l) => l.startsWith('var app = builder.Build();'));
+        const bp = new vscode.SourceBreakpoint(new vscode.Location(doc.uri, new vscode.Position(line, 0)));
+        vscode.debug.addBreakpoints([bp]);
+        let stopped = false;
+        const tracker = vscode.debug.registerDebugAdapterTrackerFactory('refyntra-dotnet', {
+          createDebugAdapterTracker: () => ({ onDidSendMessage: (m) => { if (m.type === 'event' && m.event === 'stopped') stopped = true; } }),
+        });
+        try {
+          assert.equal(await a.run.debug(api.id), true, 'debugging started');
+          await waitFor(() => stopped, 'stopped at the breakpoint', 240000);
+          await vscode.commands.executeCommand('workbench.action.closeSidebar');
+          await vscode.commands.executeCommand('workbench.action.closePanel');
+          await vscode.window.showTextDocument(doc, { preview: false, selection: new vscode.Range(line, 0, line, 0) });
+          await sleep(3000);
+          await shot('inline-values', 2500);
+          await vscode.commands.executeCommand('refyntra.showImmediate');
+          await waitFor(() => a.immediate.frame(), 'Immediate bound to the frame', 10000);
+          await sleep(1500);
+          await a.immediate.evaluate('builder.Environment.EnvironmentName');
+          const env = await a.immediate.evaluate('builder.Environment');
+          if (env.result && env.result.ref > 0) await a.immediate.expand(env.result.id);
+          await sleep(1500);
+          await shot('immediate', 2500);
+        } finally {
+          tracker.dispose();
+          vscode.debug.removeBreakpoints([bp]);
+          if (vscode.debug.activeDebugSession) await vscode.debug.stopDebugging();
+          await waitFor(() => !vscode.debug.activeDebugSession, 'debug session ended', 60000);
+          await reset();
+        }
+      },
+    ],
+    [
+      'visual: ctor-actions — Ctrl+. on a new constructor parameter (field, property, DI registration), then the Generate constructor picker',
+      async () => {
+        await ready();
+        await reset();
+        const rel = 'Shop.Api/Handlers/OrderHandlers.cs';
+        const { doc } = await open(rel, 'IAuditLog audit)');
+        const text = doc.getText();
+        const edit = new vscode.WorkspaceEdit();
+        const paramAt = doc.positionAt(text.indexOf('IAuditLog audit)') + 'IAuditLog audit'.length);
+        edit.insert(doc.uri, paramAt, ', IClock clock');
+        await vscode.workspace.applyEdit(edit);
+        try {
+          const clock = doc.positionAt(doc.getText().indexOf('IClock clock') + 8);
+          const ed = await vscode.window.showTextDocument(doc, { preview: false, selection: new vscode.Selection(clock, clock) });
+          ed.revealRange(new vscode.Range(clock, clock), vscode.TextEditorRevealType.InCenter);
+          await sleep(800);
+          await vscode.commands.executeCommand('editor.action.quickFix');
+          await shot('ctor-actions', 2500);
+          key('Escape');
+          await sleep(500);
+          // Generate constructor on the class: the multi-select picker (readonly, not initialised members preselected).
+          const field = new vscode.WorkspaceEdit();
+          const auditField = doc.getText().indexOf('private readonly IAuditLog _audit;');
+          field.insert(doc.uri, doc.positionAt(auditField + 'private readonly IAuditLog _audit;'.length), '\n    private readonly IClock _time;');
+          await vscode.workspace.applyEdit(field);
+          const cls = doc.positionAt(doc.getText().indexOf('class OrderPlacedAuditHandler') + 8);
+          void vscode.commands.executeCommand('refyntra.ctor.generate', { uri: doc.uri.toString(), offset: doc.offsetAt(cls) });
+          await sleep(1500);
+          await shot('generate-constructor', 1500);
+          key('Escape');
+        } finally {
+          await vscode.commands.executeCommand('workbench.action.files.revert');
+          await reset();
+        }
+      },
+    ],
   ];
   // REFYNTRA_VISUAL_ONLY=codelens,find: only these screenshots (local debugging); the window setup always runs.
   return only.length ? cases.filter(([title], i) => i === 0 || only.some((o) => title.startsWith(`visual: ${o} `))) : cases;
