@@ -158,6 +158,7 @@ public static partial class EditActionsPlanner
             Add(ToInterpolated, "Convert to interpolated string", Rewrite + "interpolatedString", Interpolate(c));
             Add(InlineLocal, "Inline variable", "refactor.inline.refyntra.variable", Inline(c));
             AddInlineMembers(c, Add);
+            AddConvert(c, Add);
         }
         else
         {

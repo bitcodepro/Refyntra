@@ -4,6 +4,20 @@ All notable changes are listed here. The project is alpha; nothing has been rele
 
 ## Unreleased
 
+### Added (Convert actions)
+
+- Edit actions (`code/editActions`, no protocol change), computed by Roslyn and compile-checked like the others:
+  **`if` chain → `switch` statement / expression**, **`switch` statement ↔ expression**, **`foreach` ↔ LINQ**
+  (`Where`/`Select`/`ToList`, `Any`, `All`, `FirstOrDefault`, `Count`, `Sum`; `using System.Linq;` added when
+  needed), **interpolated string ↔ `string.Format`** (alignment and format specifiers kept), **constructor ↔ primary
+  constructor** (C# 12+), **class ↔ record** (only without custom equality and mutable state; back only without
+  `with`, value comparisons or deconstruction in the document), **auto-property ↔ backing field**, **object
+  initializer** from consecutive member assignments (and split back), **`using` statement ↔ declaration** and **make
+  method async / remove `async`/`await`**. Each is offered only for shapes it can rewrite without changing behaviour
+  and refuses with a reason otherwise (README table).
+- Tests: .NET (positive and refusal per action), e2e (`if` → `switch` expression, `foreach` → LINQ, constructor →
+  primary constructor, each with Undo).
+
 ### Added (Introduce Field, Constant and Parameter)
 
 - Edit actions (`code/editActions`): **Introduce Field** from a selected expression — initialize in the field

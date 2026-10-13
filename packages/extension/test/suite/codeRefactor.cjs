@@ -231,6 +231,43 @@ exports.cases = ({ api, csharp, waitFor }) => {
       },
     ],
     [
+      'Convert actions: if -> switch expression, foreach -> LINQ, constructor -> primary constructor; one Undo step each',
+      async () => {
+        const uri = lib('EditActions/ConvertSamples.cs');
+        const doc = await vscode.workspace.openTextDocument(uri);
+        await vscode.window.showTextDocument(doc);
+        const original = doc.getText();
+        const nl = original.includes('\r\n') ? '\r\n' : '\n';
+        const apply = async (needle, offset, kind) => {
+          const p = doc.positionAt(doc.getText().indexOf(needle.split('\n').join(nl)) + offset);
+          let list = [];
+          await waitFor(async () => {
+            list = ((await vscode.commands.executeCommand('vscode.executeCodeActionProvider', uri, new vscode.Range(p, p), 'refactor.rewrite')) ?? [])
+              .filter((x) => x.command?.command === 'refyntra.editAction');
+            return list.some((x) => x.kind.value === kind);
+          }, `code action ${kind}`, 120000);
+          const action = list.find((x) => x.kind.value === kind);
+          assert.equal(await vscode.commands.executeCommand(action.command.command, ...action.command.arguments), true);
+        };
+        await apply('if (code == 1) return', 1, 'refactor.rewrite.refyntra.ifToSwitchExpression');
+        assert.ok(doc.getText().includes('return code switch'), doc.getText());
+        assert.ok(doc.getText().includes('2 or 3 => "few",'));
+        await vscode.commands.executeCommand('undo');
+        assert.equal(doc.getText(), original);
+        await apply('foreach (var v in values)\n        {\n            if (v < 0)', 1, 'refactor.rewrite.refyntra.foreachToLinq');
+        assert.ok(doc.getText().includes('return values.Any(v => v < 0);'), doc.getText());
+        assert.ok(doc.getText().includes('using System.Linq;'));
+        await vscode.commands.executeCommand('undo');
+        assert.equal(doc.getText(), original);
+        await apply('public ConvAccount(string', 8, 'refactor.rewrite.refyntra.primaryConstructor');
+        assert.ok(doc.getText().includes('public class ConvAccount(string owner, int limit)'), doc.getText());
+        assert.ok(doc.getText().includes('private readonly string _owner = owner;'));
+        await vscode.commands.executeCommand('undo');
+        assert.equal(doc.getText(), original);
+        await revertAll();
+      },
+    ],
+    [
       'Introduce Field (initialized in the constructor) is one action with choices; one Undo step',
       async () => {
         const uri = lib('EditActions/IntroduceSamples.cs');
