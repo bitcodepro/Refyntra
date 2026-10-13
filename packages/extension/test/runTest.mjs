@@ -295,6 +295,16 @@ const scenarios = visual
         settings: { 'refyntra.rename.apply': true, 'files.autoSave': 'off' },
         env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' },
       },
+      // Constructor / DI helpers on a temp copy of the Ctor fixture (two projects, two composition roots): a field from a
+      // parameter with a using added, an injected field for an undeclared name, Register in DI and Fix in scope
+      // (var -> explicit type in the solution) through the editor's Refactor Preview, each undone.
+      {
+        name: 'ctor-di',
+        fixtureCopy: ['Ctor', 'Ctor.sln'],
+        trusted: true,
+        settings: { 'refyntra.rename.apply': true, 'files.autoSave': 'off', 'refyntra.preview.style': 'native' },
+        env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' },
+      },
       // Native VS Code UI on a temp copy of Shop: code action kinds, CodeLens resolve, Call/Type Hierarchy, MediatR hover,
       // the Refactor Preview (apply, discard, stale refused) and the Change Signature dialog.
       {

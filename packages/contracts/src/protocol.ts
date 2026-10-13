@@ -14,8 +14,10 @@ export const PROTOCOL_MAJOR = 1;
  * 1.8: runnable projects for Run and Debug (`workspace/runnableProjects`).
  * 1.9: single-document edit actions computed and compile-checked by Roslyn (`code/editActions`).
  * 1.10: postfix templates (`code/postfix`) and Generate (`code/generate`).
+ * 1.11: constructor and DI helpers (`code/constructorActions`), Register in DI (`csharp.registerDi`) and Fix in scope
+ *   (`csharp.fixAll`) as previewed plans.
  */
-export const PROTOCOL_MINOR = 10;
+export const PROTOCOL_MINOR = 11;
 
 /** Zero-based line, UTF-16 code unit character. */
 export interface Position {
@@ -588,6 +590,90 @@ export interface GenerateParams extends WorkspaceParams {
   operators?: boolean;
 }
 
+/** code/constructorActions (protocol 1.11): without `actionId` the actions at `position`; with it the edits, a question or why not. */
+export interface ConstructorActionsParams extends WorkspaceParams {
+  snapshotId: string;
+  uri: string;
+  position: Position;
+  actionId?: string | null;
+  member?: string | null;
+  members?: string[] | null;
+  /** Create field and inject: the id of a type choice ("T:...") or a typed type name. */
+  type?: string | null;
+  /** The id of a "constructor" choice (constructorId: `constructor` is reserved in JavaScript objects). */
+  constructorId?: string | null;
+  /** csharp.ctor.registerDi: the service type (documentation comment id); absent: the type at the position. */
+  typeId?: string | null;
+}
+
+export interface ConstructorActionInfo {
+  /** `csharp.ctor.*`. */
+  actionId: string;
+  title: string;
+  kind: 'quickfix' | 'rewrite';
+  preferred: boolean;
+  member?: string | null;
+  members?: string[] | null;
+  typeId?: string | null;
+}
+
+export interface Choice {
+  id: string;
+  label: string;
+  detail?: string | null;
+  picked: boolean;
+}
+
+export interface DocumentEdits {
+  uri: string;
+  /** SHA-256 of the document text the edits apply to. */
+  documentHash: string;
+  edits: { range: Range; newText: string }[];
+}
+
+export interface RegistrationInfo {
+  service?: string | null;
+  serviceId?: string | null;
+  implementations: Choice[];
+  roots: Choice[];
+  lifetimes: string[];
+}
+
+export interface ConstructorActionsResult {
+  items: ConstructorActionInfo[];
+  files?: DocumentEdits[] | null;
+  /** Ask the user ("members" many, "constructor" / "type" one), then compute again with the answer. */
+  need?: 'members' | 'constructor' | 'type' | null;
+  choices?: Choice[] | null;
+  note?: string | null;
+  /** Create field and inject: the injected type is not registered in DI yet. */
+  registerTypeId?: string | null;
+  registerTypeName?: string | null;
+  /** csharp.ctor.registerDi: the choices of the registration (then refactor/prepare csharp.registerDi). */
+  registration?: RegistrationInfo | null;
+  reasonCode?: string | null;
+  message?: string | null;
+  snapshotId: string;
+}
+
+/** Register in DI (protocol 1.11): PrepareParams.registration of `csharp.registerDi`. */
+export interface RegistrationParams {
+  typeId?: string;
+  lifetime: 'Scoped' | 'Transient' | 'Singleton';
+  implementationId?: string;
+  rootId?: string;
+}
+
+/** Fix in scope (protocol 1.11): PrepareParams.fixAll of `csharp.fixAll`. */
+export interface FixAllParams {
+  /** A `csharp.edit.*` action that can be applied in a scope. */
+  actionId: string;
+  scope: 'document' | 'project' | 'solution';
+}
+
+export const CSHARP_REGISTER_DI_ACTION = 'csharp.registerDi';
+export const CSHARP_FIX_ALL_ACTION = 'csharp.fixAll';
+
 export interface GenerateMember {
   /** Member name (fields, properties), documentation comment id (base / interface members) or `field|id` (delegating). */
   id: string;
@@ -776,6 +862,10 @@ export interface PrepareParams extends WorkspaceParams {
   range?: Range;
   /** Change Signature (protocol 1.6): the new parameter list. */
   signature?: SignatureParams;
+  /** Register in DI (protocol 1.11): the service at `documentUri` + `range.start` and the choices. */
+  registration?: RegistrationParams;
+  /** Fix in scope (protocol 1.11): the edit action and the scope around `documentUri`. */
+  fixAll?: FixAllParams;
 }
 export type PrepareResult =
   | { kind: 'prepared'; plan: RefactorPlanDto }
@@ -857,6 +947,8 @@ export interface MethodMap {
   /** Protocol 1.10. */
   'code/postfix': [PostfixParams, PostfixResult];
   'code/generate': [GenerateParams, GenerateResult];
+  /** Protocol 1.11. */
+  'code/constructorActions': [ConstructorActionsParams, ConstructorActionsResult];
   'code/references': [SymbolQueryParams, LocationsResult];
   'code/implementations': [SymbolQueryParams, LocationsResult];
   'refactor/prepare': [PrepareParams, PrepareResult];

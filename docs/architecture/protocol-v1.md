@@ -227,6 +227,50 @@ a test class. It is not part of `initialize.capabilities`.
     `GetHashCode` uses `HashCode.Combine` (more than 8 members: `HashCode.Add`). `members` absent = the preselected
     ones. Never writes files; the client applies the edits as one undo step only to the same document version.
     Both are sent only to hosts with minor ≥ 10.
+- 1.11 (constructor / DI helpers, Register in DI, Fix in scope):
+  - request `code/constructorActions` `{traceId, workspaceId, snapshotId, uri, position, actionId?, member?, members?,
+    type?, constructorId?, typeId?}` → `{items: [{actionId, title, kind, preferred, member?, members?, typeId?}],
+    files?: [{uri, documentHash, edits}], need?, choices?: [{id, label, detail?, picked}], note?, registerTypeId?,
+    registerTypeName?, registration?, reasonCode?, message?, snapshotId}`. Without `actionId` it lists the actions at
+    `position` (`kind` `quickfix` | `rewrite`): on a constructor parameter `csharp.ctor.introduceField` /
+    `.introduceProperty` / `.initializeExisting` (`member`) / `.initializeAllParameters` / `.registerDi` (`typeId`);
+    on an unassigned readonly field or get-only auto-property `.initializeMembers` (`members`); on an undeclared
+    field-shaped name (`_x`, `m_x`) `.createInjectedField` (`member`); on the type header `.generate` (computed by
+    `code/generate` kind `constructor`) and `.addParameters`. Positional record parameters get nothing. With
+    `actionId` the host computes the change over every part of a partial type (types fully qualified, usings added,
+    names simplified, field names from the `.editorconfig` naming rules for private instance fields, else the
+    existing fields, else `_camelCase`; `this.` kept only where needed or required by
+    `dotnet_style_qualification_for_field`), formats the new nodes, and returns `files` (minimal edits per document
+    with the SHA-256 of its text; the client applies all of them only while every document has that text), or a
+    question `need` = `members` (pick many) | `constructor` (pick one; answered with `constructorId`) | `type` (pick
+    one or a typed name; answered with `type`) with `choices` and the prompt in `message`, or a refusal: `NoType`,
+    `StaticType`, `NotApplicable`, `UnknownMember`, `NameTaken`, `NoMembers`, `NothingToDo`, `NoConstructor`,
+    `CallSites` (the constructor is called with `new`, `: this` / `: base`, or a parameterless one is inherited
+    implicitly), `PrimaryConstructorScope`, `UnknownType`, `CompilationErrors` (a compiler error a changed document
+    did not have), `ReadOnlyFile`, `GeneratedCode`. `.createInjectedField` infers the type from a well-known name
+    (`_logger` → `ILogger<T>` when Microsoft.Extensions.Logging is referenced, `_mediator`, `_configuration`, …), an
+    assignment, or the solution types that have every member used on the name (the only interface, else the only
+    type); `registerTypeId` names the type when the DI facts show no registration for it. `actionId`
+    `csharp.ctor.registerDi` returns `registration` `{service, serviceId, implementations, roots, lifetimes}` or a
+    refusal (`NoType`, `FrameworkType`, `AlreadyRegistered`, `NoImplementation`, `NoCompositionRoot`); the roots are
+    the composition roots of the DI facts (methods / top-level code with unconditional registrations or service
+    collection calls), each with the last such statement as the insertion point. Never writes files. Sent only to
+    hosts with minor ≥ 11.
+  - `refactor/prepare` action `csharp.registerDi`: `PrepareParams.registration` `{typeId?, lifetime, implementationId?,
+    rootId?}` with `documentUri` + `range.start` at the service (a constructor parameter or a type). The plan adds
+    `receiver.Add{Lifetime}<Service, Implementation>();` after the root's last registration (before a `return
+    services;`), with usings; it is compile-checked and revalidated like the other code plans. Refusals: those of the
+    description plus `ChooseImplementation`, `ChooseCompositionRoot`, `InvalidParams`.
+  - `refactor/prepare` action `csharp.fixAll`: `PrepareParams.fixAll` `{actionId, scope}` with `documentUri`. `actionId`
+    is one of `csharp.edit.varToExplicit`, `.explicitToVar`, `.toExpressionBody`, `.toBlockBody`,
+    `.usingToDeclaration`, `.toObjectInitializer`, `.toInterpolatedString`, `.stringFormatToInterpolated`; `scope` is
+    `document`, `project` (every project of the document) or `solution`. Every occurrence is computed exactly like
+    the single edit action; a document that would get a new compiler error is redone occurrence by occurrence and
+    the occurrences that add an error are skipped (a limitation says how many); generated and read-only files are
+    skipped. One plan (compile-checked, revalidated, applied by the EditApplier, Undo); the request honours
+    `$/cancelRequest`. Refusals: `NotApplicable` (not a scope action), `NoDocument`, `NoChanges`,
+    `TooManyOccurrences` (more than 20000), `InvalidParams`. Compiler and third-party analyzer diagnostics are not
+    fixed in scope (Refyntra has no code fixes for them); OR1001 deliberately has no code fix.
 - Additive (EF Core): relation kinds `efcore.*` and group `data` (above); `SearchFilters.entity?: boolean` ("entity:")
   and `SearchFilters.table?: string` ("table:NAME") return EF Core entities as symbol items. Older hosts ignore the
   filters (they return a normal symbol search); older clients render the kinds and the group generically. The
@@ -288,6 +332,7 @@ issuing semantic requests.
 | `code/editActions` | req | `EditActionsParams` `{…, uri, range, actionId?}` | `EditActionsResult` (since 1.9; Convert / Inline / Introduce) |
 | `code/postfix` | req | `PostfixParams` `{…, uri, position}` | `PostfixResult` (since 1.10; postfix templates) |
 | `code/generate` | req | `GenerateParams` `{…, uri, position, kind?, members?, equatable?, operators?}` | `GenerateResult` (since 1.10; Generate) |
+| `code/constructorActions` | req | `ConstructorActionsParams` `{…, uri, position, actionId?, member?, members?, type?, constructorId?, typeId?}` | `ConstructorActionsResult` (since 1.11; constructor / DI helpers) |
 | `workspace/didDeleteFiles` | notif | `{workspaceId, sequence, workspaceRevision, files: [{uri}]}` | – (since 1.6; consumes a document sequence) |
 | `analysis/run` | req | `AnalysisRunParams` `{traceId, workspaceId, snapshotId, uri?}` | `AnalysisRunResult` (since 1.1, additive; see "Analysis") |
 | `$/cancelRequest` | notif | `{id}` | – |

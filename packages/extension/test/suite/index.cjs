@@ -1555,6 +1555,8 @@ scenarios['web-frameworks'] = require('./webFrameworks.cjs').cases({ api, waitFo
 scenarios['web-frameworks-restricted'] = require('./webFrameworks.cjs').restricted({ api, waitFor });
 // Task context (test/suite/taskContext.cjs).
 scenarios['task-context'] = require('./taskContext.cjs').cases({ api, csharp, waitFor });
+// Constructor / DI helpers on Roslyn, Register in DI and Fix in scope through the Refactor Preview (test/suite/ctorDi.cjs).
+scenarios['ctor-di'] = require('./ctorDi.cjs').cases({ api, csharp, waitFor });
 // Native VS Code UI: code actions, CodeLens, Call/Type Hierarchy, hover, Refactor Preview, Change Signature dialog (test/suite/nativeUi.cjs).
 scenarios['native-ui'] = require('./nativeUi.cjs').cases({ api, csharp, waitFor });
 // Visual (screenshot) scenarios, Docker/Xvfb only (test/suite/visual.cjs, scripts/test/linux-visual.sh).

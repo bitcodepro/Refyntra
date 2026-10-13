@@ -661,19 +661,30 @@ Ctrl+. (or the lightbulb) offers, depending on the cursor:
 | Undeclared `_repo` in `_repo.Get(id)` | **Create field '_repo' and inject via constructor**: the type is inferred for well-known names (`_logger` → `ILogger<A>`, `_mediator`, `_configuration`, …) or chosen from the solution's types (interfaces first, typed text accepted); then offers the DI registration when the type is not registered |
 | Class name | **Generate constructor…** (multi-select picker; readonly, not initialised members preselected), **Add parameters to constructor…** |
 
-Naming follows `.editorconfig` (`dotnet_naming_rule` for private fields: `required_prefix`; `dotnet_style_qualification_for_field`),
-else the class's (or file's) existing private fields (`_camel`, `m_camel`, or `camel` with `this.`), else `_camelCase`.
-These edits only touch the current document, so they are applied directly as one editor change (one **Undo**), like
-VS Code's own quick fixes, without a preview; the C# diagnostics then show any compile error. Adding parameters to an
-**existing** constructor is refused when the class is created with `new` anywhere in the workspace (those calls would
-break; use Change Signature, which updates them); classes created by the DI container need no call-site change.
-**Register in DI** checks Refyntra's DI relations (Related → registrations; text search as a fallback), asks the
-lifetime (Scoped/Transient/Singleton), pairs an interface with its only implementation (or lets you choose), and
-inserts `AddScoped<IB, B>()` after the last registration of the composition root: top-level `builder.Services` in
-`Program.cs`, a `this IServiceCollection` extension method or `ConfigureServices`. Several roots: you choose; none:
-nothing is changed and the message says so. That edit is in another file, so it goes through VS Code's Refactor Preview.
-Limits: a syntax pass (no semantic model), so types are copied as written; a partial class is seen only in the current
-file; a class with a primary constructor gets no explicit constructor (it would need `: this(...)`).
+The C# host computes every one of them with Roslyn (protocol 1.11): types are semantic (written fully qualified, then
+the needed `using` is added and the name simplified, generic types included), every part of a **partial class** counts
+(a field declared in one file is initialised in the constructor of another), and the result is **refused when a changed
+file would get a compiler error** it did not have. Naming follows the `.editorconfig` naming rules for private instance
+fields (`dotnet_naming_rule` → `required_prefix`, `capitalization`; `this.` only where needed or required by
+`dotnet_style_qualification_for_field`), else the type's (or file's) existing private fields (`_camel`, `m_camel`, or
+`camel` with `this.`), else `_camelCase`. An unused constructor parameter of the same type is reused instead of adding
+one. **Create field and inject** infers the type from the name (`_logger` → `ILogger<A>` when
+Microsoft.Extensions.Logging is referenced, `_mediator`, `_configuration`, …), an assignment, or the members used on
+it (`_audit.Record("x", id)` → the only solution interface with `Record`, else the only type); otherwise it asks
+(solution types, interfaces first, a typed name is resolved and imported). Results that touch only documents of the
+cursor's type are applied directly as one editor change (one **Undo**) while every document is unchanged. Adding
+parameters to an **existing** constructor is refused when it is called (`new`, `: this(...)`/`: base(...)`, or an
+implicit base call of a parameterless one): use Change Signature, which updates the calls; classes created by the DI
+container need no call-site change. A class with a primary constructor gets the new parameter there and the member an
+`= parameter` initializer (only in the part that declares the primary constructor); positional record parameters get
+no actions (they already are properties).
+**Register in DI** uses Refyntra's DI relations: an already registered service is refused, an interface is paired with
+its only source implementation (several: you choose), you pick the lifetime (Scoped/Transient/Singleton), and the
+composition roots are those the DI analysis found (top-level `builder.Services`, `this IServiceCollection` extension
+methods, `ConfigureServices`, any method with unconditional registrations). Several roots: you choose; none: nothing
+is changed and the message says so. The registration (`AddScoped<IB, B>()` after the root's last registration, usings
+added) is a plan in another file, so it goes through the preview (Refactor Preview with `refyntra.preview.style`
+`native`), is revalidated before it is applied and can be undone.
 
 ### Rider-style edit actions (C#)
 
@@ -715,8 +726,18 @@ the cursor (C# editors only; VS Code has no default binding for these keys). Pro
 Inline Method, Field and Parameter change one document: every call or read must be in the file of the action
 (otherwise refused with *CrossFile*). Introduce Field / Constant change one document; Introduce Parameter is a previewed
 plan over every changed file (`refactor/prepare` `csharp.introduceParameter`, command `refyntra.introduceParameter`).
-Names are suggested from the expression (no prompt); rename them afterwards with Rename (F2). Not yet available: Fix in
-scope.
+Names are suggested from the expression (no prompt); rename them afterwards with Rename (F2).
+
+**Fix in scope** (Rider's "apply to file / project / solution"): next to **Use explicit type**, **Use 'var'**, **Convert
+to expression / block body**, **Convert to 'using' declaration**, **Use object initializer**, **Convert to interpolated
+string** and **Convert 'string.Format' to interpolated string**, the lightbulb offers *… in document, project or
+solution…*; a QuickPick asks for the scope. The host applies the action to every place it applies in that scope
+(`refactor/prepare` `csharp.fixAll`, protocol 1.11), each occurrence computed exactly like the single action, as one
+plan: preview (Refactor Preview with `refyntra.preview.style` `native`), revalidation, the EditApplier and Undo, with
+a cancellable progress notification for large solutions. Occurrences that would give their file a new compiler error
+are skipped (the preview says how many); generated and read-only files are skipped. Compiler and third-party analyzer
+diagnostics have no fix in scope (Refyntra does not run their code fixes), and Refyntra's own rule OR1001 deliberately
+has no code fix (changing a lifetime is an architectural decision).
 
 ### Postfix templates (C#)
 

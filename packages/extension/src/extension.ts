@@ -371,8 +371,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     }),
     vscode.commands.registerCommand('refyntra.changeSignature', (arg?: unknown) => runChangeSignature(engine, previews, editApplier, atTarget(arg))),
     registerCodeActions(engine),
-    registerConstructorActions(engine, editApplier), // constructor / DI helpers (constructorActions.ts)
-    registerEditActions(engine, editApplier), // Convert / Inline / Introduce edit actions computed by Roslyn (protocol 1.9)
+    registerConstructorActions(engine, previews, editApplier), // constructor / DI helpers computed by Roslyn (protocol 1.11)
+    registerEditActions(engine, previews, editApplier), // Convert / Inline / Introduce edit actions computed by Roslyn (protocol 1.9)
     registerPostfix(engine), // C# postfix templates after a dot (protocol 1.10)
     registerGenerate(engine, editApplier), // Generate… / Alt+Insert (protocol 1.10)
     inlineValues.disposable, // C# inline debug values and hover member chains (inlineValues.ts)

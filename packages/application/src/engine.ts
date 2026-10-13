@@ -149,6 +149,10 @@ export interface ActionPrepareOptions {
   newName?: string;
   /** Change Signature: the new parameter list. */
   signature?: import('@refyntra/contracts').SignatureParams;
+  /** Register in DI (protocol 1.11): the lifetime and the choices (target.position is the service). */
+  registration?: import('@refyntra/contracts').RegistrationParams;
+  /** Fix in scope (protocol 1.11): the edit action and the scope around the target document. */
+  fixAll?: import('@refyntra/contracts').FixAllParams;
 }
 
 /** Change Signature: the parameters of the method at the cursor, or why there are none. */
@@ -171,6 +175,14 @@ export type EditActionsOutcome =
 /** Postfix templates (protocol 1.10): the templates for the expression before the dot, or why not. */
 export type PostfixOutcome =
   | { kind: 'templates'; items: import('@refyntra/contracts').PostfixTemplate[]; expressionRange: import('@refyntra/contracts').Range | null; typeName: string | null }
+  | Unavailable;
+
+/** Constructor / DI actions (protocol 1.11): the actions at a position, the edits of one, a question, or the registration choices. */
+export type ConstructorActionsOutcome =
+  | { kind: 'actions'; items: import('@refyntra/contracts').ConstructorActionInfo[] }
+  | { kind: 'edits'; files: import('@refyntra/contracts').DocumentEdits[]; note: string | null; registerTypeId: string | null; registerTypeName: string | null }
+  | { kind: 'ask'; need: 'members' | 'constructor' | 'type'; choices: import('@refyntra/contracts').Choice[]; message: string }
+  | { kind: 'registration'; info: import('@refyntra/contracts').RegistrationInfo }
   | Unavailable;
 
 /** Generate (protocol 1.10): the kinds for the type at the position, or the edits of one kind, or why not. */
@@ -235,6 +247,8 @@ export interface EngineClient {
   postfix?(target: DocumentTarget, token?: CancellationToken): Promise<PostfixOutcome>;
   /** Generate (owned route, protocol 1.10): without `request` the kinds for the type at the position; with it the edits. */
   generate?(target: DocumentTarget, request?: import('./adapters').GenerateRequest, token?: CancellationToken): Promise<GenerateOutcome>;
+  /** Constructor / DI actions (owned route, protocol 1.11): without `request` the actions at the position. */
+  constructorActions?(target: DocumentTarget, request?: import('./adapters').ConstructorRequest, token?: CancellationToken): Promise<ConstructorActionsOutcome>;
   discardPlan(planId: string): void;
   planState(planId: string): PlanState | undefined;
   /** Rule analysis (`analysis/run`) of every route that offers it; one outcome per route, never throws except on cancel. */
@@ -651,6 +665,8 @@ export class RefyntraEngine implements EngineClient {
         ...(options.targetFolderUri ? { targetFolderUri: options.targetFolderUri } : {}),
         ...(options.range ? { range: options.range } : {}),
         ...(options.signature ? { signature: options.signature } : {}),
+        ...(options.registration ? { registration: options.registration } : {}),
+        ...(options.fixAll ? { fixAll: options.fixAll } : {}),
       };
       const prepared = await this.withStaleRetry(async () => {
         // Extract Method works on a selection: no symbol is needed at the cursor.
@@ -761,6 +777,26 @@ export class RefyntraEngine implements EngineClient {
       if (!request) return { kind: 'kinds', typeName: v.typeName ?? null, kinds: v.kinds };
       if (!v.edits) return { kind: 'unavailable', reasonCode: v.reasonCode ?? 'Unavailable', message: v.message ?? 'Nothing can be generated here.', recoveryActions: [] };
       return { kind: 'edits', edits: v.edits, documentHash: v.documentHash ?? null };
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      return this.toUnavailable(adapter, e);
+    }
+  }
+
+  async constructorActions(target: DocumentTarget, request?: import('./adapters').ConstructorRequest, token?: CancellationToken): Promise<ConstructorActionsOutcome> {
+    const adapter = this.o.registry.routeFor(target.uri);
+    if (!adapter || adapter.descriptor.ownership !== 'owned-semantic' || typeof adapter.constructorActions !== 'function') {
+      return { kind: 'unavailable', reasonCode: 'ActionNotSupported', message: 'Constructor actions are not provided for this file by Refyntra.', recoveryActions: [] };
+    }
+    try {
+      const r = await this.withStaleRetry(() => adapter.constructorActions!(target.uri, target.position, request, token), token);
+      const v = r.value;
+      if (!v) return { kind: 'unavailable', reasonCode: 'ProtocolTooOld', message: 'The C# host is too old for the constructor actions; update the extension.', recoveryActions: [] };
+      if (!request) return { kind: 'actions', items: v.items };
+      if (v.registration) return { kind: 'registration', info: v.registration };
+      if (v.need && v.choices) return { kind: 'ask', need: v.need, choices: v.choices, message: v.message ?? '' };
+      if (!v.files) return { kind: 'unavailable', reasonCode: v.reasonCode ?? 'Unavailable', message: v.message ?? 'The action is not available here.', recoveryActions: [] };
+      return { kind: 'edits', files: v.files, note: v.note ?? null, registerTypeId: v.registerTypeId ?? null, registerTypeName: v.registerTypeName ?? null };
     } catch (e) {
       if (e instanceof CancelledError) throw e;
       return this.toUnavailable(adapter, e);

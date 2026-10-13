@@ -1,9 +1,13 @@
 import * as vscode from 'vscode';
 import type { EngineClient } from '@refyntra/application';
+import { CSHARP_FIX_ALL_ACTION } from '@refyntra/contracts';
+import { runCodePlan } from './codeRefactor';
 import { toPosition } from './convert';
 import type { VsCodeEditApplier } from './editApplier';
 import {
   EDIT_ACTION_COMMAND,
+  FIX_ALL_COMMAND,
+  FIX_ALL_SCOPE_ITEMS,
   INTRODUCE_PARAMETER_COMMAND,
   INTRODUCE_PARAMETER_EDIT_ACTION,
   KEYBOARD_ACTIONS,
@@ -11,10 +15,13 @@ import {
   canApply,
   choicePickItems,
   editActionTitle,
+  fixAllVariant,
   groupEditActions,
   offerEditActions,
   parseEditActionTarget,
+  parseFixAllTarget,
 } from './editActionsModel';
+import type { PreviewContentProvider } from './rename';
 
 const CACHE_MS = 4000;
 
@@ -61,12 +68,22 @@ export class EditActionProvider implements vscode.CodeActionProvider {
       }
     }
     if (token.isCancellationRequested) return [];
-    return groupEditActions(offerEditActions(items, context.only?.value)).map((i) => {
+    const out: vscode.CodeAction[] = [];
+    const scoped: vscode.CodeAction[] = [];
+    for (const i of groupEditActions(offerEditActions(items, context.only?.value))) {
       const a = new vscode.CodeAction(editActionTitle(i), vscode.CodeActionKind.Empty.append(i.kind));
       const arg: EditActionTarget = { ...target, actionId: i.actionId, version: document.version, ...(i.choices.length ? { choices: i.choices } : {}) };
       a.command = { command: EDIT_ACTION_COMMAND, title: a.title, arguments: [arg] };
-      return a;
-    });
+      out.push(a);
+      // Fix in scope (protocol 1.11): the same action in the document, the project or the solution (listed after the single actions).
+      const v = fixAllVariant(i);
+      if (v) {
+        const f = new vscode.CodeAction(editActionTitle(v), vscode.CodeActionKind.Empty.append(v.kind));
+        f.command = { command: FIX_ALL_COMMAND, title: f.title, arguments: [{ uri: target.uri, actionId: v.actionId, title: i.title }] };
+        scoped.push(f);
+      }
+    }
+    return [...out, ...scoped];
   }
 }
 
@@ -104,6 +121,26 @@ export async function runEditAction(engine: EngineClient, applier: VsCodeEditApp
   return ok;
 }
 
+/**
+ * Fix in scope: the scope (QuickPick), then the host applies the action to every place in it as one plan
+ * (refactor/prepare csharp.fixAll) — preview, revalidation, EditApplier and Undo like the other code refactorings.
+ */
+export async function runFixAll(engine: EngineClient, previews: PreviewContentProvider, applier: VsCodeEditApplier, arg: unknown): Promise<void> {
+  const t = parseFixAllTarget(arg);
+  if (!t) return;
+  let scope = t.scope;
+  if (!scope) {
+    const pick = await vscode.window.showQuickPick([...FIX_ALL_SCOPE_ITEMS], { title: `Refyntra: ${t.title}`, placeHolder: 'Apply it in…' });
+    if (!pick) return;
+    scope = pick.scope;
+  }
+  const s = scope;
+  const title = `${t.title} in ${s}`;
+  await runCodePlan(engine, previews, applier, title, (token) => engine.prepareAction({ uri: t.uri, position: { line: 0, character: 0 } }, CSHARP_FIX_ALL_ACTION, token, { range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }, fixAll: { actionId: t.actionId, scope: s } }), () =>
+    runFixAll(engine, previews, applier, { ...t, scope: s }),
+  );
+}
+
 /** Keyboard commands (Introduce / Inline Variable) at the active editor's selection. */
 async function runKeyboardAction(engine: EngineClient, applier: VsCodeEditApplier, command: string): Promise<boolean> {
   const spec = KEYBOARD_ACTIONS[command];
@@ -121,8 +158,9 @@ async function runKeyboardAction(engine: EngineClient, applier: VsCodeEditApplie
   return runEditAction(engine, applier, { uri: editor.document.uri.toString(), range: { start: toPosition(range.start), end: toPosition(range.end) }, actionId: spec.actionId, version: editor.document.version });
 }
 
-export function registerEditActions(engine: EngineClient, applier: VsCodeEditApplier): vscode.Disposable {
+export function registerEditActions(engine: EngineClient, previews: PreviewContentProvider, applier: VsCodeEditApplier): vscode.Disposable {
   return vscode.Disposable.from(
+    vscode.commands.registerCommand(FIX_ALL_COMMAND, (arg?: unknown) => runFixAll(engine, previews, applier, arg)),
     vscode.languages.registerCodeActionsProvider({ language: 'csharp', scheme: 'file' }, new EditActionProvider(engine), { providedCodeActionKinds: EditActionProvider.providedCodeActionKinds }),
     vscode.commands.registerCommand(EDIT_ACTION_COMMAND, (arg?: unknown) => runEditAction(engine, applier, arg)),
     ...Object.keys(KEYBOARD_ACTIONS).map((c) => vscode.commands.registerCommand(c, () => runKeyboardAction(engine, applier, c))),

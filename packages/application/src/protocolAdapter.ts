@@ -609,7 +609,7 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
 
   prepare(req: PrepareRequest, token?: CancellationToken): Promise<RouteResult<PrepareResult>> {
     return this.semantic('refactor/prepare', token, (s, snapshotId, traceId) =>
-      s.transport.request('refactor/prepare', { traceId, workspaceId: this.opts.workspaceId, snapshotId, actionId: req.actionId, symbolId: req.symbolId, newName: req.newName, ...(req.renameFile ? { renameFile: true } : {}), ...(req.targetFolderUri ? { targetFolderUri: req.targetFolderUri } : {}), ...(req.documentUri ? { documentUri: req.documentUri } : {}), ...(req.cleanup ? { cleanup: req.cleanup } : {}), ...(req.generatedEdits ? { generatedEdits: req.generatedEdits } : {}), ...(req.range ? { range: req.range } : {}), ...(req.signature ? { signature: req.signature } : {}) }, token),
+      s.transport.request('refactor/prepare', { traceId, workspaceId: this.opts.workspaceId, snapshotId, actionId: req.actionId, symbolId: req.symbolId, newName: req.newName, ...(req.renameFile ? { renameFile: true } : {}), ...(req.targetFolderUri ? { targetFolderUri: req.targetFolderUri } : {}), ...(req.documentUri ? { documentUri: req.documentUri } : {}), ...(req.cleanup ? { cleanup: req.cleanup } : {}), ...(req.generatedEdits ? { generatedEdits: req.generatedEdits } : {}), ...(req.range ? { range: req.range } : {}), ...(req.signature ? { signature: req.signature } : {}), ...(req.registration ? { registration: req.registration } : {}), ...(req.fixAll ? { fixAll: req.fixAll } : {}) }, token),
     );
   }
 
@@ -750,6 +750,24 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
         : [];
       const edits = Array.isArray(r?.edits) ? r.edits.filter((e) => e && e.range && e.range.start && e.range.end && typeof e.newText === 'string') : null;
       return { typeName: r?.typeName ?? null, kinds, edits, documentHash: r?.documentHash ?? null, reasonCode: r?.reasonCode ?? null, message: r?.message ?? null, snapshotId: r?.snapshotId ?? snapshotId };
+    });
+  }
+
+  /** Constructor / DI actions (protocol 1.11): list (no request) or compute one; null for an older host. */
+  constructorActions(uri: string, position: Position, request: import('./adapters').ConstructorRequest | undefined, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').ConstructorActionsResult | null>> {
+    return this.semantic('code/constructorActions', token, async (s, snapshotId, traceId) => {
+      if (s.protocolMinor < 11) return null;
+      const r = await s.transport.request('code/constructorActions', { traceId, workspaceId: this.opts.workspaceId, snapshotId, uri, position, ...(request ?? {}) }, token);
+      const choices = (x: unknown) => (Array.isArray(x) ? x.filter((c) => c && typeof c.id === 'string' && typeof c.label === 'string').map((c) => ({ id: c.id, label: c.label, detail: typeof c.detail === 'string' ? c.detail : null, picked: !!c.picked })) : []);
+      const items = Array.isArray(r?.items) ? r.items.filter((i) => i && typeof i.actionId === 'string' && typeof i.title === 'string').map((i) => ({ ...i, kind: (i.kind === 'quickfix' ? 'quickfix' : 'rewrite') as 'quickfix' | 'rewrite', preferred: !!i.preferred })) : [];
+      const files = Array.isArray(r?.files)
+        ? r.files.filter((f) => f && typeof f.uri === 'string' && typeof f.documentHash === 'string' && Array.isArray(f.edits)).map((f) => ({ ...f, edits: f.edits.filter((e) => e && e.range && e.range.start && e.range.end && typeof e.newText === 'string') }))
+        : null;
+      const reg = r?.registration ? { service: r.registration.service ?? null, serviceId: r.registration.serviceId ?? null, implementations: choices(r.registration.implementations), roots: choices(r.registration.roots), lifetimes: Array.isArray(r.registration.lifetimes) ? r.registration.lifetimes : [] } : null;
+      return {
+        items, files, need: r?.need ?? null, choices: r?.choices ? choices(r.choices) : null, note: r?.note ?? null, registerTypeId: r?.registerTypeId ?? null, registerTypeName: r?.registerTypeName ?? null,
+        registration: reg, reasonCode: r?.reasonCode ?? null, message: r?.message ?? null, snapshotId: r?.snapshotId ?? snapshotId,
+      };
     });
   }
 

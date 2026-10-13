@@ -222,48 +222,6 @@ exports.cases = ({ api, csharp, waitFor }) => {
       },
     ],
     [
-      'constructor: Create and initialize field from a constructor parameter, Undo restores the file',
-      async () => {
-        const p = file('Svc.cs');
-        const original = ['namespace Demo;', '', 'public interface IRepo { }', '', 'public class Svc', '{', '    private readonly IRepo _other;', '', '    public Svc(IRepo other, IRepo repo)', '    {', '        _other = other;', '    }', '}', ''].join('\n');
-        fs.writeFileSync(p, original);
-        try {
-          const uri = vscode.Uri.file(p);
-          const doc = await vscode.workspace.openTextDocument(uri);
-          await vscode.window.showTextDocument(doc);
-          const at = doc.positionAt(original.indexOf('repo)') + 1);
-          const actions = await vscode.commands.executeCommand('vscode.executeCodeActionProvider', uri, new vscode.Range(at, at), undefined, 50);
-          const titles = actions.map((x) => x.title);
-          assert.ok(titles.includes("Create and initialize property 'Repo'"), titles.join(' | '));
-          assert.ok(titles.includes("Register 'IRepo' in DI…"), titles.join(' | '));
-          const create = actions.find((x) => x.title === "Create and initialize field '_repo'");
-          assert.ok(create, titles.join(' | '));
-          assert.equal(await vscode.commands.executeCommand(create.command.command, ...create.command.arguments), true);
-          const text = doc.getText();
-          assert.ok(text.includes('    private readonly IRepo _other;\n    private readonly IRepo _repo;\n'), text);
-          assert.ok(text.includes('        _other = other;\n        _repo = repo;\n    }'), text);
-          await vscode.window.showTextDocument(doc);
-          await vscode.commands.executeCommand('undo');
-          assert.equal(doc.getText(), original, 'one Undo restores the file');
-          // On an unassigned readonly field: Initialize from constructor (creates the constructor).
-          const field = ['namespace Demo;', 'public class W', '{', '    private readonly IRepo _repo;', '}', ''].join('\n');
-          const edit = new vscode.WorkspaceEdit();
-          edit.replace(uri, new vscode.Range(0, 0, doc.lineCount, 0), field);
-          await vscode.workspace.applyEdit(edit);
-          const onField = doc.positionAt(field.indexOf('_repo') + 1);
-          const fa = await vscode.commands.executeCommand('vscode.executeCodeActionProvider', uri, new vscode.Range(onField, onField), undefined, 50);
-          const init = fa.find((x) => x.title === "Initialize '_repo' from constructor");
-          assert.ok(init, fa.map((x) => x.title).join(' | '));
-          assert.equal(await vscode.commands.executeCommand(init.command.command, ...init.command.arguments), true);
-          assert.ok(doc.getText().includes('    public W(IRepo repo)\n    {\n        _repo = repo;\n    }'), doc.getText());
-          await vscode.commands.executeCommand('workbench.action.files.revert');
-        } finally {
-          await vscode.commands.executeCommand('workbench.action.closeAllEditors');
-          fs.rmSync(p, { force: true });
-        }
-      },
-    ],
-    [
       'run: the web app starts with its launch profile, answers on the profile URL, the browser URL is opened; Stop ends it',
       async () => {
         const a = await ready();

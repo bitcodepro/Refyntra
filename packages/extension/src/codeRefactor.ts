@@ -242,7 +242,7 @@ async function buildPreview(preview: RenamePreview): Promise<StoredPreview> {
 }
 
 /** Shared flow of the code refactorings: prepare, preview, confirm, apply, report. */
-async function runCodePlan(
+export async function runCodePlan(
   engine: EngineClient,
   previews: PreviewContentProvider,
   applier: VsCodeEditApplier,

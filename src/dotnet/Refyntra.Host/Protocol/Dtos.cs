@@ -626,6 +626,25 @@ public sealed class PrepareParams : WorkspaceParams
     public RangeDto? Range { get; set; }
     /// <summary>Change Signature (protocol 1.6): the new parameter list.</summary>
     public SignatureParamsDto? Signature { get; set; }
+    /// <summary>Register in DI (protocol 1.11, action csharp.registerDi): the service at documentUri + range.start (or typeId) and the choices.</summary>
+    public RegistrationParamsDto? Registration { get; set; }
+    /// <summary>Fix in scope (protocol 1.11, action csharp.fixAll): the edit action and the scope around documentUri.</summary>
+    public FixAllParamsDto? FixAll { get; set; }
+}
+
+public sealed class RegistrationParamsDto
+{
+    public string? TypeId { get; set; }
+    public string Lifetime { get; set; } = "Scoped";
+    public string? ImplementationId { get; set; }
+    public string? RootId { get; set; }
+}
+
+public sealed class FixAllParamsDto
+{
+    public string ActionId { get; set; } = "";
+    /// <summary>"document" | "project" | "solution".</summary>
+    public string Scope { get; set; } = "document";
 }
 
 public sealed class PrepareResultDto
@@ -807,6 +826,78 @@ public sealed class GenerateResultDto
     public List<GenerateKindDto> Kinds { get; set; } = new();
     public List<TextEditDto>? Edits { get; set; }
     public string? DocumentHash { get; set; }
+    public string? ReasonCode { get; set; }
+    public string? Message { get; set; }
+    public string SnapshotId { get; set; } = "";
+}
+
+/// <summary>code/constructorActions (protocol 1.11): without actionId the constructor / DI actions at the position; with it the edits, a question or a refusal.</summary>
+public sealed class ConstructorActionsParams : WorkspaceParams
+{
+    public string SnapshotId { get; set; } = "";
+    public string Uri { get; set; } = "";
+    public PositionDto Position { get; set; } = new();
+    public string? ActionId { get; set; }
+    public string? Member { get; set; }
+    public List<string>? Members { get; set; }
+    /// <summary>Create field and inject: a documentation comment id ("T:...") of a choice, or a typed type name.</summary>
+    public string? Type { get; set; }
+    /// <summary>The chosen constructor (an id of an earlier "constructor" choice).</summary>
+    public string? ConstructorId { get; set; }
+    /// <summary>csharp.ctor.registerDi: the service type (documentation comment id); absent: the type at the position.</summary>
+    public string? TypeId { get; set; }
+}
+
+public sealed class ConstructorActionDto
+{
+    public string ActionId { get; set; } = "";
+    public string Title { get; set; } = "";
+    /// <summary>"quickfix" | "rewrite".</summary>
+    public string Kind { get; set; } = "";
+    public bool Preferred { get; set; }
+    public string? Member { get; set; }
+    public List<string>? Members { get; set; }
+    public string? TypeId { get; set; }
+}
+
+public sealed class ChoiceDto
+{
+    public string Id { get; set; } = "";
+    public string Label { get; set; } = "";
+    public string? Detail { get; set; }
+    public bool Picked { get; set; }
+}
+
+public sealed class DocumentEditsDto
+{
+    public string Uri { get; set; } = "";
+    public string DocumentHash { get; set; } = "";
+    public List<TextEditDto> Edits { get; set; } = new();
+}
+
+public sealed class RegistrationInfoDto
+{
+    public string? Service { get; set; }
+    public string? ServiceId { get; set; }
+    public List<ChoiceDto> Implementations { get; set; } = new();
+    public List<ChoiceDto> Roots { get; set; } = new();
+    public List<string> Lifetimes { get; set; } = new();
+}
+
+public sealed class ConstructorActionsResultDto
+{
+    public List<ConstructorActionDto> Items { get; set; } = new();
+    /// <summary>The edits of the computed action per document (null when listing, asking or refused).</summary>
+    public List<DocumentEditsDto>? Files { get; set; }
+    /// <summary>"members" | "constructor" | "type": ask the user, then compute again with the answer.</summary>
+    public string? Need { get; set; }
+    public List<ChoiceDto>? Choices { get; set; }
+    public string? Note { get; set; }
+    /// <summary>Create field and inject: the injected type is not registered in DI yet.</summary>
+    public string? RegisterTypeId { get; set; }
+    public string? RegisterTypeName { get; set; }
+    /// <summary>csharp.ctor.registerDi: the choices for the registration (then refactor/prepare csharp.registerDi).</summary>
+    public RegistrationInfoDto? Registration { get; set; }
     public string? ReasonCode { get; set; }
     public string? Message { get; set; }
     public string SnapshotId { get; set; } = "";

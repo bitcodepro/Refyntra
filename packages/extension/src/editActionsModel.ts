@@ -125,3 +125,51 @@ export const KEYBOARD_ACTIONS: Readonly<Record<string, { actionId: string; needs
   'refyntra.introduceVariable': { actionId: 'csharp.edit.introduceVariable', needsSelection: true, label: 'Introduce Variable' },
   'refyntra.inlineVariable': { actionId: 'csharp.edit.inlineVariable', needsSelection: false, label: 'Inline Variable' },
 };
+
+// ---------------------------------------------------------------- Fix in scope (protocol 1.11, csharp.fixAll)
+
+/** Command of "… in document, project or solution": asks for the scope, then runs the previewed csharp.fixAll plan. */
+export const FIX_ALL_COMMAND = 'refyntra.fixAll';
+
+/** Style-like edit actions that can be applied to a whole document, project or solution. */
+export const FIX_ALL_ACTIONS: ReadonlySet<string> = new Set([
+  'csharp.edit.varToExplicit',
+  'csharp.edit.explicitToVar',
+  'csharp.edit.toExpressionBody',
+  'csharp.edit.toBlockBody',
+  'csharp.edit.usingToDeclaration',
+  'csharp.edit.toObjectInitializer',
+  'csharp.edit.toInterpolatedString',
+  'csharp.edit.stringFormatToInterpolated',
+]);
+
+export type FixAllScope = 'document' | 'project' | 'solution';
+
+/** The scope variant of an offered single action (absent when the action cannot be applied in a scope). */
+export function fixAllVariant(group: EditActionGroup): { title: string; kind: string; actionId: string } | undefined {
+  if (group.choices.length > 0 || !FIX_ALL_ACTIONS.has(group.actionId)) return undefined;
+  return { title: `${group.title} in document, project or solution…`, kind: group.kind, actionId: group.actionId };
+}
+
+export const FIX_ALL_SCOPE_ITEMS: readonly { label: string; description: string; scope: FixAllScope }[] = [
+  { label: 'Document', description: 'this file', scope: 'document' },
+  { label: 'Project', description: 'every file of the project(s) of this file', scope: 'project' },
+  { label: 'Solution', description: 'every C# file of the loaded solution', scope: 'solution' },
+];
+
+export interface FixAllTarget {
+  uri: string;
+  actionId: string;
+  title: string;
+  scope?: FixAllScope;
+}
+
+/** The argument of FIX_ALL_COMMAND, or undefined when malformed. */
+export function parseFixAllTarget(arg: unknown): FixAllTarget | undefined {
+  if (!arg || typeof arg !== 'object') return undefined;
+  const a = arg as { uri?: unknown; actionId?: unknown; title?: unknown; scope?: unknown };
+  if (typeof a.uri !== 'string' || !a.uri.startsWith('file:') || typeof a.actionId !== 'string' || !FIX_ALL_ACTIONS.has(a.actionId)) return undefined;
+  const t: FixAllTarget = { uri: a.uri, actionId: a.actionId, title: typeof a.title === 'string' ? a.title : a.actionId };
+  if (a.scope === 'document' || a.scope === 'project' || a.scope === 'solution') t.scope = a.scope;
+  return t;
+}

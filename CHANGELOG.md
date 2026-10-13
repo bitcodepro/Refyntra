@@ -4,6 +4,37 @@ All notable changes are listed here. The project is alpha; nothing has been rele
 
 ## Unreleased
 
+### Changed (constructor and DI helpers on Roslyn)
+
+- The constructor / DI helpers (create and initialize field or property from a constructor parameter, initialize an
+  existing unassigned member, initialize all parameters, field from a primary constructor parameter, initialize
+  readonly fields from the constructor (creating it), Create field and inject via constructor, Add parameters to
+  constructor, Register in DI) are computed by the C# host with Roslyn (protocol 1.11, `code/constructorActions`)
+  instead of a text pass: semantic types with the needed usings (generic types included), every part of a partial
+  class (the edit lands in the part with the constructor), `.editorconfig` naming rules (prefix and capitalization),
+  then the existing fields, a compile check of every changed file, and call-site checks with Roslyn references.
+  Same command ids, titles and pickers; the text-based model was removed (an older host shows a message).
+- Improvements: a primary-constructor class gets the new parameter in its primary constructor and the member an
+  `= parameter` initializer; the type of an undeclared `_name` is inferred from the members used on it (the solution
+  types that have them, interfaces first) or from an assignment; `_logger` becomes `ILogger<T>` only when
+  Microsoft.Extensions.Logging is referenced; a typed type name is resolved and imported.
+- **Register in DI** is a previewed plan (`refactor/prepare` `csharp.registerDi`): already-registered services are
+  recognised from Refyntra's DI relations, an interface is paired with its single implementation, the composition
+  roots come from the DI analysis (several: you choose; none: refused), usings are added; revalidated and undoable.
+
+### Added (Fix in scope)
+
+- *… in document, project or solution…* for the style-like edit actions (var ↔ explicit type, expression ↔ block
+  body, `using` declaration, object initializer, interpolated string, `string.Format` → interpolation):
+  `refactor/prepare` `csharp.fixAll` (protocol 1.11) computes every occurrence in the scope as one plan, applied
+  through the preview with revalidation, the EditApplier and Undo; cancellable progress; occurrences that would add a
+  compiler error, generated and read-only files are skipped and reported. Compiler and third-party analyzer
+  diagnostics are out of scope; OR1001 has no code fix by design.
+- Tests: .NET (`ConstructorTests`, `FixAllTests`, `RegisterWithoutRootTests` on the new `Ctor` fixture: partial
+  classes across files, generic types, records, primary constructors, naming styles, call sites, two composition
+  roots, no root, fix-all across two projects), unit tests of the TypeScript glue, e2e scenario `ctor-di` (field with
+  a using, injected field, Register in DI and var → explicit type in the solution through the Refactor Preview, Undo).
+
 ### Added (Convert actions)
 
 - Edit actions (`code/editActions`, no protocol change), computed by Roslyn and compile-checked like the others:

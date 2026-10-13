@@ -28,8 +28,10 @@ public sealed class Engine : IRpcHandler, IDisposable
     /// 1.9: code/editActions (single-document Convert / Inline / Introduce edit actions, compile-checked by Roslyn).
     /// 1.10: code/postfix (postfix templates) and code/generate (Generate: constructor, equality, ToString, properties,
     /// missing / overriding / delegating members).
+    /// 1.11: code/constructorActions (constructor and DI helpers on Roslyn), actions csharp.registerDi
+    /// (PrepareParams.registration) and csharp.fixAll (PrepareParams.fixAll: an edit action in a document, project or solution).
     /// </summary>
-    public const int ProtocolMinor = 10;
+    public const int ProtocolMinor = 11;
     /// <summary>How long workspace/snapshotBarrier waits for a missing document sequence (tests shorten it).</summary>
     public TimeSpan BarrierTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
@@ -117,6 +119,8 @@ public sealed class Engine : IRpcHandler, IDisposable
                 return await PostfixAsync(Params<PostfixParams>(p), ct).ConfigureAwait(false);
             case "code/generate":
                 return await GenerateAsync(Params<GenerateParams>(p), ct).ConfigureAwait(false);
+            case "code/constructorActions":
+                return await ConstructorActionsAsync(Params<ConstructorActionsParams>(p), ct).ConfigureAwait(false);
             case "workspace/runnableProjects":
                 return RunnableProjects(Params<WorkspaceParams>(p));
             case "code/resolveFrame":
@@ -680,6 +684,49 @@ public sealed class Engine : IRpcHandler, IDisposable
         return result;
     }
 
+    private static ChoiceDto Choice(CtorChoice c) => new() { Id = c.Id, Label = c.Label, Detail = c.Detail, Picked = c.Picked };
+
+    private async Task<ConstructorActionsResultDto> ConstructorActionsAsync(ConstructorActionsParams p, CancellationToken ct)
+    {
+        var snap = RequireSnapshot(p.WorkspaceId, p.SnapshotId);
+        var path = PathOf(p.Uri);
+        var position = new Microsoft.CodeAnalysis.Text.LinePosition(p.Position.Line, p.Position.Character);
+        var result = new ConstructorActionsResultDto { SnapshotId = snap.Id };
+        if (string.IsNullOrEmpty(p.ActionId))
+        {
+            foreach (var a in await ConstructorPlanner.ListAsync(snap, path, position, ct).ConfigureAwait(false))
+                result.Items.Add(new ConstructorActionDto { ActionId = a.ActionId, Title = a.Title, Kind = a.Kind, Preferred = a.Preferred, Member = a.Member, Members = a.Members?.ToList(), TypeId = a.TypeId });
+            return result;
+        }
+        if (p.ActionId == ConstructorPlanner.RegisterDi)
+        {
+            var info = await DiRegistrationPlanner.DescribeAsync(snap, path, position, p.TypeId, ct).ConfigureAwait(false);
+            result.ReasonCode = info.ReasonCode;
+            result.Message = info.Message;
+            if (info.ReasonCode == null)
+                result.Registration = new RegistrationInfoDto
+                {
+                    Service = info.Service, ServiceId = info.ServiceId, Lifetimes = DiRegistrationPlanner.Lifetimes.ToList(),
+                    Implementations = info.Implementations.Select(Choice).ToList(), Roots = info.Roots.Select(Choice).ToList(),
+                };
+            return result;
+        }
+        var outcome = await ConstructorPlanner.ComputeAsync(snap, path, position, new CtorRequest(p.ActionId, p.Member, p.Members, p.Type, p.ConstructorId), ct).ConfigureAwait(false);
+        result.ReasonCode = outcome.ReasonCode;
+        result.Message = outcome.Message;
+        result.Need = outcome.Need;
+        result.Choices = outcome.Choices?.Select(Choice).ToList();
+        result.Note = outcome.Note;
+        result.RegisterTypeId = outcome.RegisterTypeId;
+        result.RegisterTypeName = outcome.RegisterTypeName;
+        result.Files = outcome.Files?.Select(f => new DocumentEditsDto
+        {
+            Uri = UriPaths.ToUri(f.Path), DocumentHash = f.DocumentHash,
+            Edits = f.Edits.Select(e => new TextEditDto { Range = ToRange(e.Range), NewText = e.NewText }).ToList(),
+        }).ToList();
+        return result;
+    }
+
     private async Task<HierarchyResultDto> HierarchyAsync(HierarchyParams p, CancellationToken ct)
     {
         if (Array.IndexOf(HierarchyService.Directions, p.Direction) < 0)
@@ -758,7 +805,8 @@ public sealed class Engine : IRpcHandler, IDisposable
     {
         var snap = RequireSnapshot(p.WorkspaceId, p.SnapshotId);
         if (p.ActionId is not ("csharp.rename" or MoveTypePlanner.ActionId or GenerateHandlerPlanner.ActionId or Refactorings.Cleanup.CleanupPlanner.ActionId
-            or SafeDeletePlanner.ActionId or ExtractMethodPlanner.ActionId or ChangeSignaturePlanner.ActionId or EditActionsPlanner.IntroduceParameterAction))
+            or SafeDeletePlanner.ActionId or ExtractMethodPlanner.ActionId or ChangeSignaturePlanner.ActionId or EditActionsPlanner.IntroduceParameterAction
+            or DiRegistrationPlanner.ActionId or EditActionsPlanner.FixAllAction))
             return new PrepareResultDto { Kind = "unavailable", ReasonCode = "UnsupportedAction", Message = $"Action {p.ActionId} is not supported." };
         RenameOutcome outcome;
         if (p.ActionId == Refactorings.Cleanup.CleanupPlanner.ActionId)
@@ -780,6 +828,22 @@ public sealed class Engine : IRpcHandler, IDisposable
                 return new PrepareResultDto { Kind = "unavailable", ReasonCode = "InvalidParams", Message = "Introduce Parameter needs documentUri and range." };
             outcome = await EditActionsPlanner.PrepareIntroduceParameterAsync(snap, PathOf(p.DocumentUri),
                 new Microsoft.CodeAnalysis.Text.LinePositionSpan(new(p.Range.Start.Line, p.Range.Start.Character), new(p.Range.End.Line, p.Range.End.Character)), ct).ConfigureAwait(false);
+        }
+        else if (p.ActionId == DiRegistrationPlanner.ActionId)
+        {
+            // Register in DI (1.11): the service at documentUri + range.start (or registration.typeId).
+            if (p.DocumentUri == null || p.Registration == null)
+                return new PrepareResultDto { Kind = "unavailable", ReasonCode = "InvalidParams", Message = "Register in DI needs documentUri and registration." };
+            var at = p.Range?.Start ?? new PositionDto();
+            outcome = await DiRegistrationPlanner.PrepareAsync(snap, PathOf(p.DocumentUri), new(at.Line, at.Character), p.Registration.TypeId, p.Registration.Lifetime,
+                p.Registration.ImplementationId, p.Registration.RootId, ct).ConfigureAwait(false);
+        }
+        else if (p.ActionId == EditActionsPlanner.FixAllAction)
+        {
+            // Fix in scope (1.11): one edit action in the document, its project or the solution.
+            if (p.DocumentUri == null || p.FixAll == null)
+                return new PrepareResultDto { Kind = "unavailable", ReasonCode = "InvalidParams", Message = "Fix in scope needs documentUri and fixAll." };
+            outcome = await EditActionsPlanner.PrepareFixAllAsync(snap, PathOf(p.DocumentUri), p.FixAll.ActionId, p.FixAll.Scope, ct).ConfigureAwait(false);
         }
         else
         {
