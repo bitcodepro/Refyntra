@@ -159,6 +159,11 @@ export interface ActionPrepareOptions {
 export type SignatureOutcome = { kind: 'signature'; info: import('@refyntra/contracts').SignatureInfo } | Unavailable;
 
 /** File Structure (protocol 1.13) of a document of an owned route. */
+/** Smart Step Into (protocol 1.14) at a stopped position of an owned route. */
+export type StepIntoTargetsOutcome =
+  | { kind: 'targets'; result: import('@refyntra/contracts').StepIntoTargetsResult }
+  | { kind: 'unavailable'; reasonCode: string; message: string; recoveryActions: RecoveryAction[] };
+
 export type FileStructureOutcome =
   | { kind: 'structure'; result: import('@refyntra/contracts').FileStructureResult }
   | { kind: 'unavailable'; reasonCode: string; message: string; recoveryActions: RecoveryAction[] };
@@ -248,6 +253,8 @@ export interface EngineClient {
   hierarchy(target: DocumentTarget, direction: import('@refyntra/contracts').HierarchyDirection | 'subject', token?: CancellationToken): Promise<HierarchyOutcome>;
   /** File Structure (owned route, protocol 1.13): the types and members of the document, optionally inherited members. */
   fileStructure?(uri: string, includeInherited: boolean, token?: CancellationToken): Promise<FileStructureOutcome>;
+  /** Smart Step Into (owned route, protocol 1.14): the calls of the statement a debugger stopped at. */
+  stepIntoTargets?(uri: string, position: Position, token?: CancellationToken): Promise<StepIntoTargetsOutcome>;
   /** Find Usages grouped (owned route, protocol 1.12): classified usages of the symbol at the position, at most `limit`. */
   usages(target: DocumentTarget, limit: number, token?: CancellationToken): Promise<UsagesOutcome>;
   /** Run and Debug (protocol 1.8): the C# projects of the loaded workspace classified for running and debugging. */
@@ -756,6 +763,23 @@ export class RefyntraEngine implements EngineClient {
       if (!result) return { kind: 'unavailable', reasonCode: 'ProtocolTooOld', message: 'The C# host is too old for File Structure; update the extension.', recoveryActions: [] };
       if (result.reasonCode) return { kind: 'unavailable', reasonCode: result.reasonCode, message: 'This file is not part of the loaded solution.', recoveryActions: [] };
       return { kind: 'structure', result };
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      return this.toUnavailable(adapter, e);
+    }
+  }
+
+  async stepIntoTargets(uri: string, position: Position, token?: CancellationToken): Promise<StepIntoTargetsOutcome> {
+    const adapter = this.o.registry.routeFor(uri);
+    if (!adapter || adapter.descriptor.ownership !== 'owned-semantic' || typeof adapter.stepIntoTargets !== 'function') {
+      return { kind: 'unavailable', reasonCode: 'ActionNotSupported', message: 'Smart Step Into is provided for C# files only.', recoveryActions: [] };
+    }
+    try {
+      const r = await this.withStaleRetry(() => adapter.stepIntoTargets!(uri, position, token), token);
+      const result = r.value;
+      if (!result) return { kind: 'unavailable', reasonCode: 'ProtocolTooOld', message: 'The C# host is too old for Smart Step Into; update the extension.', recoveryActions: [] };
+      if (result.reasonCode) return { kind: 'unavailable', reasonCode: result.reasonCode, message: result.reasonCode === 'DocumentNotFound' ? 'This file is not part of the loaded solution.' : 'No statement at the stopped position.', recoveryActions: [] };
+      return { kind: 'targets', result };
     } catch (e) {
       if (e instanceof CancelledError) throw e;
       return this.toUnavailable(adapter, e);

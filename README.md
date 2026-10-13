@@ -702,7 +702,7 @@ Where you find it:
 - **Web apps**: the launch profile's `applicationUrl`, `environmentVariables` and `commandLineArgs` are used; with
   `launchBrowser` the browser opens on the URL the app prints in `Now listening on:` (also while debugging).
 - **Health** has a *Run and debug* section: the bundled netcoredbg and debugpy versions, the Python interpreter, cargo,
-  and whether lldb-dap was found.
+  whether lldb-dap was found, and which .NET debugger features work (and which netcoredbg cannot do).
 
 Debug configuration (`"type": "refyntra-dotnet"`): `project` (built first unless `"build": false`), `framework`,
 `configuration`, `program`, `args`, `cwd`, `env`, `stopAtEntry`, `justMyCode` (default on), `console`, `launchBrowser`;
@@ -730,6 +730,25 @@ from stdin while it is debugged; use Run for that. `"type": "refyntra-python"`: 
   `completions`, when the debugger supports them; netcoredbg does not, so C# shows none). Here **assignments and method
   calls are allowed** (`count = 5`, `list.Clear()`): you typed them. Results are trees (expand loads the members), each
   with **Copy** and **Watch** (adds it to VS Code's Watch view); **Clear** in the panel title.
+
+### Debugger extras for C# (netcoredbg)
+
+What the bundled netcoredbg 3.2.0 can do was measured (its DAP capabilities and a probe of each request, table in
+[ADR-008](docs/adr/ADR-008-run-and-debug.md#decision)); Refyntra offers only what really works:
+
+| Feature | With `refyntra-dotnet` | Keys (preset) |
+|---|---|---|
+| **Smart Step Into** — choose which call of the stopped line to step into | **Refyntra: Smart Step Into**: the C# host lists the calls of the stopped statement in the order they run; pick one and the program stops at the first statement of that method. Calls without source (framework, NuGet packages), abstract/interface calls and delegates are listed with the reason and refused. If the chosen call is not made (`a && Check()`), it stops at the next statement and says so. Works with temporary breakpoints, so another breakpoint reached first stops there | Alt+Shift+F11 (`visualStudio`), Shift+F7 (`resharper`) |
+| **Run to Cursor** | VS Code's own command (editor context menu while stopped) | Ctrl+F10 (`visualStudio`, C# editors) |
+| **Conditional breakpoints** | VS Code's *Edit Condition* (`i == 2`), evaluated by netcoredbg | — |
+| **Function breakpoints** | VS Code's *+* in the Breakpoints view | — |
+| **Break on exception types** | **Refyntra: Break on Exception Types…**: pick `System.InvalidOperationException` and others (or type full names); stored in `refyntra.debug.dotnet.breakOnExceptionTypes`. netcoredbg matches the exact type (no base types, no wildcards). The `all` and `user-unhandled` checkboxes in the Breakpoints view still apply; with `all` ticked every exception breaks | — |
+| **Set Next Statement / Jump to Cursor** | **Not available**: netcoredbg does not implement `gotoTargets`/`goto`, so VS Code does not offer Jump to Cursor | — |
+| **Hit counts, logpoints** | **Not available**: netcoredbg ignores them and stops like at a plain breakpoint; Refyntra warns when you add one to a C# file. Use a condition instead | — |
+| **Restart Frame, data breakpoints** | Not available in netcoredbg | — |
+
+Completion of variable names inside the breakpoint condition editor is not possible: VS Code gives extensions no hook
+into that input.
 
 ### Constructor and DI helpers (C#)
 
@@ -915,6 +934,8 @@ constructor that needs them (the compile check refuses it).
 | `refyntra.stop` / `refyntra.restart` | Stop or restart what Refyntra started (Run view, view title) |
 | `refyntra.selectRunTarget` | Choose project, launch profile, target framework and configuration (the status bar item) |
 | `refyntra.showImmediate` | The Refyntra Immediate panel for the stopped frame (Ctrl+Alt+I in the `visualStudio` preset while debugging) |
+| `refyntra.smartStepInto` | Smart Step Into: choose which call of the stopped C# statement to step into (Alt+Shift+F11 in the `visualStudio` preset, Shift+F7 in the `resharper` preset) |
+| `refyntra.breakOnExceptionTypes` | Choose the .NET exception types a `refyntra-dotnet` session breaks on when thrown |
 | `refyntra.ctor.generate` / `refyntra.ctor.addParameters` | Generate a constructor from chosen fields and properties / add them to the existing constructor (also Ctrl+. on the class name) |
 | `refyntra.introduceParameter` | Introduce Parameter for the selected C# expression: every call site passes it (preview first) |
 | `refyntra.introduceVariable` / `refyntra.inlineVariable` | Introduce a local from the selected C# expression / inline the C# local at the cursor (Ctrl+Alt+V / Ctrl+Alt+N in the `resharper` preset) |

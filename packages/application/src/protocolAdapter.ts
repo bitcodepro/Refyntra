@@ -755,6 +755,21 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
     });
   }
 
+  /** Smart Step Into (protocol 1.14): the calls of the stopped statement; null for an older host. */
+  stepIntoTargets(uri: string, position: Position, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').StepIntoTargetsResult | null>> {
+    return this.semantic('code/stepIntoTargets', token, async (s, snapshotId, traceId) => {
+      if (s.protocolMinor < 14) return null;
+      const r = await s.transport.request('code/stepIntoTargets', { traceId, workspaceId: this.opts.workspaceId, snapshotId, uri, position }, token);
+      const isRange = (x: unknown): boolean => !!x && typeof x === 'object' && !!(x as { start?: unknown }).start && !!(x as { end?: unknown }).end;
+      const targets = Array.isArray(r?.targets)
+        ? r.targets
+            .filter((t) => t && typeof t.label === 'string' && typeof t.kind === 'string' && isRange(t.callRange))
+            .map((t) => ({ ...t, detail: typeof t.detail === 'string' ? t.detail : '', isVirtual: !!t.isVirtual, breakAt: t.breakAt && typeof t.breakAt.uri === 'string' && isRange(t.breakAt.range) ? t.breakAt : null }))
+        : [];
+      return { targets, statement: isRange(r?.statement) ? r.statement : null, nextStatement: r?.nextStatement ?? null, reasonCode: r?.reasonCode ?? null, snapshotId: r?.snapshotId ?? snapshotId };
+    });
+  }
+
   /** Edit actions (protocol 1.9): list at a range, or compute one action; null for an older host. */
   editActions(uri: string, range: import('@refyntra/contracts').Range, actionId: string | undefined, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').EditActionsResult | null>> {
     return this.semantic('code/editActions', token, async (s, snapshotId, traceId) => {

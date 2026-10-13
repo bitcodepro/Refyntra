@@ -151,6 +151,9 @@ checked, and what has **not** been checked by a person with assistive technology
   toggles, Ctrl+C copies the value, Escape returns to the input); an item reads "name = value, type". New results and
   errors are announced in a polite live region. Without a stopped session the input is disabled and the status text
   says why. Colours come from VS Code theme variables (high contrast works); no external files, strict CSP.
+- **Smart Step Into** (Alt+Shift+F11 in the `visualStudio` preset, Shift+F7 in the `resharper` preset) and **Break
+  on Exception Types…** are QuickPicks: each call reads its method, the call as written and, for calls that cannot be
+  stepped into, the reason. Run to Cursor (Ctrl+F10 in the `visualStudio` preset) is VS Code's own command.
 - Constructor and DI helpers are ordinary code actions (Ctrl+., the lightbulb, the Refactor menu); their choices
   (members, lifetime, implementation, composition root, type of a new field) are QuickPicks.
 

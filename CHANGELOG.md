@@ -4,6 +4,26 @@ All notable changes are listed here. The project is alpha; nothing has been rele
 
 ## Unreleased
 
+### Added (debugger extras for C#)
+
+- What the bundled netcoredbg 3.2.0 supports was measured in Docker (DAP `initialize` capabilities and a probe of
+  each request) and recorded in ADR-008; the Run and Debug e2e compares the live capabilities with that table.
+- **Refyntra: Smart Step Into** (Alt+Shift+F11 in the `visualStudio` preset, Shift+F7 in the `resharper` preset, while
+  a `refyntra-dotnet` session is stopped): netcoredbg has no `stepInTargets`, so the C# host lists the calls of the
+  stopped statement in execution order (protocol 1.14 `code/stepIntoTargets`) and Refyntra steps into the chosen one
+  with temporary breakpoints (removed at the next stop); a call that is not made stops at the next statement; calls
+  without source, abstract/interface calls and delegates are refused with the reason.
+- **Run to Cursor** on Ctrl+F10 in the `visualStudio` preset (VS Code's own command, C# editors while stopped).
+- **Refyntra: Break on Exception Types…** and `refyntra.debug.dotnet.breakOnExceptionTypes`: break when exceptions of
+  these exact types are thrown (netcoredbg's `all` filter with a type condition), in addition to the ticked filters.
+- A warning when a C# breakpoint gets a hit count or a log message: netcoredbg ignores both and stops.
+- Health lists the .NET debugger features and what netcoredbg cannot do (Set Next Statement / Jump to Cursor, hit
+  counts, logpoints, Restart Frame, data breakpoints): those are not offered.
+- Tests: .NET `StepIntoTargetsTests` (execution order, body starts, metadata/abstract/delegate reasons, loops,
+  constructors, next statement), unit tests of the model and keybindings, e2e cases in `run-debug` (capabilities,
+  conditional breakpoint, Run to Cursor, Smart Step Into into a call / not called / refused, exception types, notes),
+  visual baseline `smart-step-into` (both themes).
+
 ### Added (File Structure)
 
 - **Refyntra: File Structure** (Ctrl+F12 in the `visualStudio` and `resharper` presets; Cmd+F12 on macOS): the members

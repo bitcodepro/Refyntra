@@ -1002,3 +1002,41 @@ public sealed class ConstructorActionsResultDto
     public string? Message { get; set; }
     public string SnapshotId { get; set; } = "";
 }
+
+/// <summary>code/stepIntoTargets (protocol 1.14): the calls of the statement a debugger stopped at.</summary>
+public sealed class StepIntoTargetsParams : WorkspaceParams
+{
+    public string SnapshotId { get; set; } = "";
+    public string Uri { get; set; } = "";
+    /// <summary>The stopped position (0-based), the start of the debugger's sequence point.</summary>
+    public PositionDto Position { get; set; } = new();
+}
+
+public sealed class StepIntoTargetDto
+{
+    /// <summary>"Calc.Add(int, int)".</summary>
+    public string Label { get; set; } = "";
+    /// <summary>The call as written (one line, at most 80 characters).</summary>
+    public string Detail { get; set; } = "";
+    /// <summary>"method" | "constructor" | "delegate".</summary>
+    public string Kind { get; set; } = "method";
+    public RangeDto CallRange { get; set; } = new();
+    /// <summary>Where the callee's body starts (first statement); null when Refyntra cannot step into it.</summary>
+    public LocationDto? BreakAt { get; set; }
+    /// <summary>Why there is no <see cref="BreakAt"/>: "metadata" | "noBody" | "delegate" | "implicit".</summary>
+    public string? Reason { get; set; }
+    /// <summary>A virtual call: an override may run instead.</summary>
+    public bool IsVirtual { get; set; }
+}
+
+public sealed class StepIntoTargetsResultDto
+{
+    public List<StepIntoTargetDto> Targets { get; set; } = new();
+    /// <summary>The stopped statement.</summary>
+    public RangeDto? Statement { get; set; }
+    /// <summary>The next statement of the same block (or the closing brace of the member): where stepping over ends.</summary>
+    public PositionDto? NextStatement { get; set; }
+    /// <summary>"DocumentNotFound" | "NoStatement".</summary>
+    public string? ReasonCode { get; set; }
+    public string SnapshotId { get; set; } = "";
+}

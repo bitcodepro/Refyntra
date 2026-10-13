@@ -1,4 +1,5 @@
 import type { LoadDiagnostic, ProjectContextInfo } from '@refyntra/contracts';
+import { dotnetDebugFeaturesText } from './debugExtrasModel';
 import type { AdapterHealth, HealthSummary } from '@refyntra/domain';
 
 // The Health page for ordinary users (pure: unit-tested with vitest, no vscode import). Top to bottom: one status
@@ -328,6 +329,7 @@ export function debugSection(d: DebugHealth, trusted: boolean): LanguageSection 
   const ver = (v: string | undefined) => (v ? v.replace(/\s*\(.*$/, '') : undefined);
   const parts: string[] = [];
   parts.push(d.netcoredbg.path ? `.NET: debugging with the bundled ${ver(d.netcoredbg.version) ?? 'netcoredbg'} (MIT, Samsung); running with dotnet run${d.dotnet ? '' : ' (dotnet was not found on PATH)'}.` : `.NET: ${d.netcoredbg.reason ?? 'netcoredbg is not available.'}`);
+  if (d.netcoredbg.path) parts.push(dotnetDebugFeaturesText());
   parts.push(d.debugpy.path ? `Python: debugging with the bundled ${ver(d.debugpy.version) ?? 'debugpy'} (MIT) and ${d.python ? `the interpreter ${d.python}` : 'a Python interpreter, but none was found (install Python or create a .venv)'}.` : 'Python: the bundled debugpy is missing; reinstall Refyntra.');
   parts.push(d.lldbDap ? `Rust: cargo run${d.cargo ? '' : ' (cargo was not found)'}; debugging with lldb-dap from the installed LLVM (${d.lldbDap}).` : `Rust: cargo run${d.cargo ? '' : ' (cargo was not found)'}; debugging needs lldb-dap from an installed LLVM, which was not found (Refyntra does not bundle a Rust debugger, see ADR-008).`);
   parts.push('Node.js: package.json scripts run with npm, pnpm or yarn; debugging uses the JavaScript debugger built into VS Code.');

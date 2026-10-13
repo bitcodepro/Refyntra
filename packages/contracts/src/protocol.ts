@@ -19,8 +19,9 @@ export const PROTOCOL_MAJOR = 1;
  * 1.12: Find Usages grouped (`code/usages`: classified usages) and the Navigate To directions `bases` / `containing`
  *   of `code/hierarchy`.
  * 1.13: File Structure (`code/fileStructure`: types, members, regions and inherited members of one document).
+ * 1.14: Smart Step Into (`code/stepIntoTargets`: the calls of the statement a debugger stopped at).
  */
-export const PROTOCOL_MINOR = 13;
+export const PROTOCOL_MINOR = 14;
 
 /** Zero-based line, UTF-16 code unit character. */
 export interface Position {
@@ -570,6 +571,42 @@ export interface FileStructureResult {
   snapshotId: string;
 }
 
+/** code/stepIntoTargets (protocol 1.14): the calls of the statement a debugger stopped at (Smart Step Into). */
+export interface StepIntoTargetsParams extends WorkspaceParams {
+  snapshotId: string;
+  uri: string;
+  /** The stopped position (0-based): the start of the debugger's sequence point. */
+  position: Position;
+}
+
+/** Why a call cannot be stepped into: no source in the solution, no body (abstract, interface), a delegate, a compiler-generated constructor. */
+export type StepIntoReason = 'metadata' | 'noBody' | 'delegate' | 'implicit';
+
+export interface StepIntoTarget {
+  /** "Calc.Add(int, int)". */
+  label: string;
+  /** The call as written (one line, at most 80 characters). */
+  detail: string;
+  kind: 'method' | 'constructor' | 'delegate';
+  callRange: Range;
+  /** Where the callee's body starts; null when it cannot be stepped into (see reason). */
+  breakAt?: Location | null;
+  reason?: StepIntoReason | null;
+  /** A virtual call: an override may run instead. */
+  isVirtual: boolean;
+}
+
+export interface StepIntoTargetsResult {
+  /** In the order the calls run (arguments before the call that receives them). */
+  targets: StepIntoTarget[];
+  statement?: Range | null;
+  /** The next statement of the same block, or the closing brace of the member: where the statement ends. */
+  nextStatement?: Position | null;
+  /** "DocumentNotFound" | "NoStatement". */
+  reasonCode?: string | null;
+  snapshotId: string;
+}
+
 export interface HierarchyParams extends WorkspaceParams {
   snapshotId: string;
   symbolId: string;
@@ -1052,6 +1089,8 @@ export interface MethodMap {
   'code/usages': [UsagesParams, UsagesResult];
   /** Protocol 1.13. */
   'code/fileStructure': [FileStructureParams, FileStructureResult];
+  /** Protocol 1.14. */
+  'code/stepIntoTargets': [StepIntoTargetsParams, StepIntoTargetsResult];
   'code/references': [SymbolQueryParams, LocationsResult];
   'code/implementations': [SymbolQueryParams, LocationsResult];
   'refactor/prepare': [PrepareParams, PrepareResult];

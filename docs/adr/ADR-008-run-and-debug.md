@@ -74,6 +74,53 @@ Constraints:
 8. **Trust**: every run, debug, build and dynamic configuration requires a trusted workspace; Restricted Mode explains
    instead (Run view welcome, warnings, Health).
 
+9. **Debugger capabilities (netcoredbg 3.2.0-1092).** Measured, not assumed: the DAP `initialize` response of the
+   bundled linux-x64 build in Docker, then each request tried on a console program (2026-10-13). The Run and Debug e2e
+   compares the live `initialize` response with this table on every run (`NETCOREDBG_CAPABILITIES` in
+   `debugExtrasModel.ts`).
+
+   | DAP capability | netcoredbg | Probe | Refyntra |
+   |---|---|---|---|
+   | supportsConfigurationDoneRequest | yes | — | used |
+   | supportsConditionalBreakpoints | yes | `i == 3` in a loop stops once, with i = 3 | VS Code's condition editor; e2e |
+   | supportsHitConditionalBreakpoints | no | `hitCondition: "3"` ignored: stops every time | not offered; a warning when a C# breakpoint has one |
+   | supportsLogPoints | no | `logMessage` ignored: stops like a breakpoint, logs nothing | not offered; a warning when a C# logpoint is added |
+   | supportsFunctionBreakpoints | yes | accepted (bound when the method is loaded) | VS Code's function breakpoints |
+   | supportsDataBreakpoints | no (absent) | — | not offered |
+   | supportsExceptionFilterOptions | yes | `all` + `condition` = comma-separated full type names: breaks only on those types; exact type only (base types, short names, `System.*` do not match); `!Type` excludes a type | **Break on Exception Types** (below) |
+   | supportsExceptionOptions | no (false) | — (the capability says no) | not used |
+   | exceptionBreakpointFilters | `all`, `user-unhandled` | — | VS Code's checkboxes |
+   | supportsExceptionInfoRequest | yes | `CLR/System.InvalidOperationException` | VS Code's exception widget |
+   | supportsSetVariable / supportsSetExpression | yes / yes | `total = 5` | Immediate Window assignments |
+   | supportsTerminateRequest, supportsCancelRequest | yes | — | — |
+   | supportsStepInTargetsRequest | no (absent) | `stepInTargets` fails: `0x80004001` (E_NOTIMPL) | **Smart Step Into** through the C# host (below) |
+   | supportsGotoTargetsRequest | no (absent) | `gotoTargets` fails: E_NOTIMPL | **Set Next Statement / Jump to Cursor not available** (VS Code hides Jump to Cursor; Health and README say so) |
+   | supportsRestartFrame | no (absent) | `restartFrame` fails: E_NOTIMPL | not offered |
+   | supportsCompletionsRequest | no (absent) | — | Immediate Window shows no C# completions |
+   | supportsStepBack, supportsInstructionBreakpoints, supportsReadMemoryRequest | no (absent) | — | — |
+
+   - **Run to Cursor** is VS Code's own command: a temporary breakpoint and Continue, so it works with any adapter
+     that binds breakpoints (e2e). Ctrl+F10 in the `visualStudio` preset (C# editors, while stopped).
+   - **Smart Step Into** (Refyntra: Smart Step Into; Alt+Shift+F11 in the `visualStudio` preset, Shift+F7 in the
+     `resharper` preset, while a `refyntra-dotnet` session is stopped): netcoredbg has no `stepInTargets`, so VS
+     Code's *Step Into Target* is not offered. The host lists the calls of the stopped statement (`code/stepIntoTargets`,
+     protocol 1.14) in the order they run; the user picks one; Refyntra sets temporary breakpoints at the start of the
+     callee's body and at the next statement of the stopped block (where execution goes if the call is not made),
+     waits until netcoredbg has them, continues, and removes them at the next stop or when the session ends. A
+     breakpoint the user already had there is left alone. Honest limits: calls without source (framework, NuGet),
+     abstract/interface calls and delegates are listed but refused with the reason; a virtual call stops only if that
+     implementation runs; another breakpoint, another thread or a recursive call that reaches one of the temporary
+     breakpoints first stops there (the temporary breakpoints are removed all the same); when the statement is the last
+     one of a loop body there is no next-statement guard, so a call that is not made lets the program run on to the
+     next breakpoint.
+   - **Break on Exception Types** (Refyntra: Break on Exception Types…, setting
+     `refyntra.debug.dotnet.breakOnExceptionTypes`): netcoredbg ORs its filters, so the types cannot be added to a
+     ticked `all`; Refyntra sends, right behind VS Code's own `setExceptionBreakpoints` (seen by a debug adapter
+     tracker, before `configurationDone`), the ticked filters plus `all` with the type names as its condition. With
+     `all` ticked every exception breaks anyway and nothing is added. Changing the setting updates running sessions.
+   - **Breakpoint condition completion** is not possible: VS Code's breakpoint condition input has no completion API for
+     extensions (and netcoredbg has no `completions`). Not implemented.
+
 ## Consequences
 
 - VSIX size (win32-x64): 27.89 MiB → 32.36 MiB compressed (+4.47 MiB); unpacked +13.1 MiB (netcoredbg 8.4 MiB, debugpy
@@ -82,5 +129,5 @@ Constraints:
   Upgrading = new version + SHA-256 in `debuggers.json`, then `pnpm notices`, the Docker e2e (it debugs the Runnable
   fixture with netcoredbg and a Python file with debugpy) and the audit.
 - Limitations stated in the support matrix: no .NET debugging on win32-arm64, darwin-x64 and Alpine; no stdin while
-  debugging .NET; no Python attach by process id; Rust debugging only with an installed LLVM; MAUI and Blazor
+  debugging .NET; no hit counts, logpoints, Set Next Statement or Restart Frame with netcoredbg; no Python attach by process id; Rust debugging only with an installed LLVM; MAUI and Blazor
   WebAssembly not run or debugged; WinForms/WPF only on Windows.

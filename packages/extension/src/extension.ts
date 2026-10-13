@@ -45,6 +45,7 @@ import { registerEditActions } from './editActions';
 import { registerGenerate } from './generate';
 import { registerPostfix } from './postfix';
 import { type ImmediateViewProvider, registerImmediate } from './immediate';
+import { type DebugExtras, registerDebugExtras } from './debugExtras';
 import { type CSharpEvaluatableExpressionProvider, type CSharpInlineValuesProvider, registerInlineValues } from './inlineValues';
 import { type RefyntraCodeLensProvider, registerCodeLens } from './codeLens';
 import { registerHierarchy } from './hierarchy';
@@ -134,6 +135,8 @@ export interface RefyntraTestApi {
   inlineValues: { values: CSharpInlineValuesProvider; hover: CSharpEvaluatableExpressionProvider };
   /** The Immediate Window (e2e: evaluates, expands, reads entries). */
   immediate: ImmediateViewProvider;
+  /** Debugger extras for .NET (e2e: Smart Step Into outcome and picks, netcoredbg capabilities, exception types). */
+  debugExtras: DebugExtras;
   /** Navigate To (Alt+`): the open list and choosing a target by id (e2e / visual wait on it instead of sleeping). */
   navigateTo: { state(): NavigateToState; accept(id: string): Promise<boolean> };
   /** The Refyntra Usages view (e2e: groupings, filters, Next/Previous, export, pinned tabs). */
@@ -297,6 +300,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
   const run = registerRun(context, engine, isTrusted);
   const inlineValues = registerInlineValues();
   const immediate = registerImmediate();
+  const debugExtras = registerDebugExtras(engine);
   context.subscriptions.push(run.disposable);
   const debugStatus = () => run.service.debuggers.status();
   const health = new HealthDocument(engine, () => solutions.selected(), debugStatus);
@@ -401,6 +405,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     registerGenerate(engine, editApplier), // Generate… / Alt+Insert (protocol 1.10)
     inlineValues.disposable, // C# inline debug values and hover member chains (inlineValues.ts)
     immediate.disposable, // Refyntra Immediate panel (immediate.ts)
+    debugExtras.disposable, // Smart Step Into, Break on Exception Types, notes on unsupported breakpoint options (debugExtras.ts)
     registerHierarchy(engine), // built-in Call / Type Hierarchy for C# (protocol 1.7)
     registerMediatRHover(engine),
     vscode.commands.registerCommand('refyntra.statusMenu', () => statusBar.showMenu()),
@@ -470,6 +475,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     run: run.service,
     inlineValues: { values: inlineValues.values, hover: inlineValues.hover },
     immediate: immediate.provider,
+    debugExtras: debugExtras.extras,
     navigateTo: { state: () => navigateToState(), accept: (id) => acceptNavigateTarget(id) },
     usages: usages.provider,
     recent: recent.service,

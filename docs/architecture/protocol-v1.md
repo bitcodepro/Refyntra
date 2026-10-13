@@ -308,6 +308,23 @@ a test class. It is not part of `initialize.capabilities`.
     implicitly declared members, members inaccessible from the type, and members the type (any partial part) overrides
     or redeclares. `regions` are the `#region` / `#endregion` pairs (name, range). `reasonCode` `DocumentNotFound`:
     the document is not in the snapshot. Sent only to hosts with minor ≥ 13.
+- 1.14 (additive): Smart Step Into.
+  - `code/stepIntoTargets` `StepIntoTargetsParams` `{traceId, workspaceId, snapshotId, uri, position}` →
+    `StepIntoTargetsResult` `{targets, statement?, nextStatement?, reasonCode?, snapshotId}`. `position` is where a
+    debugger stopped (the start of its sequence point, 0-based); leading blanks are skipped. The host takes the
+    innermost statement (not a block) or expression body there and lists its invocations and object creations in the
+    order they run (an argument or receiver before the call that uses it); calls inside lambdas, local functions and
+    nested statements (a loop body when stopped at the loop header) are not calls of this statement. Each
+    `StepIntoTarget` has `label` (`Calc.Add(int, int)`), `detail` (the call as written, one line, at most 80
+    characters), `kind` (`method`, `constructor`, `delegate`), `callRange`, `breakAt` (a `Location` with an empty
+    range: the first statement of the callee's body, its expression body, a constructor initializer, or the closing
+    brace of an empty body; extension methods, generic and partial methods resolve to their source definition), and
+    `reason` when `breakAt` is null: `metadata` (no source in the solution), `noBody` (abstract, interface, extern,
+    partial without implementation: the method that runs is chosen at run time), `delegate`, `implicit`
+    (compiler-generated constructor). `isVirtual`: an override may run instead. `statement` is the stopped statement;
+    `nextStatement` the next statement of the same block, of the top-level statements, or the closing brace when the
+    statement is the last of a member body (null otherwise, e.g. the last statement of a loop body). `reasonCode`:
+    `DocumentNotFound`, `NoStatement`. Sent only to hosts with minor ≥ 14.
 - Additive (EF Core): relation kinds `efcore.*` and group `data` (above); `SearchFilters.entity?: boolean` ("entity:")
   and `SearchFilters.table?: string` ("table:NAME") return EF Core entities as symbol items. Older hosts ignore the
   filters (they return a normal symbol search); older clients render the kinds and the group generically. The
@@ -371,6 +388,7 @@ issuing semantic requests.
 | `code/generate` | req | `GenerateParams` `{…, uri, position, kind?, members?, equatable?, operators?}` | `GenerateResult` (since 1.10; Generate) |
 | `code/usages` | req | `UsagesParams` `{…, symbolId, limit?}` | `UsagesResult` (since 1.12; Find Usages grouped) |
 | `code/fileStructure` | req | `FileStructureParams` `{…, uri, includeInherited?}` | `FileStructureResult` (since 1.13; File Structure) |
+| `code/stepIntoTargets` | req | `StepIntoTargetsParams` `{…, uri, position}` | `StepIntoTargetsResult` (since 1.14; Smart Step Into) |
 | `code/constructorActions` | req | `ConstructorActionsParams` `{…, uri, position, actionId?, member?, members?, type?, constructorId?, typeId?}` | `ConstructorActionsResult` (since 1.11; constructor / DI helpers) |
 | `workspace/didDeleteFiles` | notif | `{workspaceId, sequence, workspaceRevision, files: [{uri}]}` | – (since 1.6; consumes a document sequence) |
 | `analysis/run` | req | `AnalysisRunParams` `{traceId, workspaceId, snapshotId, uri?}` | `AnalysisRunResult` (since 1.1, additive; see "Analysis") |

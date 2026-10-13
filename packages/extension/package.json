@@ -424,6 +424,17 @@
         "category": "Refyntra"
       },
       {
+        "command": "refyntra.smartStepInto",
+        "title": "Smart Step Into",
+        "category": "Refyntra",
+        "enablement": "inDebugMode && debugType == 'refyntra-dotnet' && debugState == 'stopped'"
+      },
+      {
+        "command": "refyntra.breakOnExceptionTypes",
+        "title": "Break on Exception Types…",
+        "category": "Refyntra"
+      },
+      {
         "command": "refyntra.immediate.clear",
         "title": "Clear Immediate Window",
         "category": "Refyntra",
@@ -1680,6 +1691,16 @@
           "default": true,
           "markdownDescription": "Show values of C# locals, parameters and assigned fields after the lines of the stopped method (up to the stopped line) while debugging with `refyntra-dotnet`. Only names and `this.member` are evaluated (watch context), never method calls; netcoredbg may run property getters. VS Code shows them when `#debug.inlineValues#` is `auto` (the default, which uses language providers like this one) or `on`."
         },
+        "refyntra.debug.dotnet.breakOnExceptionTypes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_`]*)+(\\+[A-Za-z_][A-Za-z0-9_`]*)*$",
+            "patternErrorMessage": "A full type name: Namespace.TypeName (nested types: Namespace.Outer+Inner)."
+          },
+          "default": [],
+          "markdownDescription": "Full names of .NET exception types (`System.InvalidOperationException`) a `refyntra-dotnet` session breaks on when they are thrown, in addition to the ticked exception filters (`all`, `user-unhandled`). netcoredbg matches the exact type: base types and wildcards do not match. Choose them with **Refyntra: Break on Exception Types…**."
+        },
         "refyntra.fileStructure.preview": {
           "type": "boolean",
           "default": false,
@@ -1833,6 +1854,22 @@
         "key": "ctrl+alt+i",
         "mac": "cmd+alt+i",
         "when": "config.refyntra.keybindings.preset == 'visualStudio' && inDebugMode"
+      },
+      {
+        "command": "refyntra.smartStepInto",
+        "key": "alt+shift+f11",
+        "when": "config.refyntra.keybindings.preset == 'visualStudio' && inDebugMode && debugType == 'refyntra-dotnet' && debugState == 'stopped'"
+      },
+      {
+        "command": "refyntra.smartStepInto",
+        "key": "shift+f7",
+        "when": "config.refyntra.keybindings.preset == 'resharper' && inDebugMode && debugType == 'refyntra-dotnet' && debugState == 'stopped'"
+      },
+      {
+        "command": "editor.debug.action.runToCursor",
+        "key": "ctrl+f10",
+        "mac": "cmd+f10",
+        "when": "config.refyntra.keybindings.preset == 'visualStudio' && inDebugMode && debugState == 'stopped' && editorTextFocus && editorLangId == csharp"
       }
     ],
     "breakpoints": [

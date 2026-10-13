@@ -1,4 +1,5 @@
 import { type HealthSummary, formatAdapterHealth, projectCounts } from '@refyntra/domain';
+import { dotnetDebugFeaturesText } from './debugExtrasModel';
 import { type DebugHealth, buildHealthPage, renderHealthPageText } from './healthPageModel';
 import { reasonPhrase } from './terminology';
 
@@ -61,6 +62,7 @@ export function renderHealth(h: HealthSummary, extra: { solution?: string | unde
       `- dotnet: ${d.dotnet ? esc(d.dotnet) : 'not found on PATH'}`,
       `- cargo: ${d.cargo ? esc(d.cargo) : 'not found'}`,
       `- lldb-dap (Rust debugging): ${d.lldbDap ? esc(d.lldbDap) : 'not found'}`,
+      ...(d.netcoredbg.path ? [`- ${esc(dotnetDebugFeaturesText())}`] : []),
       '',
     );
   }

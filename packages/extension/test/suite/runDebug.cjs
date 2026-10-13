@@ -284,6 +284,154 @@ exports.cases = ({ api, csharp, waitFor }) => {
       },
     ],
     [
+      'debug extras: netcoredbg capabilities match ADR-008; a conditional breakpoint stops only when it holds; Run to Cursor; Smart Step Into',
+      async () => {
+        const a = await ready();
+        track();
+        const rel = 'ConsoleApp/Program.cs';
+        const uri = vscode.Uri.file(file(rel));
+        const loop = await lineOf(rel, 'total += Calc.Square(i);');
+        const addLine = await lineOf(rel, 'total += Calc.Add(');
+        const bigLine = await lineOf(rel, 'var big = ');
+        const failLine = await lineOf(rel, 'Calc.TryFail();');
+        const outLine = await lineOf(rel, 'Console.Out.WriteLine');
+        const twiceBody = await lineOf('ConsoleApp/Calc.cs', 'return x * 2;');
+        const cond = new vscode.SourceBreakpoint(new vscode.Location(uri, new vscode.Position(loop, 0)), true, 'i == 2');
+        vscode.debug.addBreakpoints([cond]);
+        const extras = a.debugExtras;
+        const stops = (s) => eventsOf(s, 'stopped');
+        const nthStop = (s, n, what) => waitFor(() => stops(s)[n - 1], what, 120000);
+        const top = async (s, threadId) => (await s.customRequest('stackTrace', { threadId, startFrame: 0, levels: 1 })).stackFrames[0];
+        const value = async (s, frameId, expression) => (await s.customRequest('evaluate', { expression, frameId, context: 'watch' })).result;
+        /** VS Code focuses the new top frame a moment after the stopped event; its Continue / Run to Cursor act on the focused thread. */
+        const focused = (s) =>
+          waitFor(async () => {
+            const it = vscode.debug.activeStackItem;
+            if (!(it instanceof vscode.DebugStackFrame) || it.session.id !== s.id) return false;
+            const st = await s.customRequest('stackTrace', { threadId: it.threadId, startFrame: 0, levels: 1 });
+            return st.stackFrames[0]?.id === it.frameId;
+          }, 'VS Code focuses the stopped frame', 30000);
+        async function runToCursor(s, line, n) {
+          await focused(s);
+          const doc = await vscode.workspace.openTextDocument(uri);
+          await vscode.window.showTextDocument(doc, { selection: new vscode.Range(line, 0, line, 0), preview: false });
+          await vscode.commands.executeCommand('editor.debug.action.runToCursor');
+          const e = await nthStop(s, n, `stop #${n} (Run to Cursor, line ${line + 1})`);
+          const f = await top(s, e.body.threadId);
+          assert.equal(f.line, line + 1, `Run to Cursor stopped at line ${line + 1}`);
+          return { e, f };
+        }
+        const userBreakpoints = () => vscode.debug.breakpoints.length;
+        try {
+          const session = await startedSession(() => a.run.debug(target(a, 'ConsoleApp').id), 'refyntra-dotnet');
+          const done = ended(session);
+          // 1. Conditional breakpoint: the loop runs four times, it stops once, with i == 2.
+          const first = await nthStop(session, 1, 'the conditional breakpoint');
+          assert.equal(first.body.reason, 'breakpoint');
+          let f = await top(session, first.body.threadId);
+          assert.equal(f.line, loop + 1);
+          assert.equal(await value(session, f.id, 'i'), '2');
+          assert.equal(await value(session, f.id, 'total'), '1');
+          // The capabilities netcoredbg announced are the table in ADR-008 (absent = false).
+          const caps = extras.hooks.capabilities;
+          assert.ok(caps, 'the initialize response was seen');
+          for (const [k, v] of Object.entries(extras.expectedCapabilities)) assert.equal(!!caps[k], v, `netcoredbg ${k}`);
+
+          // 2. Run to Cursor (VS Code's command, Ctrl+F10 in the visualStudio preset): the loop ends without another
+          // stop at the conditional breakpoint (i == 3 does not hold).
+          ({ f } = await runToCursor(session, addLine, 2));
+          assert.equal(await value(session, f.id, 'total'), '14');
+
+          // 3. Smart Step Into: the calls of the statement in the order they run; into Twice (Square already ran).
+          const before = userBreakpoints();
+          extras.hooks.pick = (items) => items.find((i) => i.target.label === 'Calc.Twice(int)');
+          await focused(session);
+          let out = await extras.smartStepInto();
+          assert.deepEqual(extras.hooks.lastTargets.targets.map((t) => t.label), ['Calc.Square(int)', 'Calc.Twice(int)', 'Calc.Add(int, int)']);
+          assert.equal(out.kind, 'target', JSON.stringify(out));
+          assert.equal(out.at.line, twiceBody + 1);
+          assert.ok(out.at.path.replace(/\\/g, '/').endsWith('ConsoleApp/Calc.cs'), out.at.path);
+          f = await top(session, stops(session)[2].body.threadId);
+          assert.equal(f.line, twiceBody + 1);
+          assert.equal(await value(session, f.id, 'x'), '3');
+          assert.equal(userBreakpoints(), before, 'the temporary breakpoints are removed');
+
+          // 4. A call that is not made (short-circuit): Smart Step Into stops at the next statement and says so.
+          await runToCursor(session, bigLine, 4);
+          extras.hooks.pick = (items) => items.find((i) => i.target.label === 'Calc.Check(int)');
+          await focused(session);
+          out = await extras.smartStepInto();
+          assert.equal(out.kind, 'returned', JSON.stringify(out));
+          assert.equal(out.at.line, failLine + 1);
+          assert.ok(extras.hooks.messages.some((m) => /Calc\.Check\(int\) was not called/.test(m)));
+          assert.equal(userBreakpoints(), before);
+
+          // 5. A framework method (no source): listed, refused honestly, the program stays where it is.
+          await runToCursor(session, outLine, 6);
+          extras.hooks.pick = (items) => items.find((i) => /WriteLine/.test(i.target.label));
+          await focused(session);
+          out = await extras.smartStepInto();
+          assert.equal(out.kind, 'refused', JSON.stringify(out));
+          assert.match(out.message, /no source in the solution/);
+          assert.equal(stops(session).length, 6, 'no continue after a refusal');
+          extras.hooks.pick = undefined;
+
+          await session.customRequest('continue', { threadId: stops(session)[5].body.threadId });
+          await Promise.race([done, new Promise((_, rej) => setTimeout(() => rej(new Error('session did not end')), 60000))]);
+          assert.equal(a.run.hooks.debugExitCodes.get(session.id), 7);
+          assert.match(eventsOf(session, 'output').map((e) => e.body.output).join(''), /Total 24 False/);
+        } finally {
+          extras.hooks.pick = undefined;
+          vscode.debug.removeBreakpoints([cond]);
+          await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+        }
+      },
+    ],
+    [
+      'debug extras: Break on Exception Types stops on the chosen type only; logpoints and hit counts get a note',
+      async () => {
+        const a = await ready();
+        track();
+        const extras = a.debugExtras;
+        const throwLine = await lineOf('ConsoleApp/Calc.cs', 'throw new InvalidOperationException');
+        try {
+          await vscode.commands.executeCommand('refyntra.breakOnExceptionTypes', ['System.InvalidOperationException']);
+          let session = await startedSession(() => a.run.debug(target(a, 'ConsoleApp').id), 'refyntra-dotnet');
+          let done = ended(session);
+          const stop = await waitFor(() => eventsOf(session, 'stopped')[0], 'the exception stop', 240000);
+          assert.equal(stop.body.reason, 'exception');
+          const f = (await session.customRequest('stackTrace', { threadId: stop.body.threadId, startFrame: 0, levels: 1 })).stackFrames[0];
+          assert.equal(f.line, throwLine + 1);
+          const info = await session.customRequest('exceptionInfo', { threadId: stop.body.threadId });
+          assert.match(info.exceptionId, /System\.InvalidOperationException/);
+          await session.customRequest('continue', { threadId: stop.body.threadId });
+          await Promise.race([done, new Promise((_, rej) => setTimeout(() => rej(new Error('session did not end')), 60000))]);
+          assert.equal(eventsOf(session, 'stopped').length, 1);
+
+          // Another type: the InvalidOperationException is thrown and caught without a stop.
+          await vscode.commands.executeCommand('refyntra.breakOnExceptionTypes', ['System.ArgumentException']);
+          session = await startedSession(() => a.run.debug(target(a, 'ConsoleApp').id), 'refyntra-dotnet');
+          done = ended(session);
+          await Promise.race([done, new Promise((_, rej) => setTimeout(() => rej(new Error('session did not end')), 240000))]);
+          assert.equal(eventsOf(session, 'stopped').length, 0, 'no stop for a type that is not thrown');
+          assert.equal(a.run.hooks.debugExitCodes.get(session.id), 7);
+        } finally {
+          await vscode.workspace.getConfiguration('refyntra').update('debug.dotnet.breakOnExceptionTypes', undefined, vscode.ConfigurationTarget.Workspace);
+        }
+        // netcoredbg has no logpoints and no hit counts (it stops at them): Refyntra says so when one is added in C#.
+        const uri = vscode.Uri.file(file('ConsoleApp/Program.cs'));
+        const log = new vscode.SourceBreakpoint(new vscode.Location(uri, new vscode.Position(2, 0)), true, undefined, undefined, 'greeting={greeting}');
+        const hit = new vscode.SourceBreakpoint(new vscode.Location(uri, new vscode.Position(3, 0)), true, undefined, '3');
+        vscode.debug.addBreakpoints([log, hit]);
+        try {
+          await waitFor(() => extras.hooks.messages.some((m) => /does not support logpoints/.test(m)), 'the logpoint note', 10000);
+          await waitFor(() => extras.hooks.messages.some((m) => /does not support hit counts/.test(m)), 'the hit count note', 10000);
+        } finally {
+          vscode.debug.removeBreakpoints([log, hit]);
+        }
+      },
+    ],
+    [
       'run: Generate launch.json writes the configurations; Health names the bundled debuggers',
       async () => {
         const a = await ready();

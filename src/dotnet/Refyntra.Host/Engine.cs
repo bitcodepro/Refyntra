@@ -32,8 +32,9 @@ public sealed class Engine : IRpcHandler, IDisposable
     /// (PrepareParams.registration) and csharp.fixAll (PrepareParams.fixAll: an edit action in a document, project or solution).
     /// 1.12: code/usages (classified usages) and the code/hierarchy directions "bases" / "containing".
     /// 1.13: code/fileStructure (File Structure: types, members, regions and inherited members of a document).
+    /// 1.14: code/stepIntoTargets (Smart Step Into: the calls of the statement a debugger stopped at).
     /// </summary>
-    public const int ProtocolMinor = 13;
+    public const int ProtocolMinor = 14;
     /// <summary>How long workspace/snapshotBarrier waits for a missing document sequence (tests shorten it).</summary>
     public TimeSpan BarrierTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
@@ -127,6 +128,8 @@ public sealed class Engine : IRpcHandler, IDisposable
                 return await GenerateAsync(Params<GenerateParams>(p), ct).ConfigureAwait(false);
             case "code/constructorActions":
                 return await ConstructorActionsAsync(Params<ConstructorActionsParams>(p), ct).ConfigureAwait(false);
+            case "code/stepIntoTargets":
+                return await StepIntoTargetsAsync(Params<StepIntoTargetsParams>(p), ct).ConfigureAwait(false);
             case "workspace/runnableProjects":
                 return RunnableProjects(Params<WorkspaceParams>(p));
             case "code/resolveFrame":
@@ -649,6 +652,34 @@ public sealed class Engine : IRpcHandler, IDisposable
             Members = t.Members.Select(Member).ToList(), Inherited = t.Inherited.Select(Member).ToList(),
         }).ToList();
         result.Regions = model.Regions.Select(r => new StructureRegionDto { Name = r.Name, Range = ToRange(r.Range) }).ToList();
+        return result;
+    }
+
+    private async Task<StepIntoTargetsResultDto> StepIntoTargetsAsync(StepIntoTargetsParams p, CancellationToken ct)
+    {
+        var snap = RequireSnapshot(p.WorkspaceId, p.SnapshotId);
+        var result = new StepIntoTargetsResultDto { SnapshotId = snap.Id };
+        var doc = snap.Session.DocumentIdsForPath(PathOf(p.Uri)).Select(snap.Solution.GetDocument).FirstOrDefault(d => d != null);
+        if (doc == null)
+        {
+            result.ReasonCode = "DocumentNotFound";
+            return result;
+        }
+        var model = await StepIntoTargets.ComputeAsync(doc, new Microsoft.CodeAnalysis.Text.LinePosition(p.Position.Line, p.Position.Character), ct).ConfigureAwait(false);
+        if (model == null)
+        {
+            result.ReasonCode = "NoStatement";
+            return result;
+        }
+        result.Statement = ToRange(model.Statement);
+        result.NextStatement = model.NextStatement is { } n ? new PositionDto { Line = n.Line, Character = n.Character } : null;
+        result.Targets = model.Targets.Select(t => new StepIntoTargetDto
+        {
+            Label = t.Label, Detail = t.Detail, Kind = t.Kind, CallRange = ToRange(t.CallSpan), Reason = t.Reason, IsVirtual = t.IsVirtual,
+            BreakAt = t.BreakAt is { } b && t.FilePath != null
+                ? new LocationDto { Uri = UriPaths.ToUri(t.FilePath), Range = new RangeDto { Start = new PositionDto { Line = b.Line, Character = b.Character }, End = new PositionDto { Line = b.Line, Character = b.Character } } }
+                : null,
+        }).ToList();
         return result;
     }
 

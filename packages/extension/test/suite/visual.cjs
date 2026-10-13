@@ -391,6 +391,8 @@ exports.cases = ({ api, csharp, waitFor }) => {
         try {
           assert.equal(await a.run.debug(api.id), true, 'debugging started');
           await waitFor(() => stopped, 'stopped at the breakpoint', 240000);
+          // VS Code opens the Run and Debug view when it focuses the stopped frame: close the side bar only after that.
+          await waitFor(() => vscode.debug.activeStackItem, 'the stopped frame is focused', 30000);
           await vscode.commands.executeCommand('workbench.action.closeSidebar');
           await vscode.commands.executeCommand('workbench.action.closePanel');
           await vscode.window.showTextDocument(doc, { preview: false, selection: new vscode.Range(line, 0, line, 0) });
@@ -404,6 +406,43 @@ exports.cases = ({ api, csharp, waitFor }) => {
           if (env.result && env.result.ref > 0) await a.immediate.expand(env.result.id);
           await sleep(1500);
           await shot('immediate', 2500);
+        } finally {
+          tracker.dispose();
+          vscode.debug.removeBreakpoints([bp]);
+          if (vscode.debug.activeDebugSession) await vscode.debug.stopDebugging();
+          await waitFor(() => !vscode.debug.activeDebugSession, 'debug session ended', 60000);
+          await reset();
+        }
+      },
+    ],
+    [
+      'visual: smart-step-into — the Smart Step Into picker while stopped in Program.cs (a framework call is listed with the reason)',
+      async () => {
+        const a = await ready();
+        await reset();
+        const api = (await a.run.refresh()).find((t) => t.label === 'Shop.Api');
+        const doc = await vscode.workspace.openTextDocument(file(PROGRAM));
+        const line = doc.getText().split(/\r?\n/).findIndex((l) => l.startsWith('var app = builder.Build();'));
+        const bp = new vscode.SourceBreakpoint(new vscode.Location(doc.uri, new vscode.Position(line, 0)));
+        vscode.debug.addBreakpoints([bp]);
+        let stopped = false;
+        const tracker = vscode.debug.registerDebugAdapterTrackerFactory('refyntra-dotnet', {
+          createDebugAdapterTracker: () => ({ onDidSendMessage: (m) => { if (m.type === 'event' && m.event === 'stopped') stopped = true; } }),
+        });
+        try {
+          assert.equal(await a.run.debug(api.id), true, 'debugging started');
+          await waitFor(() => stopped, 'stopped at the breakpoint', 240000);
+          await waitFor(() => vscode.debug.activeStackItem, 'the stopped frame is focused', 30000);
+          await vscode.commands.executeCommand('workbench.action.closeSidebar');
+          await vscode.commands.executeCommand('workbench.action.closePanel');
+          await vscode.window.showTextDocument(doc, { preview: false, selection: new vscode.Range(line, 0, line, 0) });
+          const outcome = vscode.commands.executeCommand('refyntra.smartStepInto');
+          await waitFor(() => a.debugExtras.hooks.pickerOpen && a.debugExtras.hooks.lastTargets, 'the Smart Step Into picker', 60000);
+          assert.deepEqual(a.debugExtras.hooks.lastTargets.targets.map((t) => t.label), ['WebApplicationBuilder.Build()']);
+          parkMouse();
+          await shot('smart-step-into', 2000);
+          key('Escape');
+          assert.equal((await outcome).kind, 'cancelled');
         } finally {
           tracker.dispose();
           vscode.debug.removeBreakpoints([bp]);
