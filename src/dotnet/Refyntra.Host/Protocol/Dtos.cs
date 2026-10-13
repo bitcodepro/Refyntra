@@ -337,7 +337,7 @@ public sealed class HierarchyParams : WorkspaceParams
 {
     public string SnapshotId { get; set; } = "";
     public string SymbolId { get; set; } = "";
-    /// <summary>"incoming" | "outgoing" | "supertypes" | "subtypes".</summary>
+    /// <summary>"incoming" | "outgoing" | "supertypes" | "subtypes" | "bases" | "containing" (the last two: protocol 1.12).</summary>
     public string Direction { get; set; } = "";
 }
 
@@ -355,6 +355,39 @@ public sealed class HierarchyResultDto
     public List<HierarchyItemDto> Items { get; set; } = new();
     public string Completeness { get; set; } = "complete";
     public bool Truncated { get; set; }
+    public string SnapshotId { get; set; } = "";
+}
+
+/// <summary>code/usages (protocol 1.12): the classified usages of a symbol.</summary>
+public sealed class UsagesParams : WorkspaceParams
+{
+    public string SnapshotId { get; set; } = "";
+    public string SymbolId { get; set; } = "";
+    /// <summary>At most this many items (default 1000, at most 50000); <c>total</c> says how many there are.</summary>
+    public int Limit { get; set; }
+}
+
+public sealed class UsageItemDto
+{
+    public string Uri { get; set; } = "";
+    public RangeDto Range { get; set; } = new();
+    /// <summary>read | write | readWrite | invocation | nameof | attribute | inheritance | typeArgument | objectCreation | other.</summary>
+    public string Kind { get; set; } = "other";
+    public string? ContainingMember { get; set; }
+    public string? ContainingType { get; set; }
+    public string? ProjectName { get; set; }
+    public bool IsTest { get; set; }
+    /// <summary>The whole source line of the usage (untrimmed, at most 400 characters).</summary>
+    public string LineText { get; set; } = "";
+}
+
+public sealed class UsagesResultDto
+{
+    public SymbolRefDto? Subject { get; set; }
+    public List<UsageItemDto> Items { get; set; } = new();
+    public int Total { get; set; }
+    public bool Truncated { get; set; }
+    public string Completeness { get; set; } = "complete";
     public string SnapshotId { get; set; } = "";
 }
 

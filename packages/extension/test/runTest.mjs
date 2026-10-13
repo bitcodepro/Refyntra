@@ -314,6 +314,13 @@ const scenarios = visual
         settings: { 'refyntra.rename.apply': true, 'files.autoSave': 'off', 'refyntra.preview.style': 'native' },
         env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' },
       },
+      // Navigate To (Alt+`) and Find Usages grouped (protocol 1.12) on a temp copy of Shop; nothing is edited.
+      {
+        name: 'navigation',
+        copy: 'navigation',
+        trusted: true,
+        env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' },
+      },
       // Stack trace navigation on a temp copy of the StackTraces fixture (path-suffix matching, ambiguity, by symbol).
       {
         name: 'stack-trace',

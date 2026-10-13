@@ -1,3 +1,10 @@
 {
-  "*": []
+  "*": [],
+  "usages": [
+    { "x": 48, "y": 304, "width": 256, "height": 20, "why": "Usages view header: VS Code shows the title or the title-bar actions depending on focus/hover timing" },
+    { "x": 47, "y": 368, "width": 258, "height": 3, "why": "focus outline of the Usages tree (drawn or not depending on focus timing): top" },
+    { "x": 47, "y": 528, "width": 258, "height": 4, "why": "focus outline: bottom" },
+    { "x": 47, "y": 368, "width": 3, "height": 164, "why": "focus outline: left" },
+    { "x": 301, "y": 368, "width": 4, "height": 164, "why": "focus outline: right" }
+  ]
 }

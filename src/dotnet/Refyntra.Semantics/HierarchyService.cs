@@ -19,7 +19,8 @@ public static class HierarchyService
 {
     public const int MaxItems = 500;
 
-    public static readonly string[] Directions = { "incoming", "outgoing", "supertypes", "subtypes" };
+    /// <summary>"bases" and "containing" (protocol 1.12) serve Navigate To (<see cref="NavigationTargets"/>).</summary>
+    public static readonly string[] Directions = { "incoming", "outgoing", "supertypes", "subtypes", "bases", "containing" };
 
     public static bool IsCallable(ISymbol s) => s is IMethodSymbol or IPropertySymbol or IEventSymbol or IFieldSymbol { IsConst: false };
 
@@ -31,10 +32,13 @@ public static class HierarchyService
             "outgoing" => await OutgoingAsync(snapshot, symbol, ct).ConfigureAwait(false),
             "supertypes" => Supertypes(symbol),
             "subtypes" => await SubtypesAsync(snapshot, symbol, ct).ConfigureAwait(false),
+            "bases" => NavigationTargets.Bases(symbol).Select(s => new HierarchyHit(s, new List<Location>())).ToList(),
+            "containing" => NavigationTargets.Containing(symbol).Select(s => new HierarchyHit(s, new List<Location>())).ToList(),
             _ => throw new ArgumentOutOfRangeException(nameof(direction)),
         };
-        var ordered = items
-            .Where(h => h.Symbol.Locations.Any(l => l.IsInSource))
+        var inSource = items.Where(h => h.Symbol.Locations.Any(l => l.IsInSource));
+        // Bases keep their order (nearest first); the others are sorted by file and position.
+        var ordered = direction == "bases" ? inSource.ToList() : inSource
             .OrderBy(h => SymbolFacts.PrimaryLocation(h.Symbol)?.SourceTree?.FilePath, StringComparer.Ordinal)
             .ThenBy(h => SymbolFacts.PrimaryLocation(h.Symbol)?.SourceSpan.Start ?? 0)
             .ToList();

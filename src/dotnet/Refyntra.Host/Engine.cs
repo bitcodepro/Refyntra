@@ -31,7 +31,7 @@ public sealed class Engine : IRpcHandler, IDisposable
     /// 1.11: code/constructorActions (constructor and DI helpers on Roslyn), actions csharp.registerDi
     /// (PrepareParams.registration) and csharp.fixAll (PrepareParams.fixAll: an edit action in a document, project or solution).
     /// </summary>
-    public const int ProtocolMinor = 11;
+    public const int ProtocolMinor = 12;
     /// <summary>How long workspace/snapshotBarrier waits for a missing document sequence (tests shorten it).</summary>
     public TimeSpan BarrierTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
@@ -113,6 +113,8 @@ public sealed class Engine : IRpcHandler, IDisposable
                 return await SignatureAsync(Params<SymbolQueryParams>(p), ct).ConfigureAwait(false);
             case "code/hierarchy":
                 return await HierarchyAsync(Params<HierarchyParams>(p), ct).ConfigureAwait(false);
+            case "code/usages":
+                return await UsagesAsync(Params<UsagesParams>(p), ct).ConfigureAwait(false);
             case "code/editActions":
                 return await EditActionsAsync(Params<EditActionsParams>(p), ct).ConfigureAwait(false);
             case "code/postfix":
@@ -730,7 +732,7 @@ public sealed class Engine : IRpcHandler, IDisposable
     private async Task<HierarchyResultDto> HierarchyAsync(HierarchyParams p, CancellationToken ct)
     {
         if (Array.IndexOf(HierarchyService.Directions, p.Direction) < 0)
-            throw new EngineException(ErrorCodes.InvalidParams, "InvalidParams", "direction must be incoming, outgoing, supertypes or subtypes.");
+            throw new EngineException(ErrorCodes.InvalidParams, "InvalidParams", "direction must be incoming, outgoing, supertypes, subtypes, bases or containing.");
         var snap = RequireSnapshot(p.WorkspaceId, p.SnapshotId);
         var (symbol, project) = await SymbolIds.ResolveAsync(snap, p.SymbolId, ct).ConfigureAwait(false);
         var model = await HierarchyService.QueryAsync(snap, symbol, p.Direction, ct).ConfigureAwait(false);
@@ -744,6 +746,27 @@ public sealed class Engine : IRpcHandler, IDisposable
             }).ToList(),
             Completeness = model.Completeness,
             Truncated = model.Truncated,
+            SnapshotId = snap.Id,
+        };
+    }
+
+    private async Task<UsagesResultDto> UsagesAsync(UsagesParams p, CancellationToken ct)
+    {
+        var snap = RequireSnapshot(p.WorkspaceId, p.SnapshotId);
+        var (symbol, project) = await SymbolIds.ResolveAsync(snap, p.SymbolId, ct).ConfigureAwait(false);
+        var model = await UsageClassifier.FindAsync(snap, symbol, p.Limit, ct).ConfigureAwait(false);
+        var mapper = new Mapper(snap, project, ct);
+        return new UsagesResultDto
+        {
+            Subject = mapper.Symbol(symbol),
+            Items = model.Items.Select(u => new UsageItemDto
+            {
+                Uri = UriPaths.ToUri(u.Location.SourceTree!.FilePath), Range = Mapper.Range(u.Span), Kind = u.Kind,
+                ContainingMember = u.ContainingMember, ContainingType = u.ContainingType, ProjectName = u.Project.Name, IsTest = u.IsTest, LineText = u.LineText,
+            }).ToList(),
+            Total = model.Total,
+            Truncated = model.Truncated,
+            Completeness = model.Completeness,
             SnapshotId = snap.Id,
         };
     }

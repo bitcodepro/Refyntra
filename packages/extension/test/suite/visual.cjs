@@ -495,6 +495,44 @@ exports.cases = ({ api, csharp, waitFor }) => {
         await reset();
       },
     ],
+    // The Navigate To and Usages cases run last: the Usages view appears in the side bar from the first search on,
+    // and no earlier screenshot shows it.
+    [
+      'visual: navigate-to — Refyntra: Navigate To… (Alt+`) on a class member: the targets with counts',
+      async () => {
+        const a = await ready();
+        await reset();
+        await open(SERVICES, 'public OrderDto? Find(int id) => _orders', 'public OrderDto? '.length + 1);
+        // Deterministic: the list is shown once every target and count is computed (test hook, no sleep).
+        void vscode.commands.executeCommand('refyntra.navigateTo');
+        await waitFor(() => a.navigateTo.state().open && a.navigateTo.state().ready && a.navigateTo.state().items.length > 0, 'Navigate To targets', 120000);
+        await shot('navigate-to', 1500);
+        key('Escape');
+        await reset();
+      },
+    ],
+    [
+      'visual: usages — the Refyntra Usages view: usages of IOrderService grouped by kind, then file',
+      async () => {
+        const a = await ready();
+        await reset();
+        const { doc, start } = await open(SERVICES, 'public interface IOrderService', 'public interface '.length + 1);
+        a.usages.clear();
+        a.usages.setGroupings(['kind', 'file']);
+        a.usages.setFilters({ kinds: [], tests: 'all' });
+        await a.usages.find({ uri: doc.uri.toString(), position: { line: start.line, character: start.character } });
+        await waitFor(() => !a.usages.state().loading && a.usages.state().sessions.length === 1, 'usages loaded', 120000);
+        // Only the side bar matters here: no editor (its CodeLens resolve at their own pace) and Related collapsed (it
+        // follows the cursor), so the Usages view has the room and nothing else on screen moves.
+        await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+        await vscode.commands.executeCommand('refyntra.relatedView.focus');
+        await vscode.commands.executeCommand('workbench.actions.view.toggleCollapse').then(undefined, () => undefined);
+        await vscode.commands.executeCommand('refyntra.usagesView.focus');
+        await vscode.commands.executeCommand('list.focusFirst');
+        await shot('usages', 2500);
+        a.usages.clear();
+      },
+    ],
   ];
   // REFYNTRA_VISUAL_ONLY=codelens,find: only these screenshots (local debugging); the window setup always runs.
   return only.length ? cases.filter(([title], i) => i === 0 || only.some((o) => title.startsWith(`visual: ${o} `))) : cases;

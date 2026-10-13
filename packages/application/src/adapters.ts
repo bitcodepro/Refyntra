@@ -151,6 +151,11 @@ export interface LanguageAdapter {
    */
   hierarchy?(uri: string, position: Position, direction: import('@refyntra/contracts').HierarchyDirection | 'subject', token?: CancellationToken): Promise<RouteResult<{ subject: SymbolRef | null; result: import('@refyntra/contracts').HierarchyResult | null }>>;
   /**
+   * Optional (protocol 1.12): classified usages of the symbol at a position (symbolAt, then code/usages). `subject` is
+   * null when there is no symbol; `result` is null when the host is too old.
+   */
+  usages?(uri: string, position: Position, limit: number, token?: CancellationToken): Promise<RouteResult<{ subject: SymbolRef | null; result: import('@refyntra/contracts').UsagesResult | null }>>;
+  /**
    * Optional (protocol 1.8): the loaded projects classified for Run and Debug (workspace/runnableProjects, no barrier).
    * Null when the host is too old.
    */

@@ -60,6 +60,8 @@ export const MAIN_MENU: readonly MenuEntry[] = [
   { label: '$(symbol-variable) Inline Variable', detail: 'Replace the C# local variable at the cursor with its value (checked by Roslyn)', command: 'refyntra.inlineVariable' },
   { label: '$(add) Generate…', detail: 'Constructor, Equals/GetHashCode, ToString, properties, missing, overriding or delegating members (Alt+Insert, checked by Roslyn)', command: 'refyntra.generate' },
   { label: '$(symbol-parameter) Introduce Parameter', detail: 'Turn the selected C# expression into a parameter; every call site passes it: preview first, then Apply', command: 'refyntra.introduceParameter' },
+  { label: '$(compass) Navigate To…', detail: 'Declaration, implementations, base symbols, usages, tests, related files, handlers, endpoints and DI registrations of the C# symbol at the cursor (Alt+`)', command: 'refyntra.navigateTo' },
+  { label: '$(references) Find Usages (Grouped)', detail: 'Usages of the C# symbol at the cursor in the Refyntra Usages view: grouped by kind, project, file or member, with filters and F4 / Shift+F4', command: 'refyntra.findUsages' },
 ];
 
 /** Walkthrough id as VS Code addresses it: <publisher>.<name>#<walkthrough id>. */

@@ -271,6 +271,25 @@ a test class. It is not part of `initialize.capabilities`.
     `$/cancelRequest`. Refusals: `NotApplicable` (not a scope action), `NoDocument`, `NoChanges`,
     `TooManyOccurrences` (more than 20000), `InvalidParams`. Compiler and third-party analyzer diagnostics are not
     fixed in scope (Refyntra has no code fixes for them); OR1001 deliberately has no code fix.
+- 1.12 (additive): Find Usages grouped and Navigate To.
+  - `code/usages` `UsagesParams` `{traceId, workspaceId, snapshotId, symbolId, limit?}` → `UsagesResult` `{subject,
+    items, total, truncated, completeness, snapshotId}`. Items are the source references of the symbol (Roslyn
+    `FindReferences`, implicit references left out), ordered by file and position, at most `limit` (default 1000, at
+    most 50000; `total` is the full count and `truncated` says that the list was cut; the client's "Show more" asks
+    again with a higher limit). Each `UsageItem` has `uri`, `range` (the name), `kind`, `containingMember` (lambdas and
+    local functions belong to their member; accessors to their property; null at type level), `containingType`,
+    `projectName`, `isTest` (the project references xUnit, NUnit or MSTest, or the containing method / type is a test)
+    and `lineText` (the whole line, untrimmed, at most 400 characters). `kind`: `read`, `write` (simple assignment,
+    `out` argument, deconstruction target, event `+=` / `-=`), `readWrite` (compound assignment, `++` / `--`, `ref`
+    argument), `invocation` (also `?.Invoke(…)` of an event or delegate and constructor initializers), `nameof`,
+    `attribute`, `inheritance` (base list: base class or implemented interface), `typeArgument` (also `T[]` / `T?`
+    inside a type argument), `objectCreation` (`new T(…)`, target-typed `new()` of a constructor), `other` (type
+    references in declarations, method groups, …). The request honours `$/cancelRequest`. Sent only to hosts with
+    minor ≥ 12.
+  - `code/hierarchy` directions `bases` (a type: its base classes nearest first, then all interfaces; a method, property
+    or event: the overridden chain, then the interface members implemented by it or by a member it overrides; source
+    symbols only, in that order) and `containing` (the type that declares a member or nested type; for a local or a
+    parameter the type of its member). Sent only to hosts with minor ≥ 12; an older host answers `InvalidParams`.
 - Additive (EF Core): relation kinds `efcore.*` and group `data` (above); `SearchFilters.entity?: boolean` ("entity:")
   and `SearchFilters.table?: string` ("table:NAME") return EF Core entities as symbol items. Older hosts ignore the
   filters (they return a normal symbol search); older clients render the kinds and the group generically. The
@@ -327,11 +346,12 @@ issuing semantic requests.
 | `refactor/revalidate` | req | `{traceId, workspaceId, planId, snapshotId}` | `RevalidateResult` |
 | `refactor/discard` | notif | `{workspaceId, planId}` | – |
 | `code/signature` | req | `SymbolQueryParams` | `SignatureInfo` (since 1.6; Change Signature) |
-| `code/hierarchy` | req | `HierarchyParams` `{…, symbolId, direction}` | `HierarchyResult` (since 1.7; call and type hierarchy) |
+| `code/hierarchy` | req | `HierarchyParams` `{…, symbolId, direction}` | `HierarchyResult` (since 1.7; call and type hierarchy; `bases` / `containing` since 1.12) |
 | `workspace/runnableProjects` | req | `WorkspaceParams` | `RunnableProjectsResult` (since 1.8; Run and Debug, no barrier) |
 | `code/editActions` | req | `EditActionsParams` `{…, uri, range, actionId?}` | `EditActionsResult` (since 1.9; Convert / Inline / Introduce) |
 | `code/postfix` | req | `PostfixParams` `{…, uri, position}` | `PostfixResult` (since 1.10; postfix templates) |
 | `code/generate` | req | `GenerateParams` `{…, uri, position, kind?, members?, equatable?, operators?}` | `GenerateResult` (since 1.10; Generate) |
+| `code/usages` | req | `UsagesParams` `{…, symbolId, limit?}` | `UsagesResult` (since 1.12; Find Usages grouped) |
 | `code/constructorActions` | req | `ConstructorActionsParams` `{…, uri, position, actionId?, member?, members?, type?, constructorId?, typeId?}` | `ConstructorActionsResult` (since 1.11; constructor / DI helpers) |
 | `workspace/didDeleteFiles` | notif | `{workspaceId, sequence, workspaceRevision, files: [{uri}]}` | – (since 1.6; consumes a document sequence) |
 | `analysis/run` | req | `AnalysisRunParams` `{traceId, workspaceId, snapshotId, uri?}` | `AnalysisRunResult` (since 1.1, additive; see "Analysis") |

@@ -16,8 +16,10 @@ export const PROTOCOL_MAJOR = 1;
  * 1.10: postfix templates (`code/postfix`) and Generate (`code/generate`).
  * 1.11: constructor and DI helpers (`code/constructorActions`), Register in DI (`csharp.registerDi`) and Fix in scope
  *   (`csharp.fixAll`) as previewed plans.
+ * 1.12: Find Usages grouped (`code/usages`: classified usages) and the Navigate To directions `bases` / `containing`
+ *   of `code/hierarchy`.
  */
-export const PROTOCOL_MINOR = 11;
+export const PROTOCOL_MINOR = 12;
 
 /** Zero-based line, UTF-16 code unit character. */
 export interface Position {
@@ -468,8 +470,46 @@ export interface SignatureInfo {
   snapshotId: string;
 }
 
-/** code/hierarchy (protocol 1.7): which neighbours of the subject. */
-export type HierarchyDirection = 'incoming' | 'outgoing' | 'supertypes' | 'subtypes';
+/**
+ * code/hierarchy (protocol 1.7): which neighbours of the subject. 1.12 adds `bases` (base types nearest first and all
+ * interfaces; for a member the overridden chain and the interface members it implements) and `containing` (the type
+ * that declares a member, nested type, local or parameter) for Navigate To.
+ */
+export type HierarchyDirection = 'incoming' | 'outgoing' | 'supertypes' | 'subtypes' | 'bases' | 'containing';
+
+/** code/usages (protocol 1.12): how a usage uses the symbol. */
+export type UsageKind = 'read' | 'write' | 'readWrite' | 'invocation' | 'nameof' | 'attribute' | 'inheritance' | 'typeArgument' | 'objectCreation' | 'other';
+
+export interface UsagesParams extends WorkspaceParams {
+  snapshotId: string;
+  symbolId: string;
+  /** At most this many items (default 1000, at most 50000); `total` says how many there are. */
+  limit?: number;
+}
+
+export interface UsageItem {
+  uri: string;
+  /** The name at the usage. */
+  range: Range;
+  kind: UsageKind;
+  /** Member that contains the usage (lambdas and local functions belong to theirs); null at type level. */
+  containingMember?: string | null;
+  containingType?: string | null;
+  projectName?: string | null;
+  /** In a test project (references xUnit, NUnit or MSTest), a test method or a test class. */
+  isTest: boolean;
+  /** The whole source line (untrimmed, at most 400 characters). */
+  lineText: string;
+}
+
+export interface UsagesResult {
+  subject?: SymbolRef | null;
+  items: UsageItem[];
+  total: number;
+  truncated: boolean;
+  completeness: 'complete' | 'partial' | 'unknown';
+  snapshotId: string;
+}
 
 export interface HierarchyParams extends WorkspaceParams {
   snapshotId: string;
@@ -949,6 +989,8 @@ export interface MethodMap {
   'code/generate': [GenerateParams, GenerateResult];
   /** Protocol 1.11. */
   'code/constructorActions': [ConstructorActionsParams, ConstructorActionsResult];
+  /** Protocol 1.12. */
+  'code/usages': [UsagesParams, UsagesResult];
   'code/references': [SymbolQueryParams, LocationsResult];
   'code/implementations': [SymbolQueryParams, LocationsResult];
   'refactor/prepare': [PrepareParams, PrepareResult];

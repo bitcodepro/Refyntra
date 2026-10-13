@@ -40,7 +40,8 @@
     "onDebugResolve:refyntra-python",
     "onDebugResolve:refyntra-lldb",
     "onDebugDynamicConfigurations",
-    "onView:refyntra.immediateView"
+    "onView:refyntra.immediateView",
+    "onView:refyntra.usagesView"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -462,6 +463,165 @@
         "command": "refyntra.editAction",
         "title": "Apply Edit Action",
         "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.navigateTo",
+        "title": "Navigate To…",
+        "category": "Refyntra",
+        "enablement": "editorLangId == csharp"
+      },
+      {
+        "command": "refyntra.findUsages",
+        "title": "Find Usages (Grouped)",
+        "category": "Refyntra",
+        "enablement": "editorLangId == csharp"
+      },
+      {
+        "command": "refyntra.usages.next",
+        "title": "Next Usage",
+        "category": "Refyntra",
+        "icon": "$(arrow-down)"
+      },
+      {
+        "command": "refyntra.usages.previous",
+        "title": "Previous Usage",
+        "category": "Refyntra",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "refyntra.usages.groupBy",
+        "title": "Usages: Group By…",
+        "category": "Refyntra",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "refyntra.usages.filterKinds",
+        "title": "Usages: Filter Usage Kinds…",
+        "category": "Refyntra",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "refyntra.usages.filterTests",
+        "title": "Usages: Tests (All / Only / Exclude)…",
+        "category": "Refyntra",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "refyntra.usages.clearFilters",
+        "title": "Usages: Clear Filters",
+        "category": "Refyntra",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "refyntra.usages.export",
+        "title": "Usages: Export to Markdown",
+        "category": "Refyntra",
+        "icon": "$(markdown)"
+      },
+      {
+        "command": "refyntra.usages.pin",
+        "title": "Usages: Pin Results",
+        "category": "Refyntra",
+        "icon": "$(pin)"
+      },
+      {
+        "command": "refyntra.usages.unpin",
+        "title": "Usages: Unpin Results",
+        "category": "Refyntra",
+        "icon": "$(pinned)"
+      },
+      {
+        "command": "refyntra.usages.refresh",
+        "title": "Usages: Refresh",
+        "category": "Refyntra",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "refyntra.usages.clear",
+        "title": "Usages: Clear All Results",
+        "category": "Refyntra",
+        "icon": "$(close-all)"
+      },
+      {
+        "command": "refyntra.usages.showMore",
+        "title": "Usages: Show More",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.usages.closeSession",
+        "title": "Close Results",
+        "category": "Refyntra",
+        "icon": "$(close)"
+      },
+      {
+        "command": "refyntra.usages.activate",
+        "title": "Make Results Active",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.usages.open",
+        "title": "Open Usage",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.usages.group.kind",
+        "title": "Group by Usage Kind",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.usages.ungroup.kind",
+        "title": "✓ Group by Usage Kind",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.usages.group.project",
+        "title": "Group by Project",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.usages.ungroup.project",
+        "title": "✓ Group by Project",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.usages.group.folder",
+        "title": "Group by Folder",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.usages.ungroup.folder",
+        "title": "✓ Group by Folder",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.usages.group.file",
+        "title": "Group by File",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.usages.ungroup.file",
+        "title": "✓ Group by File",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.usages.group.type",
+        "title": "Group by Containing Type",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.usages.ungroup.type",
+        "title": "✓ Group by Containing Type",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.usages.group.member",
+        "title": "Group by Containing Member",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.usages.ungroup.member",
+        "title": "✓ Group by Containing Member",
+        "category": "Refyntra"
       }
     ],
     "taskDefinitions": [
@@ -643,6 +803,78 @@
         {
           "command": "refyntra.editAction",
           "when": "false"
+        },
+        {
+          "command": "refyntra.usages.open",
+          "when": "false"
+        },
+        {
+          "command": "refyntra.usages.activate",
+          "when": "false"
+        },
+        {
+          "command": "refyntra.usages.closeSession",
+          "when": "false"
+        },
+        {
+          "command": "refyntra.usages.showMore",
+          "when": "false"
+        },
+        {
+          "command": "refyntra.usages.group.kind",
+          "when": "false"
+        },
+        {
+          "command": "refyntra.usages.ungroup.kind",
+          "when": "false"
+        },
+        {
+          "command": "refyntra.usages.group.project",
+          "when": "false"
+        },
+        {
+          "command": "refyntra.usages.ungroup.project",
+          "when": "false"
+        },
+        {
+          "command": "refyntra.usages.group.folder",
+          "when": "false"
+        },
+        {
+          "command": "refyntra.usages.ungroup.folder",
+          "when": "false"
+        },
+        {
+          "command": "refyntra.usages.group.file",
+          "when": "false"
+        },
+        {
+          "command": "refyntra.usages.ungroup.file",
+          "when": "false"
+        },
+        {
+          "command": "refyntra.usages.group.type",
+          "when": "false"
+        },
+        {
+          "command": "refyntra.usages.ungroup.type",
+          "when": "false"
+        },
+        {
+          "command": "refyntra.usages.group.member",
+          "when": "false"
+        },
+        {
+          "command": "refyntra.usages.ungroup.member",
+          "when": "false"
+        },
+        {
+          "command": "refyntra.navigateTo",
+          "when": "editorLangId == csharp"
+        },
+        {
+          "command": "refyntra.findUsages",
+          "when": "editorLangId == csharp"
         }
       ],
       "view/title": [
@@ -755,6 +987,121 @@
           "command": "refyntra.immediate.clear",
           "when": "view == refyntra.immediateView",
           "group": "navigation"
+        },
+        {
+          "command": "refyntra.usages.previous",
+          "when": "view == refyntra.usagesView && refyntra.usagesHasResults",
+          "group": "navigation@1"
+        },
+        {
+          "command": "refyntra.usages.next",
+          "when": "view == refyntra.usagesView && refyntra.usagesHasResults",
+          "group": "navigation@2"
+        },
+        {
+          "command": "refyntra.usages.groupBy",
+          "when": "view == refyntra.usagesView",
+          "group": "navigation@3"
+        },
+        {
+          "command": "refyntra.usages.filterKinds",
+          "when": "view == refyntra.usagesView",
+          "group": "navigation@4"
+        },
+        {
+          "command": "refyntra.usages.pin",
+          "when": "view == refyntra.usagesView && !refyntra.usagesPinned",
+          "group": "navigation@5"
+        },
+        {
+          "command": "refyntra.usages.unpin",
+          "when": "view == refyntra.usagesView && refyntra.usagesPinned",
+          "group": "navigation@5"
+        },
+        {
+          "command": "refyntra.usages.export",
+          "when": "view == refyntra.usagesView",
+          "group": "navigation@6"
+        },
+        {
+          "command": "refyntra.usages.refresh",
+          "when": "view == refyntra.usagesView",
+          "group": "navigation@7"
+        },
+        {
+          "command": "refyntra.usages.group.kind",
+          "when": "view == refyntra.usagesView && !refyntra.usages.group.kind",
+          "group": "1_group@0"
+        },
+        {
+          "command": "refyntra.usages.ungroup.kind",
+          "when": "view == refyntra.usagesView && refyntra.usages.group.kind",
+          "group": "1_group@0"
+        },
+        {
+          "command": "refyntra.usages.group.project",
+          "when": "view == refyntra.usagesView && !refyntra.usages.group.project",
+          "group": "1_group@1"
+        },
+        {
+          "command": "refyntra.usages.ungroup.project",
+          "when": "view == refyntra.usagesView && refyntra.usages.group.project",
+          "group": "1_group@1"
+        },
+        {
+          "command": "refyntra.usages.group.folder",
+          "when": "view == refyntra.usagesView && !refyntra.usages.group.folder",
+          "group": "1_group@2"
+        },
+        {
+          "command": "refyntra.usages.ungroup.folder",
+          "when": "view == refyntra.usagesView && refyntra.usages.group.folder",
+          "group": "1_group@2"
+        },
+        {
+          "command": "refyntra.usages.group.file",
+          "when": "view == refyntra.usagesView && !refyntra.usages.group.file",
+          "group": "1_group@3"
+        },
+        {
+          "command": "refyntra.usages.ungroup.file",
+          "when": "view == refyntra.usagesView && refyntra.usages.group.file",
+          "group": "1_group@3"
+        },
+        {
+          "command": "refyntra.usages.group.type",
+          "when": "view == refyntra.usagesView && !refyntra.usages.group.type",
+          "group": "1_group@4"
+        },
+        {
+          "command": "refyntra.usages.ungroup.type",
+          "when": "view == refyntra.usagesView && refyntra.usages.group.type",
+          "group": "1_group@4"
+        },
+        {
+          "command": "refyntra.usages.group.member",
+          "when": "view == refyntra.usagesView && !refyntra.usages.group.member",
+          "group": "1_group@5"
+        },
+        {
+          "command": "refyntra.usages.ungroup.member",
+          "when": "view == refyntra.usagesView && refyntra.usages.group.member",
+          "group": "1_group@5"
+        },
+        {
+          "command": "refyntra.usages.filterTests",
+          "when": "view == refyntra.usagesView",
+          "group": "2_filter@1"
+        },
+        {
+          "command": "refyntra.usages.clearFilters",
+          "when": "view == refyntra.usagesView && refyntra.usagesFiltered",
+          "group": "2_filter@2"
+        },
+        {
+          "command": "refyntra.usages.clear",
+          "when": "view == refyntra.usagesView",
+          "group": "3_results@1"
         }
       ],
       "view/item/context": [
@@ -852,6 +1199,11 @@
           "command": "refyntra.stop",
           "when": "view == refyntra.runView && viewItem =~ /^refyntra\\.run(Target|Profile)\\.running$/",
           "group": "1_run@4"
+        },
+        {
+          "command": "refyntra.usages.closeSession",
+          "when": "view == refyntra.usagesView && viewItem == refyntra.usagesSession",
+          "group": "inline"
         }
       ],
       "terminal/context": [
@@ -998,6 +1350,12 @@
           "id": "refyntra.relatedView",
           "name": "Refyntra Related",
           "contextualTitle": "Refyntra"
+        },
+        {
+          "id": "refyntra.usagesView",
+          "name": "Refyntra Usages",
+          "contextualTitle": "Refyntra",
+          "when": "refyntra.usagesViewVisible"
         },
         {
           "id": "refyntra.stackTraceView",
@@ -1381,6 +1739,38 @@
         "key": "ctrl+alt+n",
         "mac": "cmd+alt+n",
         "when": "config.refyntra.keybindings.preset == 'resharper' && editorTextFocus && !editorReadonly && editorLangId == csharp"
+      },
+      {
+        "command": "refyntra.navigateTo",
+        "key": "alt+`",
+        "mac": "ctrl+alt+`",
+        "when": "config.refyntra.keybindings.preset == 'visualStudio' && editorTextFocus && editorLangId == csharp"
+      },
+      {
+        "command": "refyntra.navigateTo",
+        "key": "alt+`",
+        "mac": "ctrl+alt+`",
+        "when": "config.refyntra.keybindings.preset == 'resharper' && editorTextFocus && editorLangId == csharp"
+      },
+      {
+        "command": "refyntra.usages.next",
+        "key": "f4",
+        "when": "config.refyntra.keybindings.preset == 'visualStudio' && refyntra.usagesHasResults && editorTextFocus && editorLangId == csharp && !referenceSearchVisible"
+      },
+      {
+        "command": "refyntra.usages.previous",
+        "key": "shift+f4",
+        "when": "config.refyntra.keybindings.preset == 'visualStudio' && refyntra.usagesHasResults && editorTextFocus && editorLangId == csharp && !referenceSearchVisible"
+      },
+      {
+        "command": "refyntra.usages.next",
+        "key": "f4",
+        "when": "config.refyntra.keybindings.preset == 'resharper' && refyntra.usagesHasResults && editorTextFocus && editorLangId == csharp && !referenceSearchVisible"
+      },
+      {
+        "command": "refyntra.usages.previous",
+        "key": "shift+f4",
+        "when": "config.refyntra.keybindings.preset == 'resharper' && refyntra.usagesHasResults && editorTextFocus && editorLangId == csharp && !referenceSearchVisible"
       },
       {
         "command": "refyntra.showImmediate",

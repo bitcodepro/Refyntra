@@ -55,6 +55,8 @@ import { SolutionService } from './solution';
 import { STACK_TRACE_VIEW, StackTraceViewProvider, runOpenStackTrace } from './stackTrace';
 import { type TaskContextViewProvider, registerTaskContext } from './taskContext';
 import { type RunService, registerRun } from './run';
+import { type NavigateToState, acceptNavigateTarget, navigateToState, runNavigateTo } from './navigateTo';
+import { type UsagesViewProvider, registerUsages } from './usages';
 
 export const CSHARP_DESCRIPTOR: AdapterDescriptor = {
   adapterId: 'csharp',
@@ -129,6 +131,10 @@ export interface RefyntraTestApi {
   inlineValues: { values: CSharpInlineValuesProvider; hover: CSharpEvaluatableExpressionProvider };
   /** The Immediate Window (e2e: evaluates, expands, reads entries). */
   immediate: ImmediateViewProvider;
+  /** Navigate To (Alt+`): the open list and choosing a target by id (e2e / visual wait on it instead of sleeping). */
+  navigateTo: { state(): NavigateToState; accept(id: string): Promise<boolean> };
+  /** The Refyntra Usages view (e2e: groupings, filters, Next/Previous, export, pinned tabs). */
+  usages: UsagesViewProvider;
 }
 
 let engineRef: RefyntraEngine | undefined;
@@ -316,6 +322,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
   const taskContext = registerTaskContext(engine, context.workspaceState, related);
   const codeLens = registerCodeLens(engine);
   context.subscriptions.push(codeLens.disposable);
+  // Find Usages grouped (protocol 1.12) and Navigate To (Alt+`).
+  const usages = registerUsages(engine, context.workspaceState);
+  context.subscriptions.push(usages.disposable, vscode.commands.registerCommand('refyntra.navigateTo', () => runNavigateTo(engine)));
   context.subscriptions.push(taskContext.disposable);
   void vscode.commands.executeCommand('setContext', 'refyntra.relatedPinned', false);
   // Welcome text of the Related view follows trust / solution / backend state (package.json viewsWelcome).
@@ -449,6 +458,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     run: run.service,
     inlineValues: { values: inlineValues.values, hover: inlineValues.hover },
     immediate: immediate.provider,
+    navigateTo: { state: () => navigateToState(), accept: (id) => acceptNavigateTarget(id) },
+    usages: usages.provider,
   };
 }
 

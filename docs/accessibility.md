@@ -11,7 +11,9 @@ checked, and what has **not** been checked by a person with assistive technology
 
 - Every command is in the Command Palette as **Refyntra: ...**. Only four internal commands are hidden (`openLocation`,
   `runRestore`, `related.open`, `nativeRename`, and the stack-trace, task-context and CodeLens helpers such as
-  `codeLens.related`); they are run by buttons, tree items and lenses.
+  `codeLens.related`, and the Usages view's item helpers `usages.open`, `.activate`, `.closeSession`, `.showMore`
+  and its per-grouping menu toggles, which **Usages: Group By…** covers in the palette); they are run by buttons,
+  tree items and lenses.
 - The status bar item is a button (screen-reader role `button`). Focus it (F6 cycles through the workbench parts, or run
   **Focus Status Bar** from the palette; arrow keys move between items) and press Enter for the Refyntra menu. The menu lists Find, Related, Actions,
   Rename, Find Handler, Find Endpoint, Find DI Registration, Show Health, Show Health (text), Select Solution, Restart
@@ -28,6 +30,17 @@ checked, and what has **not** been checked by a person with assistive technology
     Typing `#`, `/`, `>` or `@` first limits the list to symbols, files, commands or settings.
   - Actions: Esc returns to the editor; a chosen action runs its own command (Rename input box, Related view).
   - Related view: opening an item moves focus to the editor at that line (the same rule as other tree views).
+  - Navigate To (Alt+`): a QuickPick; every row says what it is and its count in words ("Base symbols, 1 symbol",
+    "Usages, 12 usages") and what Enter does ("opens it", "opens the peek view", "opens the Refyntra Usages view").
+    Enter on one location moves focus to the editor at that line; several open VS Code's peek view with the focus in
+    its list (Esc returns to the editor). Esc on the list returns focus to the editor.
+  - Refyntra Usages view: groups read "Usage Kind Invocation, 3 usages"; a usage reads its kind, "in tests" when it is,
+    the containing type and member, file and line, then the source line ("Write · Uses.Run · Uses.cs:12: order.Count
+    = 1;"). The highlight of the name in the line is visual only; the label says the same in words. F4 / Shift+F4
+    (Next / Previous Usage) open the usage in the editor and keep the focus there; the view selects the row without
+    taking focus. Group By and the filters are QuickPicks with check boxes (Space toggles, Enter confirms); the toggles
+    in the view's `…` menu say their state in words ("✓ Group by File" when on). Export to Markdown opens a plain
+    document.
   - Rename: the summary document opens without taking focus, the preview QuickPick has focus (`ignoreFocusOut`, so a
     mouse click elsewhere does not lose it), Esc discards the plan and returns to the editor, Apply closes the list and
     leaves focus in the editor; the result is shown as a notification.

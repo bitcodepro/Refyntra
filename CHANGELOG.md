@@ -4,6 +4,26 @@ All notable changes are listed here. The project is alpha; nothing has been rele
 
 ## Unreleased
 
+### Added (Navigate To and Find Usages grouped)
+
+- **Refyntra: Navigate To…** (Alt+` in the `visualStudio` and `resharper` presets, C# editors; Ctrl+Alt+` on macOS):
+  a QuickPick of the targets of the symbol at the cursor that exist, with counts — Declaration (partial parts),
+  Implementations / Derived types / Implementations and overrides, Base types / Base symbols, Usages, Related tests,
+  Related files (partial parts, `.Designer.cs`, `.g.cs`, `.razor`, `.cshtml` … with the same name), Containing type,
+  Containing file, MediatR handler, Endpoint, DI registration, Call hierarchy. One location opens directly, several
+  open the peek view. Built on Related, the call hierarchy and two new `code/hierarchy` directions.
+- **Refyntra: Find Usages (Grouped)** and the **Refyntra Usages** view: usages classified by the C# host (read, write,
+  read-write, invocation, `nameof`, attribute, inheritance / implementation, type argument, object creation, other;
+  usages in tests); grouping by usage kind, project, folder, file, containing type and member (view menu toggles,
+  counts on every group); source line with the name highlighted; kind and tests filters; Next / Previous Usage (F4 /
+  Shift+F4 while the view has results in a C# editor); Export to Markdown; pinned results as tab-like roots; cancellable
+  progress, 1000 usages first, then Show more.
+- Protocol 1.12: `code/usages` and the `code/hierarchy` directions `bases` / `containing` (protocol-v1.md).
+- Tests: .NET (`UsageClassifierTests` on an in-memory solution: every kind, partial classes, generics, properties
+  get/set, compound assignment, `nameof`, attributes, inheritance, tests, the limit; `NavigationTargetsTests`;
+  `UsagesProtocolTests` on Shop), unit tests of the Navigate To and Usages models, e2e scenario `navigation`, visual
+  baselines `navigate-to` and `usages` (both themes).
+
 ### Added (Search Everywhere)
 
 - Refyntra: Find is extended to Search Everywhere: sections Types / Symbols / Files / Commands / Settings, camel-hump

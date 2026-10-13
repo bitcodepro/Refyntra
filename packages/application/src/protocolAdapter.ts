@@ -706,11 +706,31 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
       const sym = await s.transport.request('code/symbolAt', { traceId, workspaceId: this.opts.workspaceId, snapshotId, uri, position }, token);
       const subject = sym && typeof sym === 'object' && typeof sym.name === 'string' ? sym : null;
       if (!subject || direction === 'subject' || s.protocolMinor < 7 || !subject.symbolId) return { subject, result: null };
+      if ((direction === 'bases' || direction === 'containing') && s.protocolMinor < 12) return { subject, result: null };
       const r = await s.transport.request('code/hierarchy', { traceId, workspaceId: this.opts.workspaceId, snapshotId, symbolId: subject.symbolId, direction }, token);
       const items = Array.isArray(r?.items)
         ? r.items.filter((i) => i && i.symbol && typeof i.symbol.name === 'string' && i.symbol.location && typeof i.symbol.location.uri === 'string').map((i) => ({ ...i, fromRanges: Array.isArray(i.fromRanges) ? i.fromRanges : [] }))
         : [];
       return { subject, result: { items, completeness: r?.completeness ?? 'unknown', truncated: !!r?.truncated, snapshotId: r?.snapshotId ?? snapshotId } };
+    });
+  }
+
+  /** Find Usages grouped (protocol 1.12): symbolAt, then code/usages on the same snapshot. */
+  usages(uri: string, position: Position, limit: number, token?: CancellationToken): Promise<RouteResult<{ subject: SymbolRef | null; result: import('@refyntra/contracts').UsagesResult | null }>> {
+    return this.semantic('code/usages', token, async (s, snapshotId, traceId) => {
+      const sym = await s.transport.request('code/symbolAt', { traceId, workspaceId: this.opts.workspaceId, snapshotId, uri, position }, token);
+      const subject = sym && typeof sym === 'object' && typeof sym.name === 'string' ? sym : null;
+      if (!subject || s.protocolMinor < 12 || !subject.symbolId) return { subject, result: null };
+      const r = await s.transport.request('code/usages', { traceId, workspaceId: this.opts.workspaceId, snapshotId, symbolId: subject.symbolId, limit }, token);
+      const items = Array.isArray(r?.items)
+        ? r.items
+            .filter((i) => i && typeof i.uri === 'string' && i.range && i.range.start && i.range.end && typeof i.kind === 'string')
+            .map((i) => ({ ...i, isTest: !!i.isTest, lineText: typeof i.lineText === 'string' ? i.lineText : '' }))
+        : [];
+      return {
+        subject: r?.subject && typeof r.subject.name === 'string' ? r.subject : subject,
+        result: { items, total: typeof r?.total === 'number' ? r.total : items.length, truncated: !!r?.truncated, completeness: r?.completeness ?? 'unknown', snapshotId: r?.snapshotId ?? snapshotId },
+      };
     });
   }
 

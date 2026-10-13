@@ -473,6 +473,37 @@ workspace come first. Prefixes narrow the search: `#` symbols, `/` files, `>` co
 `type:`, `member:`, `project:`, `route:`, `method:`, `component:`, `page:`, `css:` keep the classic Find. Each keystroke
 cancels the previous search; local ranking of 10,000 names takes well under 100 ms.
 
+**Navigate To… (C#, Alt+`).** Refyntra: Navigate To… (Alt+` in the `visualStudio` and `resharper` presets; Ctrl+Alt+`
+on macOS, where Option+` types a grave accent) lists every target of the symbol at the cursor **that exists**, each
+with its count: Declaration (all partial parts), Implementations / Derived types / Implementations and overrides, Base
+types or Base symbols (overridden members and implemented interface members), Usages (opens the Usages view below),
+Related tests, Related files (other partial parts, and files with the same name next to the declaration:
+`.Designer.cs`, `.g.cs`, `.razor`, `.razor.cs`, `.cshtml`, `.cshtml.cs`, `.xaml`, `.resx`), Containing type,
+Containing file (when the declaration is in another file), MediatR handler, Endpoint, DI registration and Call
+hierarchy. A target with one location opens directly; several open VS Code's peek view. The list is computed from
+Related, the host's hierarchy (protocol 1.12 `bases` / `containing`) and incoming calls. Limits: a usage count above
+50 comes from Related's own count; generated files under `obj/` are not listed as related files.
+
+**Find Usages (grouped, C#).** Refyntra: Find Usages (Grouped) fills the **Refyntra Usages** view in the Refyntra side
+bar (it appears with the first search). Every usage is classified by the C# host (protocol 1.12 `code/usages`): read,
+write, read-write (compound assignment, `++`/`--`, `ref`), invocation, `nameof`, attribute, inheritance /
+implementation, type argument, object creation, other; usages in test code (a project that references xUnit, NUnit or
+MSTest, or a test method / class) form the group **In tests** when grouping by kind.
+
+- Group by (view title `…` menu, or the Group By button): usage kind, project, folder, file, containing type,
+  containing member; the levels always nest in that order. The choice is kept per workspace. Every group shows its
+  count.
+- Each usage shows its source line with the name highlighted, the file and line, and an icon for its kind.
+- Filters: usage kinds (multi-select, with counts) and tests (all / only tests / exclude tests).
+- **Next / Previous Usage** (F4 / Shift+F4, like Visual Studio's F8 / Rider's Ctrl+Alt+Down): only while the view has
+  results, the focus is in a C# editor, the preset is not `none` and VS Code's reference peek is closed (there F4 keeps
+  its own meaning). Both wrap around and select the usage in the view.
+- **Export to Markdown** opens the shown tree (groupings and filters applied) as an untitled Markdown document.
+- **Pin**: a pinned result stays; the next search opens a new tab-like root next to it (the active one is expanded).
+  Close a tab with its `×`, or clear all.
+- Large results: a cancellable progress notification; the host returns at most 1000 usages first, then **Show more**
+  asks again for four times as many (up to 50000).
+
 ## Stack traces
 
 **Refyntra: Open Stack Trace** reads a stack trace you paste and lists its frames in the **Refyntra Stack Trace** view,
@@ -807,6 +838,11 @@ constructor that needs them (the compile check refuses it).
 |---|---|
 | `refyntra.find` | Find symbols, endpoints, known roles |
 | `refyntra.related` | Related symbols for the current position |
+| `refyntra.navigateTo` | Navigate To… (Alt+`, C#): every target of the symbol at the cursor that exists, with counts |
+| `refyntra.findUsages` | Find Usages (Grouped, C#): the Refyntra Usages view, classified and grouped usages |
+| `refyntra.usages.next` / `.previous` | Next / previous usage of the Usages view (F4 / Shift+F4 in a C# editor while it has results) |
+| `refyntra.usages.groupBy` / `.filterKinds` / `.filterTests` / `.clearFilters` | Groupings and filters of the Usages view |
+| `refyntra.usages.export` / `.pin` / `.unpin` / `.refresh` / `.clear` | Export to Markdown, pin, refresh, clear the Usages view |
 | `refyntra.actions` | Available actions and reasons for unavailable ones |
 | `refyntra.rename` | Rename with preview, then apply |
 | `refyntra.moveTypeToFile` | Move the type at the cursor into its own file (preview, then apply) |

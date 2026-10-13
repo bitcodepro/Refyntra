@@ -158,6 +158,11 @@ export interface ActionPrepareOptions {
 /** Change Signature: the parameters of the method at the cursor, or why there are none. */
 export type SignatureOutcome = { kind: 'signature'; info: import('@refyntra/contracts').SignatureInfo } | Unavailable;
 
+/** Find Usages grouped (protocol 1.12) at a position of an owned route. */
+export type UsagesOutcome =
+  | { kind: 'usages'; subject: import('@refyntra/contracts').SymbolRef; items: import('@refyntra/contracts').UsageItem[]; total: number; truncated: boolean; completeness: 'complete' | 'partial' | 'unknown' }
+  | { kind: 'unavailable'; reasonCode: string; message: string; recoveryActions: RecoveryAction[] };
+
 /** Call / type hierarchy (protocol 1.7) at a position of an owned route. */
 export type HierarchyOutcome =
   | { kind: 'hierarchy'; subject: import('@refyntra/contracts').SymbolRef; items: import('@refyntra/contracts').HierarchyItem[]; completeness: 'complete' | 'partial' | 'unknown'; truncated: boolean }
@@ -236,6 +241,8 @@ export interface EngineClient {
    * ('subject' resolves only the symbol, with no items).
    */
   hierarchy(target: DocumentTarget, direction: import('@refyntra/contracts').HierarchyDirection | 'subject', token?: CancellationToken): Promise<HierarchyOutcome>;
+  /** Find Usages grouped (owned route, protocol 1.12): classified usages of the symbol at the position, at most `limit`. */
+  usages(target: DocumentTarget, limit: number, token?: CancellationToken): Promise<UsagesOutcome>;
   /** Run and Debug (protocol 1.8): the C# projects of the loaded workspace classified for running and debugging. */
   runnableProjects?(token?: CancellationToken): Promise<RunnableProjectsOutcome>;
   /**
@@ -725,6 +732,23 @@ export class RefyntraEngine implements EngineClient {
       if (!subject) return { kind: 'unavailable', reasonCode: 'NoSymbol', message: 'There is no symbol at the cursor.', recoveryActions: [] };
       if (direction !== 'subject' && !result) return { kind: 'unavailable', reasonCode: 'ProtocolTooOld', message: 'The C# host is too old for the hierarchy; update the extension.', recoveryActions: [] };
       return { kind: 'hierarchy', subject, items: result?.items ?? [], completeness: result?.completeness ?? 'complete', truncated: result?.truncated ?? false };
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      return this.toUnavailable(adapter, e);
+    }
+  }
+
+  async usages(target: DocumentTarget, limit: number, token?: CancellationToken): Promise<UsagesOutcome> {
+    const adapter = this.o.registry.routeFor(target.uri);
+    if (!adapter || adapter.descriptor.ownership !== 'owned-semantic' || typeof adapter.usages !== 'function') {
+      return { kind: 'unavailable', reasonCode: 'ActionNotSupported', message: 'Find Usages is provided by Refyntra for C# files only.', recoveryActions: [] };
+    }
+    try {
+      const r = await this.withStaleRetry(() => adapter.usages!(target.uri, target.position, limit, token), token);
+      const { subject, result } = r.value;
+      if (!subject) return { kind: 'unavailable', reasonCode: 'NoSymbol', message: 'There is no symbol at the cursor.', recoveryActions: [] };
+      if (!result) return { kind: 'unavailable', reasonCode: 'ProtocolTooOld', message: 'The C# host is too old for Find Usages; update the extension.', recoveryActions: [] };
+      return { kind: 'usages', subject, items: result.items, total: result.total, truncated: result.truncated, completeness: result.completeness };
     } catch (e) {
       if (e instanceof CancelledError) throw e;
       return this.toUnavailable(adapter, e);
