@@ -463,6 +463,16 @@ dependency, on the first Related or Find that needs it (see [ADR-007](docs/adr/A
   refused with a reason. Stylesheets of components are linked by the HTML/CSS support above.
 - **Find**: `component:Name` (React and Angular components), `page:/path` (Next.js and Angular routes).
 
+## Navigation
+
+**Find (Search Everywhere).** Refyntra: Find (Ctrl+T in the ReSharper preset, Ctrl+, in the Visual Studio preset) is
+one list with sections Types, Symbols, Files, Commands (Refyntra and every installed extension's contributed commands,
+with their titles) and Settings (Refyntra settings). Matching understands camel humps (`OSvc` and `oSe` find
+`OrderService`); results are ranked exact > prefix > camel hump > substring, and items you picked recently in this
+workspace come first. Prefixes narrow the search: `#` symbols, `/` files, `>` commands, `@` settings. The filters
+`type:`, `member:`, `project:`, `route:`, `method:`, `component:`, `page:`, `css:` keep the classic Find. Each keystroke
+cancels the previous search; local ranking of 10,000 names takes well under 100 ms.
+
 ## Stack traces
 
 **Refyntra: Open Stack Trace** reads a stack trace you paste and lists its frames in the **Refyntra Stack Trace** view,

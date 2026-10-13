@@ -4,6 +4,12 @@ All notable changes are listed here. The project is alpha; nothing has been rele
 
 ## Unreleased
 
+### Added (Search Everywhere)
+
+- Refyntra: Find is extended to Search Everywhere: sections Types / Symbols / Files / Commands / Settings, camel-hump
+  matching, ranking exact > prefix > camel hump > substring with recently picked items (per workspace) first, and the
+  prefixes `#` symbols, `/` files, `>` commands, `@` settings.
+
 ### Changed (constructor and DI helpers on Roslyn)
 
 - The constructor / DI helpers (create and initialize field or property from a constructor parameter, initialize an

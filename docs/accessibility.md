@@ -22,6 +22,10 @@ checked, and what has **not** been checked by a person with assistive technology
 - Find, Actions, the status bar menu and the rename preview are QuickPicks: type, arrow keys, Enter, Esc.
 - Focus after each step:
   - Find: Enter closes the list and puts the cursor in the opened file; Esc returns focus to where you were.
+  - Find (Search Everywhere): results are grouped under separator rows that screen readers announce (Types, Symbols,
+    Files, Commands, Settings); each row says what it is in text (command id, relative path, setting key, "recent"),
+    not only by its icon. A command row runs the command, a setting row opens the Settings editor at that setting.
+    Typing `#`, `/`, `>` or `@` first limits the list to symbols, files, commands or settings.
   - Actions: Esc returns to the editor; a chosen action runs its own command (Rename input box, Related view).
   - Related view: opening an item moves focus to the editor at that line (the same rule as other tree views).
   - Rename: the summary document opens without taking focus, the preview QuickPick has focus (`ignoreFocusOut`, so a

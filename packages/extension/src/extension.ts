@@ -24,7 +24,7 @@ import { openLocation } from './convert';
 import { registerDocumentSync } from './documentSync';
 import { registerRuleDiagnostics } from './diagnostics';
 import { VsCodeEditApplier } from './editApplier';
-import { runFind } from './find';
+import { type SearchEverywhereState, initSearchEverywhere, runFind, searchEverywhereState } from './find';
 import { MAIN_MENU, WALKTHROUGH_ID, type WelcomeVariant, welcomeContext } from './gettingStarted';
 import { HEALTH_SCHEME, HEALTH_TEXT_COMMAND, HealthDocument, HealthPage, StatusBar } from './health';
 import type { HealthPageModel } from './healthPageModel';
@@ -87,6 +87,8 @@ export interface RefyntraTestApi {
   editApplier: VsCodeEditApplier;
   /** Process ids of spawned hosts (e2e fault injection kills the last one). */
   hostPids(): number[];
+  /** Items of the open Search Everywhere (Find) QuickPick, for tests. */
+  searchEverywhere(): SearchEverywhereState;
   /** Undo of an applied create-file plan (e2e: the same steps as the "Undo" button). */
   undoCreate(writeSet: readonly import('@refyntra/contracts').PlannedChange[]): Promise<string[]>;
   /** Undo of an applied Safe Delete / Extract Method / Change Signature (e2e: the same steps as the "Undo" button). */
@@ -158,6 +160,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
   const isTrusted = () => !forceRestricted && vscode.workspace.isTrusted;
 
   const solutions = new SolutionService(context.workspaceState);
+  initSearchEverywhere(context.workspaceState);
   context.subscriptions.push(solutions);
   const hostLocator = new HostLocator(context.extensionPath);
   const launches: ProcessLaunch[] = [];
@@ -340,7 +343,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     vscode.commands.registerCommand('refyntra.exportDebugBundle', () => debugBundle.run()),
     registerDocumentSync(engine),
     registerRuleDiagnostics(engine), // OR1001 in the "refyntra" DiagnosticCollection (diagnostics.ts)
-    vscode.commands.registerCommand('refyntra.find', () => runFind(engine)),
+    vscode.commands.registerCommand('refyntra.find', (initial?: unknown) => runFind(engine, typeof initial === 'string' ? initial : '')),
     vscode.commands.registerCommand('refyntra.findEndpoint', () => runFind(engine, 'route:')),
     vscode.commands.registerCommand('refyntra.findHandler', () => runRelatedGroupPick(engine, 'handlers', 'Refyntra: Find Handler')),
     vscode.commands.registerCommand('refyntra.findRegistration', () => runRelatedGroupPick(engine, 'registrations', 'Refyntra: Find DI Registration')),
@@ -429,6 +432,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     undoCode: (writeSet, deletedTexts) => undoCode(engine, editApplier, writeSet, deletedTexts),
     previews,
     hostPids: () => [...pids],
+    searchEverywhere: () => searchEverywhereState(),
     capabilityUi: (id) => ({ title: capabilityTitleOf(id), command: commandForCapability(id) }),
     related,
     debugBundle,

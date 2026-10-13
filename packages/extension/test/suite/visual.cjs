@@ -294,6 +294,24 @@ exports.cases = ({ api, csharp, waitFor }) => {
       },
     ],
     [
+      'visual: search-everywhere — camel-hump query with Types, Files and Commands sections',
+      async () => {
+        const a = await ready();
+        await reset();
+        await open(REQUESTS, 'GetOrderQuery');
+        const query = 'GOQ';
+        // Wait for the QuickPick's own data (files, type list, engine results) instead of sleeping.
+        void vscode.commands.executeCommand('refyntra.find', query);
+        await waitFor(() => {
+          const st = a.searchEverywhere();
+          return st.ready && st.value === query && st.items.some((i) => i.label.endsWith(' GetOrderQuery'));
+        }, 'Search Everywhere results', 60000);
+        await shot('search-everywhere', 1500);
+        key('Escape');
+        await reset();
+      },
+    ],
+    [
       'visual: run-view — the Refyntra Run view, the run target in the status bar and Run | Debug over Program.cs',
       async () => {
         const a = await ready();

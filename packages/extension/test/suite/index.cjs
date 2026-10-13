@@ -269,6 +269,23 @@ const scenarios = {
       },
     ],
     [
+      'Search Everywhere: camel humps find a type, > a Refyntra command, / a file',
+      async () => {
+        const a = await api();
+        await waitFor(() => ['Ready', 'Partial'].includes(csharp(a.health())?.state), 'host ready', 180000);
+        const query = async (value, accept, what) => {
+          const before = a.searchEverywhere().generation;
+          void vscode.commands.executeCommand('refyntra.find', value);
+          await waitFor(() => { const st = a.searchEverywhere(); return st.generation > before && st.ready && st.value === value && accept(st.items); }, what, 60000);
+          await vscode.commands.executeCommand('workbench.action.closeQuickOpen');
+        };
+        await query('GOQ', (items) => items.some((i) => i.label.endsWith(' GetOrderQuery')), 'camel hump GOQ → GetOrderQuery');
+        await query('>Refyntra: Find', (items) => items.some((i) => i.section === 'commands' && i.label.includes('Refyntra: Find')), '> finds the Refyntra command');
+        await query('/Program', (items) => items.some((i) => i.section === 'files' && i.label.endsWith(' Program.cs')), '/ finds Program.cs');
+        await query('@refyntra', (items) => items.some((i) => i.section === 'settings'), '@ finds Refyntra settings');
+      },
+    ],
+    [
       'Related, Actions and a dirty (unsaved) buffer work against the real host',
       async () => {
         const a = await api();
