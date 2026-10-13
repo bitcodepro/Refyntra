@@ -1040,3 +1040,63 @@ public sealed class StepIntoTargetsResultDto
     public string? ReasonCode { get; set; }
     public string SnapshotId { get; set; } = "";
 }
+
+/// <summary>code/tests (protocol 1.15): the test projects and test methods of the snapshot, or of some documents.</summary>
+public sealed class TestsParams : WorkspaceParams
+{
+    public string SnapshotId { get; set; } = "";
+    /// <summary>Only these documents (incremental update after edits); null or empty: every test project.</summary>
+    public List<string>? Uris { get; set; }
+}
+
+public sealed class TestProjectDto
+{
+    public string Name { get; set; } = "";
+    public string ProjectUri { get; set; } = "";
+    /// <summary>"xUnit" | "NUnit" | "MSTest" (the frameworks of the tests found).</summary>
+    public List<string> Frameworks { get; set; } = new();
+}
+
+public sealed class TestCaseDto
+{
+    /// <summary>The arguments as written: "(1, 2, 3)".</summary>
+    public string Label { get; set; } = "";
+    /// <summary>The normalised arguments (lower case, no quotes, suffixes or blanks) for matching results.</summary>
+    public List<string> Arguments { get; set; } = new();
+    public RangeDto Range { get; set; } = new();
+}
+
+public sealed class TestClassDto
+{
+    public string Name { get; set; } = "";
+    public RangeDto Range { get; set; } = new();
+    public RangeDto NameRange { get; set; } = new();
+}
+
+public sealed class TestMethodDto
+{
+    public string ProjectUri { get; set; } = "";
+    public string Uri { get; set; } = "";
+    public string Framework { get; set; } = "";
+    public string Namespace { get; set; } = "";
+    /// <summary>The containing classes, outermost first.</summary>
+    public List<TestClassDto> Classes { get; set; } = new();
+    public string Method { get; set; } = "";
+    /// <summary>"Ns.Outer+Inner.Method".</summary>
+    public string FullyQualifiedName { get; set; } = "";
+    public RangeDto Range { get; set; } = new();
+    public RangeDto NameRange { get; set; } = new();
+    public List<TestCaseDto> Cases { get; set; } = new();
+    public bool DynamicCases { get; set; }
+    public string? SkipReason { get; set; }
+}
+
+public sealed class TestsResultDto
+{
+    public List<TestProjectDto> Projects { get; set; } = new();
+    public List<TestMethodDto> Tests { get; set; } = new();
+    /// <summary>With params.uris: the documents scanned (their earlier tests are replaced by <see cref="Tests"/>).</summary>
+    public List<string>? Documents { get; set; }
+    public string State { get; set; } = "";
+    public string SnapshotId { get; set; } = "";
+}

@@ -185,7 +185,18 @@ const scenarios = visual
       // service worker"); it also keeps the pixels the same from run to run.
       launchArgs: ['--disable-gpu'],
       env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '', REFYNTRA_VISUAL_OUT: path.join(process.env.REFYNTRA_VISUAL_OUT || path.join(repo, 'test-results', 'visual', 'actual'), theme) },
-    }))
+    })).concat(
+      // The test runner (Test Explorer, test CodeLens) on a temp copy of the TestRunner fixture, same fixed settings;
+      // VS Code's Test Results panel and failure peek stay closed (their content has timings).
+      Object.entries(visualThemes).map(([theme, colorTheme]) => ({
+        name: `visual-tests-${theme}`,
+        fixtureCopy: ['TestRunner', 'TestRunner.sln'],
+        trusted: true,
+        settings: { ...visualSettings, 'workbench.colorTheme': colorTheme, 'testing.openTesting': 'neverOpen', 'testing.automaticallyOpenPeekView': 'never', 'testing.followRunningTest': false },
+        launchArgs: ['--disable-gpu'],
+        env: { REFYNTRA_TEST_NO_DURATIONS: '1', REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '', REFYNTRA_VISUAL_OUT: path.join(process.env.REFYNTRA_VISUAL_OUT || path.join(repo, 'test-results', 'visual', 'actual'), theme) },
+      })),
+    )
   : e2e
   ? [
       {
@@ -349,6 +360,9 @@ const scenarios = visual
       // Run and Debug on a temp copy of the Runnable fixture, every other extension disabled: the bundled netcoredbg
       // (breakpoint, locals, exit code) and debugpy (system Python), a web app run with its launch profile.
       { name: 'run-debug', fixtureCopy: ['Runnable', 'Runnable.sln'], trusted: true, env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' } },
+      // Test runner on a temp copy of the TestRunner fixture (xUnit, NUnit, MSTest), every other extension disabled:
+      // discovery, run all, one theory case, debug with a breakpoint in the code under test, Rerun Failed, CodeLens.
+      { name: 'tests', fixtureCopy: ['TestRunner', 'TestRunner.sln'], trusted: true, env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' } },
       // Task context on a temp copy of Shop: add, move by an edit, reload, rename through Refyntra, delete.
       {
         name: 'task-context',

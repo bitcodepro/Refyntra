@@ -770,6 +770,34 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
     });
   }
 
+  /** Test discovery (protocol 1.15): every test project, or only `uris`; null for an older host. */
+  tests(uris: string[] | undefined, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').TestsResult | null>> {
+    return this.semantic('code/tests', token, async (s, snapshotId, traceId) => {
+      if (s.protocolMinor < 15) return null;
+      const r = await s.transport.request('code/tests', { traceId, workspaceId: this.opts.workspaceId, snapshotId, ...(uris && uris.length ? { uris } : {}) }, token);
+      const isRange = (x: unknown): boolean => !!x && typeof x === 'object' && !!(x as { start?: unknown }).start && !!(x as { end?: unknown }).end;
+      const strings = (a: unknown): string[] => (Array.isArray(a) ? a.filter((x): x is string => typeof x === 'string') : []);
+      const tests = Array.isArray(r?.tests)
+        ? r.tests
+            .filter((t) => t && typeof t.fullyQualifiedName === 'string' && typeof t.uri === 'string' && typeof t.projectUri === 'string' && typeof t.method === 'string' && isRange(t.range) && isRange(t.nameRange))
+            .map((t) => ({
+              ...t,
+              namespace: typeof t.namespace === 'string' ? t.namespace : '',
+              framework: typeof t.framework === 'string' ? t.framework : '',
+              classes: Array.isArray(t.classes) ? t.classes.filter((c) => c && typeof c.name === 'string' && isRange(c.range) && isRange(c.nameRange)) : [],
+              cases: Array.isArray(t.cases) ? t.cases.filter((c) => c && typeof c.label === 'string' && isRange(c.range)).map((c) => ({ ...c, arguments: strings(c.arguments) })) : [],
+              dynamicCases: !!t.dynamicCases,
+              skipReason: typeof t.skipReason === 'string' ? t.skipReason : null,
+            }))
+            .filter((t) => t.classes.length > 0)
+        : [];
+      const projects = Array.isArray(r?.projects)
+        ? r.projects.filter((p) => p && typeof p.name === 'string' && typeof p.projectUri === 'string').map((p) => ({ ...p, frameworks: strings(p.frameworks) }))
+        : [];
+      return { projects, tests, documents: Array.isArray(r?.documents) ? strings(r.documents) : null, state: typeof r?.state === 'string' ? r.state : 'unknown', snapshotId: r?.snapshotId ?? snapshotId };
+    });
+  }
+
   /** Edit actions (protocol 1.9): list at a range, or compute one action; null for an older host. */
   editActions(uri: string, range: import('@refyntra/contracts').Range, actionId: string | undefined, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').EditActionsResult | null>> {
     return this.semantic('code/editActions', token, async (s, snapshotId, traceId) => {

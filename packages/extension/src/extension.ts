@@ -56,6 +56,7 @@ import { SolutionService } from './solution';
 import { STACK_TRACE_VIEW, StackTraceViewProvider, runOpenStackTrace } from './stackTrace';
 import { type TaskContextViewProvider, registerTaskContext } from './taskContext';
 import { type RunService, registerRun } from './run';
+import { type TestingService, registerTesting } from './testing';
 import { type NavigateToState, acceptNavigateTarget, navigateToState, runNavigateTo } from './navigateTo';
 import { type RecentService, registerRecent } from './recent';
 import { type FileStructureState, acceptStructureRow, fileStructureState, runFileStructure, setStructureFilter, setStructureQuery } from './fileStructure';
@@ -137,6 +138,8 @@ export interface RefyntraTestApi {
   immediate: ImmediateViewProvider;
   /** Debugger extras for .NET (e2e: Smart Step Into outcome and picks, netcoredbg capabilities, exception types). */
   debugExtras: DebugExtras;
+  /** The test runner (Test Explorer, ADR-009): tree, results, runs by id. */
+  testing: TestingService;
   /** Navigate To (Alt+`): the open list and choosing a target by id (e2e / visual wait on it instead of sleeping). */
   navigateTo: { state(): NavigateToState; accept(id: string): Promise<boolean> };
   /** The Refyntra Usages view (e2e: groupings, filters, Next/Previous, export, pinned tabs). */
@@ -302,7 +305,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
   const immediate = registerImmediate();
   const debugExtras = registerDebugExtras(engine);
   context.subscriptions.push(run.disposable);
-  const debugStatus = () => run.service.debuggers.status();
+  const testing = registerTesting(engine, run.service.debuggers, isTrusted);
+  context.subscriptions.push(testing.disposable);
+  const debugStatus = () => ({ ...run.service.debuggers.status(), tests: testing.service.healthText() });
   const health = new HealthDocument(engine, () => solutions.selected(), debugStatus);
   const healthPage = new HealthPage(engine, () => solutions.selected(), isTrusted, debugStatus);
   const previews = new PreviewContentProvider();
@@ -476,6 +481,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     inlineValues: { values: inlineValues.values, hover: inlineValues.hover },
     immediate: immediate.provider,
     debugExtras: debugExtras.extras,
+    testing: testing.service,
     navigateTo: { state: () => navigateToState(), accept: (id) => acceptNavigateTarget(id) },
     usages: usages.provider,
     recent: recent.service,

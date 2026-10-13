@@ -29,7 +29,7 @@ if [ "${1:-}" != "--inside" ]; then
   name="refyntra-visual-$$"
   # The container is removed on any exit of this script (also Ctrl+C or a timeout): nothing is left running.
   trap 'docker rm -f "$name" >/dev/null 2>&1' EXIT INT TERM
-  timeout "${REFYNTRA_VISUAL_TIMEOUT:-3600}" docker run --rm --init --name "$name" ${vnc_args[@]+"${vnc_args[@]}"} \
+  timeout "${REFYNTRA_VISUAL_TIMEOUT:-4500}" docker run --rm --init --name "$name" ${vnc_args[@]+"${vnc_args[@]}"} \
     -v "$repo:/src:ro" -v "$repo/test-results/visual:/out" -v "$repo/tests/visual/baselines:/baselines:$baselines_mode" \
     -v refyntra-vscode-test:/cache/vscode-test -v refyntra-nuget:/root/.nuget/packages \
     -e DOTNET_CLI_TELEMETRY_OPTOUT=1 -e DOTNET_NOLOGO=1 -e REFYNTRA_TEST_VSCODE_VERSION="${REFYNTRA_TEST_VSCODE_VERSION:-1.90.2}" \
@@ -58,9 +58,9 @@ step "screenshots (VS Code $REFYNTRA_TEST_VSCODE_VERSION, Xvfb 1600x1000x24)"
 rm -rf /out/actual /out/diff /out/report.html
 export REFYNTRA_VISUAL_OUT=/out/actual
 display_start 1600x1000x24
-xrun -s "-screen 0 1600x1000x24 -dpi 96 -nolisten tcp" -- timeout 2400 pnpm --filter refyntra run test:visual
+xrun -s "-screen 0 1600x1000x24 -dpi 96 -nolisten tcp" -- timeout 3300 pnpm --filter refyntra run test:visual
 shots=$?
-pkill -f 'Refyntra\.Host|Workspaces\.MSBuild\.BuildHost|netcoredbg|Shop\.Api' 2>/dev/null
+pkill -f 'Refyntra\.Host|Workspaces\.MSBuild\.BuildHost|netcoredbg|Shop\.Api|testhost\.dll' 2>/dev/null
 
 step "compare"
 if [ "$REFYNTRA_VISUAL_UPDATE" = 1 ]; then

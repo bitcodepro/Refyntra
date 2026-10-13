@@ -75,6 +75,8 @@ export interface DebuggerStatus {
   lldbDap?: string;
   cargo?: string;
   dotnet?: string;
+  /** The test runner's note for Health (testing.ts). */
+  tests?: string;
 }
 
 /** Where the bundled debug adapters are (debuggers/ in the VSIX; staged by servers.mjs --debuggers in a checkout). */

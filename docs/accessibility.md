@@ -140,6 +140,15 @@ checked, and what has **not** been checked by a person with assistive technology
   debug toolbar), which Refyntra does not change. Program output of a .NET debug session is in the Debug Console
   (netcoredbg has no terminal mode); Run uses a terminal that screen readers read as any VS Code terminal.
 
+### Tests
+
+- Tests live in VS Code's own Testing view (Test Explorer tree, Test Results, gutter icons, `testing.*` keybindings
+  such as Run Test at Cursor), which screen readers use as any VS Code view; Refyntra only supplies the items, results
+  and messages. Item labels are the test, class or namespace names and data rows as written ("(1, 2, 3)"); failures
+  are `TestMessage`s (readable in the Test Results view and the peek, Accessible View with Alt+F2).
+- The CodeLens `Run | Debug` titles start with a codicon for the last result (passed, failed, skipped); the
+  tooltip names the test. `refyntra.tests.codeLens` turns them off.
+
 ### Inline values, Immediate Window and constructor helpers
 
 - Inline values are VS Code's own inline decorations; screen readers reach them with the line in **Accessible View**

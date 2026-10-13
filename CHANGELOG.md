@@ -4,6 +4,26 @@ All notable changes are listed here. The project is alpha; nothing has been rele
 
 ## Unreleased
 
+### Added (test runner)
+
+- **Tests in VS Code's Test Explorer** without other extensions (ADR-009): C# tests (xUnit, NUnit, MSTest) discovered
+  by the C# host (protocol 1.15 `code/tests`: project → namespace → class → nested class → method → data rows, exact
+  locations, incremental per edited document), run with `dotnet test` and a precise `--filter` per selection, results
+  from TRX (pass/fail/skip per test and data row, duration, message, stack trace with the failing line, output).
+- **Debug a test**: build, `dotnet test --no-build` with `VSTEST_HOST_DEBUG`, the bundled netcoredbg attaches to the
+  test host; breakpoints in tests and in the code under test hit.
+- Rerun Failed, Continuous Run (the classes of a saved file), gutter icons and Test Results are VS Code's own.
+- CodeLens `Run | Debug` over C# test classes and methods with the last result (`refyntra.tests.codeLens`).
+- **Run Tests for This Code** (editor context menu, Command Palette): the tests Related lists for the symbol.
+- Python tests with pytest (when installed; Health explains otherwise), debugging with the bundled debugpy; Rust tests
+  with `cargo test` (run only).
+- **Coverage** profile: line coverage from coverlet.collector for .NET test projects that already reference it (VS
+  Code's coverage view); skipped with the reason otherwise.
+- Tests: .NET `TestDiscoveryTests` on a new `TestRunner` fixture (xUnit, NUnit, MSTest projects), unit tests of filters,
+  TRX / JUnit / cargo parsing and result matching, e2e scenario `tests` (discovery, run all with expected counts, one
+  theory row, debug with a breakpoint in the code under test, Rerun Failed, incremental discovery, CodeLens, Run Tests
+  for This Code, Continuous Run, coverage, pytest or its Health note), visual baselines `test-explorer` and `test-codelens` (both themes).
+
 ### Added (debugger extras for C#)
 
 - What the bundled netcoredbg 3.2.0 supports was measured in Docker (DAP `initialize` capabilities and a probe of

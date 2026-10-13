@@ -33,8 +33,9 @@ public sealed class Engine : IRpcHandler, IDisposable
     /// 1.12: code/usages (classified usages) and the code/hierarchy directions "bases" / "containing".
     /// 1.13: code/fileStructure (File Structure: types, members, regions and inherited members of a document).
     /// 1.14: code/stepIntoTargets (Smart Step Into: the calls of the statement a debugger stopped at).
+    /// 1.15: code/tests (test discovery for the Test Explorer: test projects, classes, methods and data cases).
     /// </summary>
-    public const int ProtocolMinor = 14;
+    public const int ProtocolMinor = 15;
     /// <summary>How long workspace/snapshotBarrier waits for a missing document sequence (tests shorten it).</summary>
     public TimeSpan BarrierTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
@@ -132,6 +133,8 @@ public sealed class Engine : IRpcHandler, IDisposable
                 return await StepIntoTargetsAsync(Params<StepIntoTargetsParams>(p), ct).ConfigureAwait(false);
             case "workspace/runnableProjects":
                 return RunnableProjects(Params<WorkspaceParams>(p));
+            case "code/tests":
+                return await TestsAsync(Params<TestsParams>(p), ct).ConfigureAwait(false);
             case "code/resolveFrame":
                 return await ResolveFrameAsync(Params<ResolveFrameParams>(p), ct).ConfigureAwait(false);
             case "analysis/run":
@@ -626,6 +629,67 @@ public sealed class Engine : IRpcHandler, IDisposable
                 LaunchSettingsUri = r.LaunchSettingsPath == null ? null : UriPaths.ToUri(r.LaunchSettingsPath),
             }).ToList(),
         };
+    }
+
+    /// <summary>code/tests (protocol 1.15): test discovery for the Test Explorer, whole snapshot or some documents.</summary>
+    private async Task<TestsResultDto> TestsAsync(TestsParams p, CancellationToken ct)
+    {
+        var session = RequireSession(p.WorkspaceId);
+        var snap = RequireSnapshot(p.WorkspaceId, p.SnapshotId);
+        var result = new TestsResultDto { SnapshotId = snap.Id, State = session.State };
+        var projects = TestDiscovery.TestProjects(snap.Solution);
+        var testProjectIds = projects.Select(x => x.Id).ToHashSet();
+        var found = new List<(Project project, DiscoveredTest test)>();
+        if (p.Uris is { Count: > 0 })
+        {
+            result.Documents = new List<string>();
+            foreach (var uri in p.Uris.Distinct(StringComparer.Ordinal))
+            {
+                result.Documents.Add(uri);
+                string path;
+                try { path = UriPaths.ToPath(uri); } catch (ArgumentException) { continue; }
+                foreach (var doc in snap.Session.DocumentIdsForPath(path).Select(snap.Solution.GetDocument))
+                {
+                    if (doc == null || !testProjectIds.Contains(doc.Project.Id)) continue;
+                    foreach (var t in await TestDiscovery.DiscoverDocumentAsync(doc, ct).ConfigureAwait(false)) found.Add((doc.Project, t));
+                }
+            }
+        }
+        else
+        {
+            foreach (var project in projects)
+                foreach (var t in await TestDiscovery.DiscoverProjectAsync(project, ct).ConfigureAwait(false)) found.Add((project, t));
+        }
+        foreach (var project in projects)
+        {
+            if (project.FilePath == null) continue;
+            result.Projects.Add(new TestProjectDto
+            {
+                Name = project.AssemblyName,
+                ProjectUri = UriPaths.ToUri(project.FilePath),
+                Frameworks = found.Where(f => f.project.Id == project.Id).Select(f => f.test.Framework).Distinct().OrderBy(x => x, StringComparer.Ordinal).ToList(),
+            });
+        }
+        foreach (var (project, t) in found)
+        {
+            if (project.FilePath == null) continue;
+            result.Tests.Add(new TestMethodDto
+            {
+                ProjectUri = UriPaths.ToUri(project.FilePath),
+                Uri = UriPaths.ToUri(t.FilePath),
+                Framework = t.Framework,
+                Namespace = t.Namespace,
+                Classes = t.Classes.Select(c => new TestClassDto { Name = c.Name, Range = ToRange(c.Range), NameRange = ToRange(c.NameRange) }).ToList(),
+                Method = t.Method,
+                FullyQualifiedName = t.FullyQualifiedName,
+                Range = ToRange(t.Range),
+                NameRange = ToRange(t.NameRange),
+                Cases = t.Cases.Select(c => new TestCaseDto { Label = c.Label, Arguments = c.Arguments.ToList(), Range = ToRange(c.Range) }).ToList(),
+                DynamicCases = t.DynamicCases,
+                SkipReason = t.SkipReason,
+            });
+        }
+        return result;
     }
 
     private async Task<FileStructureResultDto> FileStructureAsync(FileStructureParams p, CancellationToken ct)

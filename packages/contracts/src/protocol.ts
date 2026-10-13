@@ -20,8 +20,9 @@ export const PROTOCOL_MAJOR = 1;
  *   of `code/hierarchy`.
  * 1.13: File Structure (`code/fileStructure`: types, members, regions and inherited members of one document).
  * 1.14: Smart Step Into (`code/stepIntoTargets`: the calls of the statement a debugger stopped at).
+ * 1.15: Test discovery (`code/tests`: test projects, classes, methods and data cases for the Test Explorer).
  */
-export const PROTOCOL_MINOR = 14;
+export const PROTOCOL_MINOR = 15;
 
 /** Zero-based line, UTF-16 code unit character. */
 export interface Position {
@@ -607,6 +608,61 @@ export interface StepIntoTargetsResult {
   snapshotId: string;
 }
 
+/** code/tests (protocol 1.15): test discovery for the Test Explorer (every test project, or only some documents). */
+export interface TestsParams extends WorkspaceParams {
+  snapshotId: string;
+  /** Only these documents (incremental update); absent: every test project. */
+  uris?: string[] | null;
+}
+
+export interface TestProjectInfo {
+  name: string;
+  projectUri: string;
+  /** "xUnit" | "NUnit" | "MSTest". */
+  frameworks: string[];
+}
+
+export interface TestCaseInfo {
+  /** The arguments as written: "(1, 2, 3)". */
+  label: string;
+  /** Normalised arguments (lower case, no quotes, numeric suffixes or blanks) for matching results. */
+  arguments: string[];
+  range: Range;
+}
+
+export interface TestClassInfo {
+  name: string;
+  range: Range;
+  nameRange: Range;
+}
+
+export interface TestMethodInfo {
+  projectUri: string;
+  uri: string;
+  framework: string;
+  namespace: string;
+  /** Containing classes, outermost first. */
+  classes: TestClassInfo[];
+  method: string;
+  /** "Ns.Outer+Inner.Method" (as test adapters report it, without data arguments). */
+  fullyQualifiedName: string;
+  range: Range;
+  nameRange: Range;
+  cases: TestCaseInfo[];
+  /** Cases computed at run time (MemberData, TestCaseSource, DynamicData). */
+  dynamicCases: boolean;
+  skipReason?: string | null;
+}
+
+export interface TestsResult {
+  projects: TestProjectInfo[];
+  tests: TestMethodInfo[];
+  /** With params.uris: the documents scanned; their earlier tests are replaced. */
+  documents?: string[] | null;
+  state: string;
+  snapshotId: string;
+}
+
 export interface HierarchyParams extends WorkspaceParams {
   snapshotId: string;
   symbolId: string;
@@ -1091,6 +1147,8 @@ export interface MethodMap {
   'code/fileStructure': [FileStructureParams, FileStructureResult];
   /** Protocol 1.14. */
   'code/stepIntoTargets': [StepIntoTargetsParams, StepIntoTargetsResult];
+  /** Protocol 1.15. */
+  'code/tests': [TestsParams, TestsResult];
   'code/references': [SymbolQueryParams, LocationsResult];
   'code/implementations': [SymbolQueryParams, LocationsResult];
   'refactor/prepare': [PrepareParams, PrepareResult];

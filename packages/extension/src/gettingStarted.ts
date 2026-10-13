@@ -67,6 +67,7 @@ export const MAIN_MENU: readonly MenuEntry[] = [
   { label: '$(history) Recent Files', detail: 'Recently opened files of this workspace, the previous one first (Ctrl+E)', command: 'refyntra.recentFiles' },
   { label: '$(location) Recent Locations', detail: 'Places where you edited or the cursor rested, with the member and the code line (Ctrl+Shift+E)', command: 'refyntra.recentLocations' },
   { label: '$(list-tree) File Structure', detail: 'Members of the current file grouped by type and #region, with filters and inherited members for C# (Ctrl+F12)', command: 'refyntra.fileStructure' },
+  { label: '$(beaker) Run Tests for This Code', detail: 'Run the C# test at the cursor, or the tests that reference the symbol (Test Explorer shows the results)', command: 'refyntra.tests.runRelated' },
 ];
 
 /** Walkthrough id as VS Code addresses it: <publisher>.<name>#<walkthrough id>. */

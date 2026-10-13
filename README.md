@@ -680,7 +680,7 @@ the Run view, Run, Debug and Generate launch.json explain why nothing starts.
 |---|---|---|
 | .NET console, web, worker apps | `dotnet run --project … [-f …] [--launch-profile …]` in a terminal; **Run with Hot Reload** = `dotnet watch run` | Bundled **netcoredbg** 3.2.0 (MIT, Samsung): build with `dotnet build`, then breakpoints, stepping, locals, watch expressions, exception breakpoints (`all`, `user-unhandled`), attach to a process. Not on win32-arm64, macOS Intel and Alpine (no official build): Run still works there |
 | Windows Forms, WPF | Windows only | Windows only (netcoredbg) |
-| Test projects | Not run here: use the Test Explorer or the Tests group of Related | — |
+| Test projects | In VS Code's Test Explorer (see [Tests](#tests-test-explorer)) | Debug a test from the Test Explorer or its CodeLens |
 | .NET MAUI, Blazor WebAssembly | Not supported (listed with the reason) | — |
 | Python | `python <file>` with your interpreter (`python.defaultInterpreterPath`, a `.venv`/`venv`, or `python3`/`python` on PATH) | Bundled **debugpy** 1.8.22 (MIT), pure-Python parts; launch, `connect` attach. Attaching to a process id is not supported |
 | Rust | `cargo run --bin …` | Only with **lldb-dap** from an installed LLVM (detected, not bundled: CodeLLDB would add 45–56 MB per package) |
@@ -710,6 +710,36 @@ attach: `processId` (`${command:refyntra.pickDotnetProcess}` shows a process pic
 output to the Debug Console (`console: integratedTerminal` behaves like `internalConsole`), so a program cannot read
 from stdin while it is debugged; use Run for that. `"type": "refyntra-python"`: `program` or `module`, `python`, `args`,
 `cwd`, `env`, `console` (`integratedTerminal` by default), `justMyCode`, `stopOnEntry`; attach: `connect`.
+
+## Tests (Test Explorer)
+
+Refyntra runs tests in VS Code's own **Testing** view (Test Explorer, gutter icons, Test Results, Rerun Failed,
+Continuous Run), with no other extension ([ADR-009](docs/adr/ADR-009-test-runner.md)). Trusted workspaces only.
+
+| Language | Discovery | Run | Debug |
+|---|---|---|---|
+| C# (xUnit, NUnit, MSTest on VSTest) | The C# host: project → namespace → class → nested class → method → data rows (`[InlineData]`, `[TestCase]`, `[DataRow]`) with exact locations; updated as you type (only the edited file is re-read) | `dotnet test <project> --filter …` (one build per project and run); results from a TRX file: pass/fail/skip per test and data row, duration, message, stack trace, output | Build, then `dotnet test --no-build` with `VSTEST_HOST_DEBUG`; the bundled netcoredbg attaches to the test host. Breakpoints in tests and in the code under test hit |
+| Python | `python -m pytest --collect-only` with your interpreter, **only when pytest is installed** (Health says so otherwise) | pytest with a JUnit XML report | pytest under the bundled debugpy |
+| Rust | `cargo test -- --list` when cargo is installed | `cargo test` | Not supported (no bundled Rust debugger) |
+
+- **Data rows**: rows written in source appear before the first run; rows computed at run time (`[MemberData]`,
+  `[TestCaseSource]`, `[DynamicData]`) appear under their method after a run. Running one row runs its method
+  (test adapters cannot select a single row); every row reports its own result.
+- **Failures** open at the failing line (the first stack frame in the test file, else the first frame in your code);
+  "Expected / Actual" messages show VS Code's diff.
+- **CodeLens** `Run | Debug` above C# test classes and methods, with the last result (`refyntra.tests.codeLens`).
+- **Run Tests for This Code** (editor context menu → Refyntra, Command Palette): in a test, runs it; on production code,
+  runs the tests that reference the symbol (the Tests group of Related; a reference is not coverage).
+- **Continuous Run** (the eye button of the Run profile): saving a file runs the test classes in it, or the chosen tests
+  after a change elsewhere.
+- Python and Rust tests are discovered when the Test Explorer opens (or on Refresh): discovery imports or compiles
+  project code.
+- **Coverage** (the Coverage profile, VS Code's coverage view and editor highlights): line coverage for .NET test
+  projects that already reference **coverlet.collector**; otherwise the tests run without coverage and Refyntra says why
+  (it never adds packages to your projects).
+- Limits: Microsoft Testing Platform-only projects (no VSTest adapter) and tests in abstract or generic classes are not
+  listed; xUnit v2 does not capture `Console` output per test; Rust tests have no source location; coverage is line
+  coverage of .NET only.
 
 ### While debugging C# (inline values, hover, Immediate Window)
 
@@ -940,6 +970,8 @@ constructor that needs them (the compile check refuses it).
 | `refyntra.introduceParameter` | Introduce Parameter for the selected C# expression: every call site passes it (preview first) |
 | `refyntra.introduceVariable` / `refyntra.inlineVariable` | Introduce a local from the selected C# expression / inline the C# local at the cursor (Ctrl+Alt+V / Ctrl+Alt+N in the `resharper` preset) |
 | `refyntra.generateLaunchJson` | Write the run and debug configurations to `.vscode/launch.json` |
+| `refyntra.tests.runRelated` | Run Tests for This Code: the test at the cursor, or the tests that reference the symbol (C#) |
+| `refyntra.tests.run` / `refyntra.tests.debug` | (not in the palette) Run / debug one test item (the test CodeLens) |
 | `refyntra.nativeRename` | (not in the palette) The editor's own Rename, offered when a TS/JS rename cannot be confirmed safe; not validated by Refyntra |
 
 ## Settings
@@ -964,6 +996,7 @@ constructor that needs them (the compile check refuses it).
 | `refyntra.run.editorButtons` | boolean, default on | Run and Debug buttons in the editor title |
 | `refyntra.run.statusBar` | boolean, default on | The run target in the status bar |
 | `refyntra.run.view` | boolean, default on | The Refyntra Run view |
+| `refyntra.tests.codeLens` | boolean, default on | `Run \| Debug` CodeLens with the last result above C# test classes and methods |
 | `refyntra.debug.inlineValues` | boolean, default on | C# inline values after the lines of the stopped method (shown when `debug.inlineValues` is `auto` or `on`) |
 | `refyntra.trace.level` | `info` (default) and other levels | Detail of the Refyntra output log. Source text is never logged |
 
@@ -984,7 +1017,7 @@ More in [docs/support/troubleshooting.md](docs/support/troubleshooting.md).
 
 - `pnpm test:unit`, `pnpm test:architecture`, `pnpm test:host`: unit, layering and .NET host tests.
 - `pnpm test:integration`, `pnpm test:e2e`: the extension inside a real VS Code; on Linux in Docker with `bash scripts/test/linux-e2e.sh` (see [docs/support/linux-smoke.md](docs/support/linux-smoke.md)).
-- `pnpm test:visual`: screenshot tests of Refyntra's UI in VS Code 1.90.2, **only headless in Docker** (Xvfb 1600x1000, `scripts/test/linux-visual.sh`; it never opens a window on your desktop). Both Default Dark Modern and Default Light Modern, fixed DejaVu fonts and zoom, no animations, cursor blink, tips or welcome page, on a temp copy of `tests/fixtures/Shop`. Scenarios: CodeLens, the Ctrl+. refactor menu on a selection, the editor context menu's Refyntra submenu, the Refactor Preview of a rename, the Change Signature dialog, the Related, Stack Trace and Task Context views, the status bar menu, the Health page, the MediatR hover and the Find QuickPick. Screenshots are compared with `tests/visual/baselines/<theme>/<scenario>.png` (pixelmatch, threshold 0.1, at most 0.05 % differing pixels; masked regions in `tests/visual/masks.json`). Results: `test-results/visual/report.html` (baseline, actual and diff side by side) plus `actual/` and `diff/` PNGs. `pnpm test:visual --update` regenerates the baselines; review the new PNGs before committing them.
+- `pnpm test:visual`: screenshot tests of Refyntra's UI in VS Code 1.90.2, **only headless in Docker** (Xvfb 1600x1000, `scripts/test/linux-visual.sh`; it never opens a window on your desktop). Both Default Dark Modern and Default Light Modern, fixed DejaVu fonts and zoom, no animations, cursor blink, tips or welcome page, on a temp copy of `tests/fixtures/Shop`. Scenarios: CodeLens, the Ctrl+. refactor menu on a selection, the editor context menu's Refyntra submenu, the Refactor Preview of a rename, the Change Signature dialog, the Related, Stack Trace and Task Context views, the status bar menu, the Health page, the MediatR hover and the Find QuickPick; the Test Explorer after a run and the test CodeLens run on a copy of `tests/fixtures/TestRunner` (scenarios `visual-tests-dark` / `visual-tests-light`). Screenshots are compared with `tests/visual/baselines/<theme>/<scenario>.png` (pixelmatch, threshold 0.1, at most 0.05 % differing pixels; masked regions in `tests/visual/masks.json`). Results: `test-results/visual/report.html` (baseline, actual and diff side by side) plus `actual/` and `diff/` PNGs. `pnpm test:visual --update` regenerates the baselines; review the new PNGs before committing them.
 - Watch the Docker runs live: `REFYNTRA_VNC=1 pnpm test:visual` (or `pnpm test:visual --vnc`, `bash scripts/test/linux-e2e.sh --vnc`) runs a fixed Xvfb display `:99` with x11vnc and noVNC in the container. Open http://localhost:6080/vnc.html (or a VNC viewer on `localhost:5900`) once the build step is done. The ports listen on 127.0.0.1 only and the session is view-only without a password. `REFYNTRA_VNC_PAUSE_MS=1500` pauses after each test case so you can follow. Without the variable nothing changes (xvfb-run, no ports).
 
 ## Status and feedback

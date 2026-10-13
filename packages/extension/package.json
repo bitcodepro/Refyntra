@@ -351,6 +351,21 @@
         "category": "Refyntra"
       },
       {
+        "command": "refyntra.tests.runRelated",
+        "title": "Run Tests for This Code",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.tests.run",
+        "title": "Run Test",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.tests.debug",
+        "title": "Debug Test",
+        "category": "Refyntra"
+      },
+      {
         "command": "refyntra.codeLens.related",
         "title": "Open Related from CodeLens",
         "category": "Refyntra"
@@ -693,6 +708,18 @@
         {
           "command": "refyntra.openLocation",
           "when": "false"
+        },
+        {
+          "command": "refyntra.tests.run",
+          "when": "false"
+        },
+        {
+          "command": "refyntra.tests.debug",
+          "when": "false"
+        },
+        {
+          "command": "refyntra.tests.runRelated",
+          "when": "editorLangId == csharp && isWorkspaceTrusted"
         },
         {
           "command": "refyntra.runRestore",
@@ -1264,6 +1291,11 @@
           "group": "1_navigate@1"
         },
         {
+          "command": "refyntra.tests.runRelated",
+          "when": "editorLangId == csharp && isWorkspaceTrusted",
+          "group": "1_navigate@9"
+        },
+        {
           "command": "refyntra.find",
           "group": "1_navigate@2"
         },
@@ -1690,6 +1722,11 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Show values of C# locals, parameters and assigned fields after the lines of the stopped method (up to the stopped line) while debugging with `refyntra-dotnet`. Only names and `this.member` are evaluated (watch context), never method calls; netcoredbg may run property getters. VS Code shows them when `#debug.inlineValues#` is `auto` (the default, which uses language providers like this one) or `on`."
+        },
+        "refyntra.tests.codeLens": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show **Run | Debug** above C# test classes and methods (xUnit, NUnit, MSTest), with the last result. The Test Explorer and the gutter icons come from VS Code's Testing view."
         },
         "refyntra.debug.dotnet.breakOnExceptionTypes": {
           "type": "array",

@@ -325,6 +325,20 @@ a test class. It is not part of `initialize.capabilities`.
     `nextStatement` the next statement of the same block, of the top-level statements, or the closing brace when the
     statement is the last of a member body (null otherwise, e.g. the last statement of a loop body). `reasonCode`:
     `DocumentNotFound`, `NoStatement`. Sent only to hosts with minor ≥ 14.
+- 1.15 (additive): test discovery for the Test Explorer (ADR-009).
+  - `code/tests` `TestsParams` `{traceId, workspaceId, snapshotId, uris?}` → `TestsResult` `{projects, tests,
+    documents?, state, snapshotId}`. `projects`: every project that references a test framework assembly (xUnit
+    `xunit.core` / `xunit.v3.core`, NUnit `nunit.framework`, MSTest), one per project file: `{name, projectUri,
+    frameworks}`. `tests`: `TestMethodInfo` `{projectUri, uri, framework (xUnit | NUnit | MSTest), namespace, classes
+    [{name, range, nameRange}] (outermost first), method, fullyQualifiedName ("Ns.Outer+Inner.Method", as test adapters
+    report it, without data arguments), range, nameRange, cases [{label, arguments, range}], dynamicCases,
+    skipReason?}`. A test is a method with a test attribute identified by attribute identity (as in Related); abstract
+    and generic classes are left out. `cases` are the data rows written in source (`[InlineData]`, `[TestCase]`,
+    `[DataRow]`, positional arguments): `label` as written ("(1, 2, 3)"), `arguments` normalised for matching results
+    (quotes, numeric suffixes and enum type names removed, no blanks, lower case). `dynamicCases`: `[MemberData]`,
+    `[ClassData]`, `[TestCaseSource]`, `[DynamicData]` or a parameterised test without rows. `skipReason`: xUnit
+    `Skip =`, NUnit / MSTest `[Ignore]`. With `uris` only those documents are scanned (incremental update);
+    `documents` echoes them and the client replaces their earlier tests. Sent only to hosts with minor ≥ 15.
 - Additive (EF Core): relation kinds `efcore.*` and group `data` (above); `SearchFilters.entity?: boolean` ("entity:")
   and `SearchFilters.table?: string` ("table:NAME") return EF Core entities as symbol items. Older hosts ignore the
   filters (they return a normal symbol search); older clients render the kinds and the group generically. The
@@ -389,6 +403,7 @@ issuing semantic requests.
 | `code/usages` | req | `UsagesParams` `{…, symbolId, limit?}` | `UsagesResult` (since 1.12; Find Usages grouped) |
 | `code/fileStructure` | req | `FileStructureParams` `{…, uri, includeInherited?}` | `FileStructureResult` (since 1.13; File Structure) |
 | `code/stepIntoTargets` | req | `StepIntoTargetsParams` `{…, uri, position}` | `StepIntoTargetsResult` (since 1.14; Smart Step Into) |
+| `code/tests` | req | `TestsParams` `{…, uris?}` | `TestsResult` (since 1.15; Test Explorer discovery) |
 | `code/constructorActions` | req | `ConstructorActionsParams` `{…, uri, position, actionId?, member?, members?, type?, constructorId?, typeId?}` | `ConstructorActionsResult` (since 1.11; constructor / DI helpers) |
 | `workspace/didDeleteFiles` | notif | `{workspaceId, sequence, workspaceRevision, files: [{uri}]}` | – (since 1.6; consumes a document sequence) |
 | `analysis/run` | req | `AnalysisRunParams` `{traceId, workspaceId, snapshotId, uri?}` | `AnalysisRunResult` (since 1.1, additive; see "Analysis") |

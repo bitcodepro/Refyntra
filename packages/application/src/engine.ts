@@ -164,6 +164,11 @@ export type StepIntoTargetsOutcome =
   | { kind: 'targets'; result: import('@refyntra/contracts').StepIntoTargetsResult }
   | { kind: 'unavailable'; reasonCode: string; message: string; recoveryActions: RecoveryAction[] };
 
+/** Test discovery (protocol 1.15) of the owned C# route. */
+export type TestsOutcome =
+  | { kind: 'tests'; result: import('@refyntra/contracts').TestsResult }
+  | { kind: 'unavailable'; reasonCode: string; message: string; recoveryActions: RecoveryAction[] };
+
 export type FileStructureOutcome =
   | { kind: 'structure'; result: import('@refyntra/contracts').FileStructureResult }
   | { kind: 'unavailable'; reasonCode: string; message: string; recoveryActions: RecoveryAction[] };
@@ -255,6 +260,8 @@ export interface EngineClient {
   fileStructure?(uri: string, includeInherited: boolean, token?: CancellationToken): Promise<FileStructureOutcome>;
   /** Smart Step Into (owned route, protocol 1.14): the calls of the statement a debugger stopped at. */
   stepIntoTargets?(uri: string, position: Position, token?: CancellationToken): Promise<StepIntoTargetsOutcome>;
+  /** Test discovery (owned route, protocol 1.15): every test project, or only the given documents. */
+  tests?(uris?: string[], token?: CancellationToken): Promise<TestsOutcome>;
   /** Find Usages grouped (owned route, protocol 1.12): classified usages of the symbol at the position, at most `limit`. */
   usages(target: DocumentTarget, limit: number, token?: CancellationToken): Promise<UsagesOutcome>;
   /** Run and Debug (protocol 1.8): the C# projects of the loaded workspace classified for running and debugging. */
@@ -780,6 +787,19 @@ export class RefyntraEngine implements EngineClient {
       if (!result) return { kind: 'unavailable', reasonCode: 'ProtocolTooOld', message: 'The C# host is too old for Smart Step Into; update the extension.', recoveryActions: [] };
       if (result.reasonCode) return { kind: 'unavailable', reasonCode: result.reasonCode, message: result.reasonCode === 'DocumentNotFound' ? 'This file is not part of the loaded solution.' : 'No statement at the stopped position.', recoveryActions: [] };
       return { kind: 'targets', result };
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      return this.toUnavailable(adapter, e);
+    }
+  }
+
+  async tests(uris?: string[], token?: CancellationToken): Promise<TestsOutcome> {
+    const adapter = this.o.registry.languageAdapters().find((a) => a.descriptor.ownership === 'owned-semantic' && typeof a.tests === 'function');
+    if (!adapter) return { kind: 'unavailable', reasonCode: 'NoLanguageRoute', message: 'No Refyntra route discovers .NET tests.', recoveryActions: [RECOVERY_SHOW_HEALTH] };
+    try {
+      const r = await this.withStaleRetry(() => adapter.tests!(uris, token), token);
+      if (!r.value) return { kind: 'unavailable', reasonCode: 'ProtocolTooOld', message: 'The C# host is too old for test discovery; update the extension.', recoveryActions: [] };
+      return { kind: 'tests', result: r.value };
     } catch (e) {
       if (e instanceof CancelledError) throw e;
       return this.toUnavailable(adapter, e);

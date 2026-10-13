@@ -98,7 +98,7 @@ const common = [
         assert.ok(fsx.existsSync(px.join(ext.extensionPath, st.media.markdown)), st.media.markdown);
         assert.match(st.description, /\(command:refyntra\.[A-Za-z.]+\)/, `${st.id} has a command button`);
       }
-      assert.deepEqual(pkg.contributes.menus['refyntra.editorContext'].map((m) => m.command), ['refyntra.related', 'refyntra.find', 'refyntra.findHandler', 'refyntra.findEndpoint', 'refyntra.findRegistration', 'refyntra.rename', 'refyntra.extractMethod', 'refyntra.changeSignature', 'refyntra.moveTypeToFile', 'refyntra.safeDelete', 'refyntra.generateHandler', 'refyntra.cleanup', 'refyntra.taskContext.addSymbol', 'refyntra.taskContext.addFile', 'refyntra.actions']);
+      assert.deepEqual(pkg.contributes.menus['refyntra.editorContext'].map((m) => m.command), ['refyntra.related', 'refyntra.tests.runRelated', 'refyntra.find', 'refyntra.findHandler', 'refyntra.findEndpoint', 'refyntra.findRegistration', 'refyntra.rename', 'refyntra.extractMethod', 'refyntra.changeSignature', 'refyntra.moveTypeToFile', 'refyntra.safeDelete', 'refyntra.generateHandler', 'refyntra.cleanup', 'refyntra.taskContext.addSymbol', 'refyntra.taskContext.addFile', 'refyntra.actions']);
       assert.match(pkg.contributes.menus['editor/context'][0].when, /csharp\|typescript/);
       const whens = pkg.contributes.viewsWelcome.map((v) => v.when);
       for (const v of ['ready', 'untrusted', 'noSolution', 'hostFailed']) assert.equal(whens.filter((x) => x.includes(`refyntra.welcome == ${v}`)).length, 1, v);
@@ -1390,7 +1390,7 @@ scenarios['ts-delegated'] = [
 
 // ---- accessibility -----------------------------------------------------------------------------------
 // Internal commands: invoked by buttons and tree items, hidden from the Command Palette on purpose.
-const INTERNAL_COMMANDS = ['refyntra.openLocation', 'refyntra.runRestore', 'refyntra.related.open', 'refyntra.nativeRename', 'refyntra.stackTrace.openFrame', 'refyntra.stackTrace.related', 'refyntra.taskContext.addFindItem', 'refyntra.taskContext.addFromRelated', 'refyntra.codeLens.related', 'refyntra.selectRunTargetById', 'refyntra.pickDotnetProcess', 'refyntra.immediate.clear', 'refyntra.editAction', 'refyntra.usages.open', 'refyntra.usages.activate', 'refyntra.usages.closeSession', 'refyntra.usages.showMore', ...['kind', 'project', 'folder', 'file', 'type', 'member'].flatMap((g) => [`refyntra.usages.group.${g}`, `refyntra.usages.ungroup.${g}`])];
+const INTERNAL_COMMANDS = ['refyntra.openLocation', 'refyntra.runRestore', 'refyntra.related.open', 'refyntra.nativeRename', 'refyntra.stackTrace.openFrame', 'refyntra.stackTrace.related', 'refyntra.taskContext.addFindItem', 'refyntra.taskContext.addFromRelated', 'refyntra.codeLens.related', 'refyntra.selectRunTargetById', 'refyntra.pickDotnetProcess', 'refyntra.immediate.clear', 'refyntra.editAction', 'refyntra.usages.open', 'refyntra.usages.activate', 'refyntra.usages.closeSession', 'refyntra.usages.showMore', 'refyntra.tests.run', 'refyntra.tests.debug', ...['kind', 'project', 'folder', 'file', 'type', 'member'].flatMap((g) => [`refyntra.usages.group.${g}`, `refyntra.usages.ungroup.${g}`])];
 
 common.push([
   'keyboard: every user command is in the Command Palette and the status bar menu leads to the main ones',
@@ -1581,9 +1581,13 @@ scenarios.navigation = require('./navigation.cjs').cases({ api, csharp, waitFor 
 // Visual (screenshot) scenarios, Docker/Xvfb only (test/suite/visual.cjs, scripts/test/linux-visual.sh).
 // Run and Debug on a temp copy of the Runnable fixture (bundled netcoredbg and debugpy; test/suite/runDebug.cjs).
 scenarios['run-debug'] = require('./runDebug.cjs').cases({ api, csharp, waitFor });
+// Test runner on the Testing API (test/suite/testing.cjs).
+scenarios.tests = require('./testing.cjs').cases({ api, csharp, waitFor });
 
 scenarios['visual-dark'] = require('./visual.cjs').cases({ api, csharp, waitFor });
 scenarios['visual-light'] = require('./visual.cjs').cases({ api, csharp, waitFor });
+scenarios['visual-tests-dark'] = require('./visualTests.cjs').cases({ api, csharp, waitFor });
+scenarios['visual-tests-light'] = require('./visualTests.cjs').cases({ api, csharp, waitFor });
 
 exports.run =async function run() {
   const name = process.env.REFYNTRA_TEST_SCENARIO;
