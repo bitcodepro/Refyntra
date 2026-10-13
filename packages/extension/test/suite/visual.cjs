@@ -646,6 +646,36 @@ exports.cases = ({ api, csharp, waitFor }) => {
         a.usages.clear();
       },
     ],
+    [
+      'visual: inspection-quickfix — an OR1003 squiggle with the Refyntra quick fixes (Ctrl+.)',
+      async () => {
+        await ready();
+        await reset();
+        await codeLens(false);
+        try {
+          const { doc, ed } = await open(SERVICES, 'public sealed class AuditLog');
+          assert.ok(doc.getText().includes('public void Write(string entry)'), 'AuditLog.Write');
+          const eol = doc.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n';
+          // After the closing brace of AuditLog.Write (an unsaved edit, reverted below).
+          const at = doc.lineAt(doc.positionAt(doc.getText().indexOf('public void Write(string entry)')).line + 2).range.end;
+          await ed.edit((e) => e.insert(at, `${eol}${eol}    public async void Flush() => await Task.Yield();`));
+          const d = await waitFor(() => vscode.languages.getDiagnostics(doc.uri).find((x) => x.source === 'Refyntra' && (typeof x.code === 'object' ? x.code.value : x.code) === 'OR1003'), 'the OR1003 squiggle', 90000);
+          ed.selection = new vscode.Selection(d.range.start, d.range.start);
+          ed.revealRange(d.range, vscode.TextEditorRevealType.InCenter);
+          await waitFor(async () => {
+            const list = (await vscode.commands.executeCommand('vscode.executeCodeActionProvider', doc.uri, d.range, vscode.CodeActionKind.QuickFix.value)) ?? [];
+            return list.some((x) => /Refyntra/.test(x.title));
+          }, 'the quick fixes', 30000);
+          await sleep(800);
+          await vscode.commands.executeCommand('editor.action.quickFix');
+          await shot('inspection-quickfix', 2500);
+          key('Escape');
+          await vscode.commands.executeCommand('workbench.action.files.revert');
+        } finally {
+          await codeLens(true);
+        }
+      },
+    ],
   ];
   // REFYNTRA_VISUAL_ONLY=codelens,find: only these screenshots (local debugging); the window setup always runs.
   return only.length ? cases.filter(([title], i) => i === 0 || only.some((o) => title.startsWith(`visual: ${o} `))) : cases;

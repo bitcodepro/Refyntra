@@ -2,14 +2,78 @@ import type { RuleAbstention, RuleDiagnostic } from '@refyntra/contracts';
 
 // Pure part of the rule diagnostics (no vscode import): settings, grouping and the explanation text. Unit-tested.
 
-export type RuleLevel = 'off' | 'information' | 'warning';
+export type RuleLevel = 'off' | 'hint' | 'info' | 'information' | 'warning' | 'error';
+/** OR1001's levels (its setting predates the inspections). */
 export const RULE_LEVELS: readonly RuleLevel[] = ['off', 'information', 'warning'];
-export const RULE_SETTING_DEFAULTS: Readonly<Record<string, RuleLevel>> = { OR1001: 'warning' };
+/** Levels of the inspections OR1002–OR1010 (setting `refyntra.rules.ORxxxx`). */
+export const INSPECTION_LEVELS: readonly RuleLevel[] = ['off', 'hint', 'info', 'warning', 'error'];
+export const RULE_SETTING_DEFAULTS: Readonly<Record<string, RuleLevel>> = {
+  OR1001: 'warning',
+  OR1002: 'warning',
+  OR1003: 'warning',
+  OR1004: 'warning',
+  OR1005: 'info',
+  OR1006: 'info',
+  OR1007: 'info',
+  OR1008: 'hint',
+  OR1009: 'hint',
+  OR1010: 'info',
+};
 
 /** An unknown or missing setting value falls back to the rule's default (never to a stronger level). */
 export function ruleLevel(ruleId: string, configured: unknown): RuleLevel {
-  if (typeof configured === 'string' && (RULE_LEVELS as readonly string[]).includes(configured)) return configured as RuleLevel;
+  const allowed = ruleId === 'OR1001' ? RULE_LEVELS : INSPECTION_LEVELS;
+  if (typeof configured === 'string' && (allowed as readonly string[]).includes(configured)) return configured as RuleLevel;
   return RULE_SETTING_DEFAULTS[ruleId] ?? 'off';
+}
+
+/** The severity a level is shown with (Problems shows everything but hints). */
+export function severityOf(level: RuleLevel): 'hint' | 'information' | 'warning' | 'error' | undefined {
+  switch (level) {
+    case 'off':
+      return undefined;
+    case 'hint':
+      return 'hint';
+    case 'info':
+    case 'information':
+      return 'information';
+    case 'error':
+      return 'error';
+    default:
+      return 'warning';
+  }
+}
+
+/** A quick fix offered for a diagnostic: an edit action computed at the diagnostic's start. */
+export interface QuickFixOffer {
+  actionId: string;
+  title: string;
+}
+
+export const ADD_AWAIT_FIX = 'csharp.edit.fix.addAwait';
+export const DISCARD_TASK_FIX = 'csharp.edit.fix.discardTask';
+
+/** Valid quick fixes of a Refyntra inspection result (edit actions `csharp.edit.fix.*` only, without duplicates). */
+export function quickFixesOf(fixes: unknown): QuickFixOffer[] {
+  if (!Array.isArray(fixes)) return [];
+  const seen = new Set<string>();
+  const out: QuickFixOffer[] = [];
+  for (const f of fixes) {
+    if (!f || typeof f.actionId !== 'string' || !f.actionId.startsWith('csharp.edit.fix.') || typeof f.title !== 'string' || seen.has(f.actionId)) continue;
+    seen.add(f.actionId);
+    out.push({ actionId: f.actionId, title: f.title });
+  }
+  return out;
+}
+
+/** Quick fixes Refyntra adds to another tool's diagnostic: the compiler's CS4014 (an unawaited call in an async method). */
+export function compilerQuickFixes(code: unknown): QuickFixOffer[] {
+  const value = code && typeof code === 'object' ? (code as { value?: unknown }).value : code;
+  if (value !== 'CS4014') return [];
+  return [
+    { actionId: ADD_AWAIT_FIX, title: "Add 'await'" },
+    { actionId: DISCARD_TASK_FIX, title: "Discard the task explicitly ('_ =')" },
+  ];
 }
 
 /** Diagnostics per document URI, rules that are switched off removed, sorted by position. */

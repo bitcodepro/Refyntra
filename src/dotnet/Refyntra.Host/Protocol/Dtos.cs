@@ -791,6 +791,15 @@ public sealed class AnalysisRunParams : WorkspaceParams
     public string SnapshotId { get; set; } = "";
     /// <summary>Optional: only results whose primary location is in this document.</summary>
     public string? Uri { get; set; }
+    /// <summary>Protocol 1.16: documents to run the per-document inspections (OR1002–OR1010) on (the client's open C# files).</summary>
+    public List<string>? Documents { get; set; }
+}
+
+/// <summary>A quick fix of an inspection result: an edit action computed at the result's start (protocol 1.16).</summary>
+public sealed class RuleFixDto
+{
+    public string ActionId { get; set; } = "";
+    public string Title { get; set; } = "";
 }
 
 public sealed class RelatedLocationDto
@@ -811,6 +820,8 @@ public sealed class RuleDiagnosticDto
     public string Completeness { get; set; } = "complete";
     public string? CompositionRoot { get; set; }
     public string? HelpUri { get; set; }
+    /// <summary>Protocol 1.16: quick fixes (edit actions) of an inspection result.</summary>
+    public List<RuleFixDto>? Fixes { get; set; }
 }
 
 public sealed class RuleAbstentionDto

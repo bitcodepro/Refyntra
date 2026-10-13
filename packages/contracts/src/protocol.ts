@@ -21,8 +21,10 @@ export const PROTOCOL_MAJOR = 1;
  * 1.13: File Structure (`code/fileStructure`: types, members, regions and inherited members of one document).
  * 1.14: Smart Step Into (`code/stepIntoTargets`: the calls of the statement a debugger stopped at).
  * 1.15: Test discovery (`code/tests`: test projects, classes, methods and data cases for the Test Explorer).
+ * 1.16: Inspections OR1002–OR1010 (`analysis/run` `documents`) with quick fixes (`RuleDiagnostic.fixes`, edit actions
+ *   `csharp.edit.fix.*`).
  */
-export const PROTOCOL_MINOR = 15;
+export const PROTOCOL_MINOR = 16;
 
 /** Zero-based line, UTF-16 code unit character. */
 export interface Position {
@@ -1223,14 +1225,24 @@ export interface RpcErrorData {
 // ---------------------------------------------------------------- analysis (additive in 1.1; protocol-v1.md "Analysis")
 
 /** Rule ids `analysis/run` can report. */
-export const ANALYSIS_RULE_IDS = ['OR1001'] as const;
+export const ANALYSIS_RULE_IDS = ['OR1001', 'OR1002', 'OR1003', 'OR1004', 'OR1005', 'OR1006', 'OR1007', 'OR1008', 'OR1009', 'OR1010'] as const;
 export type AnalysisRuleId = (typeof ANALYSIS_RULE_IDS)[number];
 export const OR1001_HELP_URI = 'https://github.com/refyntra/refyntra/blob/main/docs/rules/OR1001.md';
+/** The documentation page of a rule (docs/rules/ORxxxx.md). */
+export const ruleHelpUri = (id: string): string => `https://github.com/refyntra/refyntra/blob/main/docs/rules/${id}.md`;
 
 export interface AnalysisRunParams extends WorkspaceParams {
   snapshotId: string;
   /** Only results whose primary location is in this document. Omitted = the whole workspace. */
   uri?: string;
+  /** Protocol 1.16: documents to run the per-document inspections (OR1002–OR1010) on, e.g. the open C# files. */
+  documents?: string[];
+}
+
+/** Protocol 1.16: a quick fix of an inspection result, an edit action (`csharp.edit.fix.*`) computed at its start. */
+export interface RuleFix {
+  actionId: string;
+  title: string;
 }
 
 export interface RuleRelatedLocation {
@@ -1252,6 +1264,8 @@ export interface RuleDiagnostic {
   completeness: 'complete' | 'partial' | 'unknown';
   compositionRoot?: string;
   helpUri?: string;
+  /** Protocol 1.16: quick fixes of an inspection result (none for OR1001). */
+  fixes?: RuleFix[];
 }
 
 /** Why a rule did not decide (explanation only; never a Problems entry). */

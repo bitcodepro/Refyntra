@@ -280,7 +280,7 @@ export interface EngineClient {
   discardPlan(planId: string): void;
   planState(planId: string): PlanState | undefined;
   /** Rule analysis (`analysis/run`) of every route that offers it; one outcome per route, never throws except on cancel. */
-  analyze(options?: { uri?: string }, token?: CancellationToken): Promise<AnalysisOutcome[]>;
+  analyze(options?: { uri?: string; documents?: readonly string[] }, token?: CancellationToken): Promise<AnalysisOutcome[]>;
   health(): HealthSummary;
   readonly onDidChangeHealth: (l: (h: HealthSummary) => void) => Disposable;
   /** Fires when previously shown results may be invalid (epoch change). */
@@ -968,7 +968,7 @@ export class RefyntraEngine implements EngineClient {
 
   // ---------------------------------------------------------------- Analysis (rules)
 
-  async analyze(options: { uri?: string } = {}, token?: CancellationToken): Promise<AnalysisOutcome[]> {
+  async analyze(options: { uri?: string; documents?: readonly string[] } = {}, token?: CancellationToken): Promise<AnalysisOutcome[]> {
     const adapters = this.o.registry.languageAdapters().filter((a) => typeof a.analyze === 'function' && (!options.uri || a === this.o.registry.routeFor(options.uri)));
     return Promise.all(
       adapters.map(async (adapter): Promise<AnalysisOutcome> => {

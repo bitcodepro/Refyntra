@@ -189,7 +189,7 @@ export interface LanguageAdapter {
   /** Optional (protocol 1.4): the source symbol of a .NET stack frame (stack trace navigation). */
   resolveFrame?(req: import('@refyntra/contracts').ResolveFrameRequest, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').ResolveFrameResult>>;
   /** Optional: rule analysis (`analysis/run`, e.g. OR1001) on the current snapshot. */
-  analyze?(params: { uri?: string }, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').AnalysisRunResult>>;
+  analyze?(params: { uri?: string; documents?: readonly string[] }, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').AnalysisRunResult>>;
 }
 
 export interface FrameworkDescriptor {

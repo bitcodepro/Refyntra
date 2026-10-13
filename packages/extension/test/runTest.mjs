@@ -316,6 +316,15 @@ const scenarios = visual
         settings: { 'refyntra.rename.apply': true, 'files.autoSave': 'off', 'refyntra.preview.style': 'native' },
         env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' },
       },
+      // Inspections OR1002–OR1010 on a temp copy of the Inspections fixture: a result in Problems, its quick fix (one
+      // undo step), Fix in scope in the solution through the Refactor Preview, CS4014 Add 'await', suppressions.
+      {
+        name: 'inspections',
+        fixtureCopy: ['Inspections', 'Inspections.sln'],
+        trusted: true,
+        settings: { 'refyntra.rename.apply': true, 'files.autoSave': 'off', 'refyntra.preview.style': 'native' },
+        env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' },
+      },
       // Native VS Code UI on a temp copy of Shop: code action kinds, CodeLens resolve, Call/Type Hierarchy, MediatR hover,
       // the Refactor Preview (apply, discard, stale refused) and the Change Signature dialog.
       {

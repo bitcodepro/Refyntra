@@ -911,7 +911,7 @@ scenarios['rename-nonutf8'] = [
 
 // Stage D on a temp copy of tests/fixtures/DiRules: OR1001 in Refyntra's own Problems collection + Tests in Related.
 const refyntraDiagnostics = () =>
-  vscode.languages.getDiagnostics().flatMap(([uri, list]) => list.filter((d) => d.source === 'Refyntra').map((d) => ({ uri, d })));
+  vscode.languages.getDiagnostics().flatMap(([uri, list]) => list.filter((d) => d.source === 'Refyntra' && (typeof d.code === 'object' ? d.code.value : d.code) === 'OR1001').map((d) => ({ uri, d })));
 scenarios['di-rules'] = [
   [
     'DiRules loads with the app and the xUnit test project',
@@ -950,7 +950,7 @@ scenarios['di-rules'] = [
       const doc = await vscode.workspace.openTextDocument(shopFile('DiRules.App/Cases/Conditional.cs'));
       const line = doc.getText().split(/\r?\n/).findIndex((l) => l.includes('AddSingleton<CondConsumer>'));
       assert.ok(line >= 0);
-      assert.equal(vscode.languages.getDiagnostics(doc.uri).filter((d) => d.source === 'Refyntra').length, 0);
+      assert.equal(vscode.languages.getDiagnostics(doc.uri).filter((d) => d.source === 'Refyntra' && (typeof d.code === 'object' ? d.code.value : d.code) === 'OR1001').length, 0);
       const actions = await vscode.commands.executeCommand('vscode.executeCodeActionProvider', doc.uri, new vscode.Range(line, 0, line, 0));
       const explainAction = (actions || []).find((x) => /OR1001/.test(x.title));
       assert.ok(explainAction, `code actions: ${(actions || []).map((x) => x.title).join(', ')}`);
@@ -1574,6 +1574,8 @@ scenarios['web-frameworks-restricted'] = require('./webFrameworks.cjs').restrict
 scenarios['task-context'] = require('./taskContext.cjs').cases({ api, csharp, waitFor });
 // Constructor / DI helpers on Roslyn, Register in DI and Fix in scope through the Refactor Preview (test/suite/ctorDi.cjs).
 scenarios['ctor-di'] = require('./ctorDi.cjs').cases({ api, csharp, waitFor });
+// Inspections OR1002–OR1010 on a temp copy of tests/fixtures/Inspections (suite/inspections.cjs).
+scenarios.inspections = require('./inspections.cjs').cases({ api, csharp, waitFor });
 // Native VS Code UI: code actions, CodeLens, Call/Type Hierarchy, hover, Refactor Preview, Change Signature dialog (test/suite/nativeUi.cjs).
 scenarios['native-ui'] = require('./nativeUi.cjs').cases({ api, csharp, waitFor });
 // Navigate To and Find Usages grouped (test/suite/navigation.cjs).

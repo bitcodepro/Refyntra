@@ -16,8 +16,8 @@ How each statement was checked:
 
 | Area | Existing tool | What it already covers | Refyntra decision |
 |---|---|---|---|
-| CancellationToken forwarding | CA2016 (.NET analyzers in the SDK) | A method with a `CancellationToken` parameter calls a method that accepts a token and does not pass it | No Refyntra rule (former OR1003/OR1004 dropped). Navigation only. |
-| Minimal API route conflicts | ASP0022 (ASP.NET Core analyzers) | Two route handlers with the same route and method | No Refyntra rule (former OR1005). Endpoints in Find/Related explain routes. |
+| CancellationToken forwarding | CA2016 (.NET analyzers in the SDK) | A method with a `CancellationToken` parameter calls a method that accepts a token and does not pass it | No Refyntra rule (dropped before shipping as candidate ids OR1003/OR1004; those ids now name the inspections below). Navigation only. |
+| Minimal API route conflicts | ASP0022 (ASP.NET Core analyzers) | Two route handlers with the same route and method | No Refyntra rule (dropped candidate id OR1005, since reused). Endpoints in Find/Related explain routes. |
 | MVC route conflicts | ASP0023 (ASP.NET Core analyzers) | Two controller actions with the same route | No Refyntra rule. |
 | Scoped service in a singleton | Compiler | Nothing (DI lifetimes are runtime data) | — |
 | Scoped service in a singleton | `ServiceProviderOptions.ValidateScopes` / `ValidateOnBuild` (Microsoft.Extensions.DependencyInjection) | At run time: resolving a scoped service from a singleton or from the root provider throws; at `Build()` every descriptor with an implementation type is validated | OR1001 (experimental): the same finding **statically, in the editor, before the app runs**, with the proof path. |
@@ -89,3 +89,34 @@ constructor edges only); see [OR1001.md](OR1001.md) for the corpus numbers.
 
 Ship OR1001 as **experimental**, default severity `warning`, setting `refyntra.rules.OR1001` (`off|information|warning`),
 no code fix. No second rule in Stage D: the other candidates are covered by CA2016/ASP0022/ASP0023 (navigation only).
+
+## Inspections OR1002–OR1010 (2026-10-13)
+
+What the SDK already reports was **verified locally** (.NET SDK 10, default analysis level, a console project with
+every candidate pattern, built with `-p:ErrorLog=…sarif`): the only analyzer results were **CA1827** (`Count() > 0` →
+`Any()`), **CA1829** (`Count()` → `Length`/`Count`) and **CA1860**; the compiler reported **CS4014** for every unawaited
+`Task`/`ValueTask`-returning call in an async method (plain, async and interface methods, `Task.Delay`, `Task.Run`). Not
+reported by default (verified in the same build): CA2000 (dispose before losing scope), CA1851 (possible multiple
+enumeration), anything about `.Result`/`.Wait()`, `async void`, `Where(…).First()`, `ToList()` before an operator,
+`string.Format` without arguments. The Microsoft.VisualStudio.Threading analyzers (VSTHRD002/100/110) cover some of
+this but are a separate NuGet package (**documented**, not part of the SDK).
+
+| Candidate | Existing default diagnostic | Decision |
+|---|---|---|
+| `.Result` / `.Wait()` / `GetAwaiter().GetResult()` | none | **OR1002** with *Use 'await'* (+ async for Task-returning methods) |
+| `async void` (not an event handler) | none | **OR1003** with *Change to async Task* |
+| Unawaited task in an async method | **CS4014** (compiler) | No duplicate: OR1004 reports only what CS4014 misses (non-async methods, `?.` calls); Refyntra adds *Add 'await'* / *Discard* quick fixes to CS4014 |
+| Missing `ConfigureAwait(false)` | none (CA2007 exists, off by default) | **No rule**: a project policy, not a defect |
+| Disposable local never disposed | CA2000 exists, off by default | **OR1005**, narrower than CA2000 (only proven non-escaping locals), with *using var* |
+| Multiple enumeration | CA1851 exists, off by default | **OR1006**, path-aware (exclusive branches, early returns), with *ToList()* |
+| `s += x` in a loop | none | **OR1007**, only strings the loop never reads, with *StringBuilder* |
+| `Count() > 0` / `Count() == 0` | **CA1827 / CA1829 / CA1860** (on by default) | **No rule** (would duplicate) |
+| `Where(p).First()` … | none | **OR1008** (hint) with the predicate overload |
+| `ToList()` / `ToArray()` enumerated once | none | **OR1009** (hint) |
+| `string.Format` without arguments | none | **OR1010** |
+| Unused private members | IDE0051/IDE0052 (IDE) | **No rule** |
+
+The exact value over the off-by-default CA rules: they are not on by default, and Refyntra's versions are scoped to what
+can be proven from one method (fewer results, each with a compile-checked fix and Fix in scope). Each rule page lists
+its false-positive guards; the fixture `tests/fixtures/Inspections` keeps every guard as a test
+(`InspectionsTests.EveryMarkedCaseIsReportedAndNothingElse`).

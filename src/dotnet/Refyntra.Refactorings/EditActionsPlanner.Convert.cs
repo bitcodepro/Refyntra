@@ -1332,16 +1332,25 @@ public static partial class EditActionsPlanner
     {
         if (c.Token.Parent is not MethodDeclarationSyntax m || c.Token != m.Identifier || m.Modifiers.Any(SyntaxKind.AsyncKeyword)) return null;
         if (m.Body == null && m.ExpressionBody == null) return null;
-        return () =>
+        return () => Task.FromResult(MakeAsyncCore(c, m, signatureChanges: true));
+    }
+
+    /// <summary>
+    /// Adds 'async' to <paramref name="m"/> (of <c>c.Root</c>) and awaits its returns; a method that does not return a
+    /// task gets Task / Task&lt;T&gt;. With <paramref name="signatureChanges"/> false the method already returns a task, so
+    /// overrides, interface implementations and Main keep their signature and are allowed.
+    /// </summary>
+    private static Document MakeAsyncCore(Ctx c, MethodDeclarationSyntax m, bool signatureChanges)
+    {
         {
             var s = c.Model.GetDeclaredSymbol(m, c.Ct)!;
-            if (s.IsOverride || s.ExplicitInterfaceImplementations.Length > 0
-                || s.ContainingType.AllInterfaces.SelectMany(i => i.GetMembers()).Any(im => SymbolEqualityComparer.Default.Equals(s.ContainingType.FindImplementationForInterfaceMember(im), s)))
+            if (signatureChanges && (s.IsOverride || s.ExplicitInterfaceImplementations.Length > 0
+                || s.ContainingType.AllInterfaces.SelectMany(i => i.GetMembers()).Any(im => SymbolEqualityComparer.Default.Equals(s.ContainingType.FindImplementationForInterfaceMember(im), s))))
                 throw new Refusal("SignatureFixed", "The method overrides or implements another member; its return type cannot change alone.");
             if (s.ReturnsByRef || s.ReturnsByRefReadonly) throw new Refusal("RefReturn", "Methods that return by reference cannot be async.");
             if (s.Parameters.Any(p => p.RefKind != RefKind.None)) throw new Refusal("RefParameters", "Async methods cannot have ref, out or in parameters.");
             if (OwnNodes(m).Any(n => n is YieldStatementSyntax)) throw new Refusal("Iterator", "Iterators are not made async.");
-            if (s.Name == "Main" && s.IsStatic) throw new Refusal("EntryPoint", "The entry point is not converted.");
+            if (signatureChanges && s.Name == "Main" && s.IsStatic) throw new Refusal("EntryPoint", "The entry point is not converted.");
             var taskLike = IsTaskLike(s.ReturnType, out var generic);
             var editor = new SyntaxEditor(c.Root, c.Doc.Project.Solution.Services);
             TypeSyntax returnType = m.ReturnType;
@@ -1359,7 +1368,7 @@ public static partial class EditActionsPlanner
                 {
                     if (r.Expression == null) continue;
                     var awaited = SF.AwaitExpression(Receiver(r.Expression));
-                    if (generic) editor.ReplaceNode(r.Expression, awaited.WithTriviaFrom(r.Expression));
+                    if (generic) editor.ReplaceNode(r.Expression, Fmt(awaited.WithTriviaFrom(r.Expression)));
                     else if (r.Parent == m.Body && m.Body!.Statements.Last() == r) editor.ReplaceNode(r, Fmt(SF.ExpressionStatement(awaited).WithTriviaFrom(r)));
                     else if (r.Parent is BlockSyntax) editor.ReplaceNode(r, (SyntaxNode)Fmt(SF.Block(SF.ExpressionStatement(awaited), SF.ReturnStatement())).WithTriviaFrom(r));
                     else throw new Refusal("NotApplicable", "A 'return' of the task is not in a block.");
@@ -1374,8 +1383,8 @@ public static partial class EditActionsPlanner
             }
             editor.ReplaceNode(m, (cur, _) => Apply((MethodDeclarationSyntax)cur));
             var root = editor.GetChangedRoot();
-            return Task.FromResult(!taskLike && !Imports(c, m.SpanStart, "System.Threading.Tasks", "Task") ? WithUsing(c.Doc, root, "System.Threading.Tasks") : c.Doc.WithSyntaxRoot(root));
-        };
+            return !taskLike && !Imports(c, m.SpanStart, "System.Threading.Tasks", "Task") ? WithUsing(c.Doc, root, "System.Threading.Tasks") : c.Doc.WithSyntaxRoot(root);
+        }
     }
 
     private static Func<Task<Document>>? RemoveMethodAsync(Ctx c)

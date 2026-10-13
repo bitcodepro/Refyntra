@@ -325,6 +325,11 @@ a test class. It is not part of `initialize.capabilities`.
     `nextStatement` the next statement of the same block, of the top-level statements, or the closing brace when the
     statement is the last of a member body (null otherwise, e.g. the last statement of a loop body). `reasonCode`:
     `DocumentNotFound`, `NoStatement`. Sent only to hosts with minor ≥ 14.
+- 1.16 (additive): inspections. `analysis/run` `documents?` runs OR1002–OR1010 on those documents (section
+  Analysis); `RuleDiagnostic.fixes?` lists their quick fixes, edit actions `csharp.edit.fix.awaitSyncCall`,
+  `asyncVoidToTask`, `addAwait`, `discardTask`, `usingVar`, `materialize`, `stringBuilder`, `predicateOverload`,
+  `removeMaterialization`, `removeFormat` (also accepted by `csharp.fixAll`). `addAwait` / `discardTask` also apply at
+  an unawaited call the compiler reports as CS4014. Sent only to hosts with minor ≥ 16.
 - 1.15 (additive): test discovery for the Test Explorer (ADR-009).
   - `code/tests` `TestsParams` `{traceId, workspaceId, snapshotId, uris?}` → `TestsResult` `{projects, tests,
     documents?, state, snapshotId}`. `projects`: every project that references a test framework assembly (xUnit
@@ -620,3 +625,12 @@ RuleAbstention = { ruleId, reason, message?, location?, compositionRoot? }
 ```
 
 Rule ids: `OR1001` (docs/rules/OR1001.md). Abstention reasons are listed there.
+
+Since 1.16, `AnalysisRunParams.documents?: string[]` (document URIs, typically the client's open C# files) also runs the
+per-document inspections `OR1002`–`OR1010` (docs/rules/OR1002.md …) on those documents; unknown URIs are ignored. Their
+results are ordinary `RuleDiagnostic`s (`confidence: 'proven'`, `completeness: 'complete'`, no evidence, related
+locations where the rule has them, `helpUri` = the rule page) with `fixes?: [{ actionId, title }]`: edit actions
+`csharp.edit.fix.*` that `code/editActions` computes at the diagnostic's start (kind `quickfix.refyntra.<rule id>`) and
+that `refactor/prepare` `csharp.fixAll` applies in a document, project or solution. Results are cached per document text
+version and project dependent semantic version. Suppressions (`#pragma warning disable`, `[SuppressMessage]`) are applied
+by the host. Older clients that send no `documents` get OR1001 only, as before.

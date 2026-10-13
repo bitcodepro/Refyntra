@@ -141,6 +141,17 @@ export const FIX_ALL_ACTIONS: ReadonlySet<string> = new Set([
   'csharp.edit.toObjectInitializer',
   'csharp.edit.toInterpolatedString',
   'csharp.edit.stringFormatToInterpolated',
+  // Quick fixes of the inspections OR1002–OR1010 (offered from their diagnostics, diagnostics.ts).
+  'csharp.edit.fix.awaitSyncCall',
+  'csharp.edit.fix.asyncVoidToTask',
+  'csharp.edit.fix.addAwait',
+  'csharp.edit.fix.discardTask',
+  'csharp.edit.fix.usingVar',
+  'csharp.edit.fix.materialize',
+  'csharp.edit.fix.stringBuilder',
+  'csharp.edit.fix.predicateOverload',
+  'csharp.edit.fix.removeMaterialization',
+  'csharp.edit.fix.removeFormat',
 ]);
 
 export type FixAllScope = 'document' | 'project' | 'solution';

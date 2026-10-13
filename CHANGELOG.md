@@ -4,6 +4,36 @@ All notable changes are listed here. The project is alpha; nothing has been rele
 
 ## Unreleased
 
+### Added (inspections)
+
+- **Refyntra's own C# inspections with quick fixes**, computed by the C# host with Roslyn's public APIs, each checked
+  against the compiler and the SDK analyzers first (docs/rules/overlap.md) and documented with its false-positive
+  guards (docs/rules/OR1002.md … OR1010.md):
+  OR1002 sync over async (`.Result`, `.Wait()`, `.GetAwaiter().GetResult()`; *Use 'await'*, a Task-returning method
+  becomes async), OR1003 `async void` outside event handlers (*Change to 'async Task'*, refused when used as a
+  delegate), OR1004 discarded tasks where CS4014 does not warn (*Discard explicitly*; CS4014 itself gets *Add 'await'*
+  and *Discard*), OR1005 disposable locals never disposed or handed over (*using var*), OR1006 possible multiple
+  enumeration on one path (*ToList()* once), OR1007 string concatenation in loops that never read the string
+  (*StringBuilder*), OR1008 `Where(p).First()` and friends (predicate overload), OR1009 redundant `ToList()`/`ToArray()`
+  (remove the copy), OR1010 `string.Format` without arguments (use the string; a format that would throw is reported
+  without a fix). Not added on purpose: `Count() > 0` (CA1827/CA1829 already on by default), missing
+  `ConfigureAwait(false)`, unused private members.
+- Results in the Problems view for the open C# files (protocol 1.16: `analysis/run` `documents`, `RuleDiagnostic.fixes`),
+  cached per document version: typing re-analyses one document. Severity per rule `refyntra.rules.ORxxxx`
+  (`off | hint | info | warning | error`); `#pragma warning disable ORxxxx` and `[SuppressMessage]` are honoured.
+- Quick fixes are edit actions (`csharp.edit.fix.*`, kind `quickfix`): compile-checked, one undo step; *… in document,
+  project or solution* applies a fix at every result of the scope as one previewed plan (Fix in scope).
+- Tests: .NET `InspectionsTests` on a new `Inspections` fixture (every reported case marked in the source, everything
+  else is a false-positive guard; each quick fix and its refusals; Fix in scope; cache reuse; Shop timing), unit tests of
+  settings and quick-fix offers, e2e scenario `inspections` (result in Problems, quick fix + Undo, Fix in scope in the
+  solution through the Refactor Preview, CS4014 *Add 'await'*, suppression), visual baseline `inspection-quickfix`
+  (both themes). Measurements: docs/performance/inspections-2026-10-13.md.
+
+### Fixed
+
+- *Make method async* wrote `awaitTask.FromResult(…)` (no space) for `return` statements of a method returning
+  `Task<T>` in a block body.
+
 ### Added (test runner)
 
 - **Tests in VS Code's Test Explorer** without other extensions (ADR-009): C# tests (xUnit, NUnit, MSTest) discovered

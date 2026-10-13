@@ -34,8 +34,9 @@ public sealed class Engine : IRpcHandler, IDisposable
     /// 1.13: code/fileStructure (File Structure: types, members, regions and inherited members of a document).
     /// 1.14: code/stepIntoTargets (Smart Step Into: the calls of the statement a debugger stopped at).
     /// 1.15: code/tests (test discovery for the Test Explorer: test projects, classes, methods and data cases).
+    /// 1.16: analysis/run `documents` (per-document inspections OR1002–OR1010) and RuleDiagnostic `fixes` (quick fixes as edit actions).
     /// </summary>
-    public const int ProtocolMinor = 15;
+    public const int ProtocolMinor = 16;
     /// <summary>How long workspace/snapshotBarrier waits for a missing document sequence (tests shorten it).</summary>
     public TimeSpan BarrierTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
@@ -945,6 +946,38 @@ public sealed class Engine : IRpcHandler, IDisposable
         }
         foreach (var a in model.Abstentions.Where(a => Keep(a.Location)))
             result.Abstentions.Add(new RuleAbstentionDto { RuleId = Semantics.Rules.Or1001Rule.Id, Reason = a.Reason, Message = a.Message, Location = Mapper.Location(a.Location), CompositionRoot = a.CompositionRoot });
+        // Per-document inspections (protocol 1.16): only the requested documents, each cached by its versions.
+        var inspected = new HashSet<string>(UriPaths.PathComparer);
+        foreach (var uri in p.Documents ?? new List<string>())
+        {
+            ct.ThrowIfCancellationRequested();
+            string path;
+            try { path = PathOf(uri); }
+            catch (EngineException) { continue; }
+            if (!inspected.Add(path)) continue;
+            var doc = snap.Session.DocumentIdsForPath(path).Select(snap.Solution.GetDocument).FirstOrDefault(d => d != null);
+            if (doc == null) continue;
+            var tree = await doc.GetSyntaxTreeAsync(ct).ConfigureAwait(false);
+            if (tree == null) continue;
+            foreach (var f in await Semantics.Rules.CodeInspections.AnalyzeDocumentAsync(snap, doc, ct).ConfigureAwait(false))
+            {
+                var loc = Mapper.Location(Location.Create(tree, f.Span));
+                if (loc == null) continue;
+                result.Diagnostics.Add(new RuleDiagnosticDto
+                {
+                    Id = f.Id,
+                    Severity = "warning",
+                    Message = f.Message,
+                    Location = loc,
+                    RelatedLocations = f.Related.Select(r => Mapper.Location(Location.Create(tree, r.Span)) is { } rl ? new RelatedLocationDto { Location = rl, Message = r.Message } : null)
+                        .Where(r => r != null).Select(r => r!).ToList(),
+                    Confidence = "proven",
+                    Completeness = "complete",
+                    HelpUri = Semantics.Rules.CodeInspections.HelpUri(f.Id),
+                    Fixes = f.Fixes.Select(x => new RuleFixDto { ActionId = x.ActionId, Title = x.Title }).ToList(),
+                });
+            }
+        }
         return result;
     }
 

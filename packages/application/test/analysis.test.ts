@@ -77,4 +77,26 @@ describe('EngineClient.analyze', () => {
     expect(ok[0]!.kind).toBe('analysis');
     expect(JSON.parse(seen[0]!).uri).toBe(A);
   });
+
+  it('sends the documents to inspect (protocol 1.16) and keeps only edit-action quick fixes', async () => {
+    w = createFixtureWorkspace({ transport: 'memory', files: FIXTURE_FILES });
+    await w.engine.start();
+    const loc = { uri: A, range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } } };
+    const seen = answer(w, (p) => ({
+      diagnostics: [
+        {
+          id: 'OR1010', severity: 'warning', message: 'format', location: loc, relatedLocations: [], evidence: [], confidence: 'proven', completeness: 'complete',
+          fixes: [{ actionId: 'csharp.edit.fix.removeFormat', title: 'Use the string directly' }, { actionId: 'refyntra.somethingElse', title: 'x' }, { title: 'no id' }],
+        },
+      ],
+      abstentions: [],
+      completeness: 'complete',
+      snapshotId: p.snapshotId,
+    }));
+    const out = await w.engine.analyze({ documents: [A] });
+    expect(JSON.parse(seen[0]!).documents).toEqual([A]);
+    const r = out[0]!;
+    if (r.kind !== 'analysis') throw new Error(r.kind);
+    expect(r.diagnostics[0]!.fixes).toEqual([{ actionId: 'csharp.edit.fix.removeFormat', title: 'Use the string directly' }]);
+  });
 });

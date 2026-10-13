@@ -166,6 +166,7 @@ public static partial class EditActionsPlanner
             Add(IntroduceLocal, "Introduce variable", "refactor.extract.refyntra.variable", Introduce(c, all: false));
             Add(IntroduceLocalAll, "Introduce variable (replace all occurrences)", "refactor.extract.refyntra.variableAll", Introduce(c, all: true));
         }
+        AddInspectionFixes(c, Add);
         return list;
     }
 

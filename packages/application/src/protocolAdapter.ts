@@ -628,18 +628,27 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
   }
 
   /** `analysis/run` (rules such as OR1001). Backend output is untrusted: malformed entries are dropped. */
-  analyze(params: { uri?: string }, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').AnalysisRunResult>> {
+  analyze(params: { uri?: string; documents?: readonly string[] }, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').AnalysisRunResult>> {
     return this.semantic(
       'analysis/run',
       token,
       async (s, snapshotId, traceId) => {
-        const r = await s.transport.request('analysis/run', { traceId, workspaceId: this.opts.workspaceId, snapshotId, ...(params.uri ? { uri: params.uri } : {}) }, token);
+        const documents = s.protocolMinor >= 16 && params.documents?.length ? { documents: [...params.documents] } : {};
+        const r = await s.transport.request('analysis/run', { traceId, workspaceId: this.opts.workspaceId, snapshotId, ...(params.uri ? { uri: params.uri } : {}), ...documents }, token);
         const isLoc = (l: unknown): boolean => !!l && typeof (l as { uri?: unknown }).uri === 'string' && !!(l as { range?: unknown }).range;
         return {
           diagnostics: Array.isArray(r?.diagnostics)
             ? r.diagnostics
                 .filter((d) => d && typeof d.id === 'string' && typeof d.message === 'string' && isLoc(d.location))
-                .map((d) => ({ ...d, relatedLocations: Array.isArray(d.relatedLocations) ? d.relatedLocations.filter((x) => x && isLoc(x.location)) : [], evidence: Array.isArray(d.evidence) ? d.evidence : [] }))
+                .map((d) => ({
+                  ...d,
+                  relatedLocations: Array.isArray(d.relatedLocations) ? d.relatedLocations.filter((x) => x && isLoc(x.location)) : [],
+                  evidence: Array.isArray(d.evidence) ? d.evidence : [],
+                  // Quick fixes are edit actions only (csharp.edit.fix.*); anything else is dropped.
+                  fixes: Array.isArray(d.fixes)
+                    ? d.fixes.filter((f) => f && typeof f.actionId === 'string' && f.actionId.startsWith('csharp.edit.fix.') && typeof f.title === 'string').map((f) => ({ actionId: f.actionId, title: f.title }))
+                    : [],
+                }))
             : [],
           abstentions: Array.isArray(r?.abstentions) ? r.abstentions.filter((a) => a && typeof a.reason === 'string') : [],
           completeness: r?.completeness ?? 'unknown',

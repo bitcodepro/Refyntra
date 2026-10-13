@@ -31,7 +31,7 @@ public static partial class EditActionsPlanner
         [ToObjectInitializer] = "Use object initializer",
         [ToInterpolated] = "Convert to interpolated string",
         [FormatToInterpolated] = "Convert 'string.Format' to interpolated string",
-    };
+    }.Concat(Semantics.Rules.CodeInspections.FixTitles).ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
 
     /// <summary>Positions where the action may apply (each is checked by the action itself).</summary>
     private static IEnumerable<int> Anchors(SyntaxNode root, string actionId) => actionId switch
@@ -84,6 +84,7 @@ public static partial class EditActionsPlanner
     /// <summary>Applies the action at every anchor of one document (last first, so earlier anchors keep their position).</summary>
     private static async Task<(Document Doc, int Applied, int Skipped)> FixDocumentAsync(Document doc, string actionId, bool checkEach, CancellationToken ct)
     {
+        if (IsInspectionFix(actionId)) return await FixInspectionDocumentAsync(doc, actionId, checkEach, ct).ConfigureAwait(false);
         var root = await doc.GetSyntaxRootAsync(ct).ConfigureAwait(false);
         var anchors = Anchors(root!, actionId).Where(p => p >= 0).Distinct().OrderByDescending(p => p).ToList();
         int applied = 0, skipped = 0;

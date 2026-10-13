@@ -39,6 +39,10 @@ Stage D additions:
   OR1001 did not check this registration* explains why. See [docs/rules/OR1001.md](docs/rules/OR1001.md) and the overlap
   review [docs/rules/overlap.md](docs/rules/overlap.md) (Microsoft DI's `ValidateOnBuild` finds the same at startup in
   Development; OR1001 finds it while editing).
+- **Inspections OR1002–OR1010** in open C# files, each with a compile-checked quick fix and *… in document, project or
+  solution*: sync over async, `async void`, discarded tasks, undisposed locals, multiple enumeration, string
+  concatenation in loops, `Where(…).First()`, redundant `ToList()`, `string.Format` without arguments (see
+  [Inspections](#inspections-c)).
 - **Tests in Related**: xUnit/NUnit/MSTest tests that reference the symbol (*references the symbol — not coverage*), test
   classes that only match by name (*heuristic*), and from a test the production symbols it references. Running a test is
   not offered: Actions shows *Run test: unavailable — no supported public test integration*.
@@ -868,7 +872,39 @@ plan: preview (Refactor Preview with `refyntra.preview.style` `native`), revalid
 a cancellable progress notification for large solutions. Occurrences that would give their file a new compiler error
 are skipped (the preview says how many); generated and read-only files are skipped. Compiler and third-party analyzer
 diagnostics have no fix in scope (Refyntra does not run their code fixes), and Refyntra's own rule OR1001 deliberately
-has no code fix (changing a lifetime is an architectural decision).
+has no code fix (changing a lifetime is an architectural decision). The quick fixes of Refyntra's inspections have a fix
+in scope too (next section).
+
+### Inspections (C#)
+
+Refyntra's own C# inspections, implemented in the C# host with Roslyn's public APIs (no third-party analyzers). Each
+rule is a precise semantic check that stays silent when it cannot prove the problem from the method itself; each was
+checked against what the compiler and the SDK analyzers already report ([overlap review](docs/rules/overlap.md)), and
+each page lists its false-positive guards.
+
+| Rule | Reports | Quick fix | Default |
+|---|---|---|---|
+| [OR1002](docs/rules/OR1002.md) | `.Result`, `.Wait()`, `.GetAwaiter().GetResult()` on a task (sync over async) | *Use 'await'* (a Task-returning method becomes `async`) | warning |
+| [OR1003](docs/rules/OR1003.md) | `async void` that is not an event handler | *Change 'async void' to 'async Task'* | warning |
+| [OR1004](docs/rules/OR1004.md) | a discarded task where CS4014 does not warn (methods that are not async, `?.` calls) | *Discard the task explicitly*; on CS4014: *Add 'await'* | warning |
+| [OR1005](docs/rules/OR1005.md) | a disposable created in a method, never disposed or handed over | *Dispose with a 'using' declaration* | info |
+| [OR1006](docs/rules/OR1006.md) | an `IEnumerable<T>` enumerated twice on one path | *Materialize once with 'ToList()'* | info |
+| [OR1007](docs/rules/OR1007.md) | `s += x` on a string built in a loop | *Use a StringBuilder* | info |
+| [OR1008](docs/rules/OR1008.md) | `Where(p).First()` / `Any()` / `Count()` … | *Pass the predicate to the operator* | hint |
+| [OR1009](docs/rules/OR1009.md) | `ToList()` / `ToArray()` enumerated once (`ToList().Any()`, `foreach` over a copy the loop does not change) | *Remove the redundant copy* | hint |
+| [OR1010](docs/rules/OR1010.md) | `string.Format` without arguments | *Use the string directly* | info |
+
+- Results appear in the Problems view (source *Refyntra*, the rule id links to its page) for the C# files open in the
+  editor; a keystroke re-analyses that document only (results are cached per document version,
+  [measurements](docs/performance/inspections-2026-10-13.md)).
+- The lightbulb (Ctrl+.) on a result offers its quick fix — computed by the host, applied only when the document gets no
+  new compiler error, one undo step — and *… in document, project or solution…*, which applies the fix at every result
+  of the scope as one previewed plan (Refactor Preview, revalidation, Undo), skipping results whose fix would not compile.
+- Severity per rule: `refyntra.rules.ORxxxx` = `off | hint | info | warning | error`.
+- Suppress like a compiler warning: `#pragma warning disable OR1002` … `restore`, or
+  `[SuppressMessage("Usage", "OR1002:…")]` on a member, a type or the assembly.
+- Not inspected on purpose: `Count() > 0` (the SDK's CA1827/CA1829 already report it), missing `ConfigureAwait(false)`
+  (a project policy, not a defect), unused private members (the IDE reports them).
 
 ### Postfix templates (C#)
 
@@ -987,6 +1023,7 @@ constructor that needs them (the compile check refuses it).
 | `refyntra.http.basePaths` | list of path prefixes, default empty | Frontend ↔ backend links: prefixes that client URLs add but the routes do not have (tried only when the exact match finds nothing) |
 | `refyntra.http.origins` | list of origins, default empty | Frontend ↔ backend links: absolute origins (`https://localhost:5001`) that are this backend; other absolute URLs are never linked |
 | `refyntra.rules.OR1001` | `off`, `information`, `warning` (default) | Severity of the experimental OR1001 rule in the Problems view |
+| `refyntra.rules.OR1002` … `OR1010` | `off`, `hint`, `info`, `warning`, `error` | Severity of each inspection (defaults: OR1002–OR1004 `warning`, OR1005–OR1007 and OR1010 `info`, OR1008–OR1009 `hint`) |
 | `refyntra.preview.style` | `native` (default), `quickPick` | Where previews are shown: VS Code's Refactor Preview for text-only plans, or the QuickPick preview for every plan |
 | `refyntra.changeSignature.editor` | `dialog` (default), `quickPick` | Change Signature edits the parameters in a dialog or in QuickPick steps |
 | `refyntra.codeLens.enabled` | boolean, default on | CodeLens above C# types and methods |
