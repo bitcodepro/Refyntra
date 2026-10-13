@@ -51,6 +51,14 @@ exports.cases = ({ api, csharp, waitFor }) => {
     for (const k of ['run.statusBar', 'run.editorButtons', 'run.view', 'run.codeLens']) await c.update(k, on, vscode.ConfigurationTarget.Global);
   }
 
+  /**
+   * CodeLens off for a case: the lists are the subject, and a freshly opened or edited editor draws its lenses at its own
+   * pace (no API says when they are on screen), so without them every capture is the same.
+   */
+  async function codeLens(on) {
+    await vscode.workspace.getConfiguration('editor').update('codeLens', on, vscode.ConfigurationTarget.Global);
+  }
+
   async function open(rel, needle, offset = 0, length = 0) {
     const doc = await vscode.workspace.openTextDocument(file(rel));
     const i = doc.getText().indexOf(needle);
@@ -492,6 +500,72 @@ exports.cases = ({ api, csharp, waitFor }) => {
         await sleep(1500);
         await shot('generate-picker', 1500);
         key('Escape');
+        await reset();
+      },
+    ],
+    [
+      'visual: recent-files — Refyntra: Recent Files (Ctrl+E): the previous file first, the current one second, a modified file',
+      async () => {
+        const a = await ready();
+        await reset();
+        a.recent.clear();
+        await codeLens(false);
+        // Program.cs gets an unsaved change (the "modified" marker) and is not the visible editor, so the CodeLens of
+        // the shown file never re-resolve after an edit.
+        const program = await open(PROGRAM, 'var builder');
+        await program.ed.edit((e) => e.insert(new vscode.Position(0, 0), '// draft\n'));
+        await open(REQUESTS, 'record GetOrderQuery');
+        await open(SERVICES, 'public OrderDto? Find(int id) => _orders', 'public OrderDto? '.length + 1);
+        await waitFor(() => a.recent.recentFiles().length === 3, 'three recent files', 10000);
+        void vscode.commands.executeCommand('refyntra.recentFiles');
+        await waitFor(() => a.recent.state().open && a.recent.state().ready && a.recent.state().kind === 'files' && a.recent.state().items.length === 3, 'Recent Files list', 10000);
+        await shot('recent-files', 1500);
+        key('Escape');
+        await open(PROGRAM, 'var builder');
+        await vscode.commands.executeCommand('workbench.action.files.revert');
+        await codeLens(true);
+        await reset();
+      },
+    ],
+    [
+      'visual: recent-locations — Refyntra: Recent Locations (Ctrl+Shift+E): edited and visited places with member and code line',
+      async () => {
+        const a = await ready();
+        await reset();
+        a.recent.clear();
+        await codeLens(false);
+        const uriOf = (rel) => file(rel).toString();
+        const p = await open(PROGRAM, 'var builder');
+        await waitFor(() => a.recent.recentLocations().some((l) => l.uri === uriOf(PROGRAM) && l.line === p.start.line), 'Program.cs visited', 15000);
+        const s = await open(SERVICES, 'public OrderDto? Find(int id) => _orders', 'public OrderDto? '.length + 1);
+        await waitFor(() => a.recent.recentLocations().some((l) => l.uri === uriOf(SERVICES) && l.line === s.start.line), 'Find visited', 15000);
+        const line = s.doc.getText().split(/\r?\n/).findIndex((t) => t.includes('_orders[id] = new OrderDto'));
+        await s.ed.edit((e) => e.insert(new vscode.Position(line, s.doc.lineAt(line).text.length), ' // audit'));
+        const pos = new vscode.Position(line, s.doc.lineAt(line).text.length);
+        s.ed.selection = new vscode.Selection(pos, pos);
+        await waitFor(() => a.recent.recentLocations().length === 3 && a.recent.recentLocations()[0].kind === 'edited', 'the edit recorded', 15000);
+        void vscode.commands.executeCommand('refyntra.recentLocations');
+        await waitFor(() => a.recent.state().open && a.recent.state().ready && a.recent.state().kind === 'locations' && a.recent.state().items.length === 3, 'Recent Locations list', 15000);
+        await shot('recent-locations', 1500);
+        key('Escape');
+        await vscode.commands.executeCommand('workbench.action.files.revert');
+        await codeLens(true);
+        await reset();
+      },
+    ],
+    [
+      'visual: file-structure — Refyntra: File Structure (Ctrl+F12): members by type with kind and accessibility, the member at the cursor selected',
+      async () => {
+        const a = await ready();
+        await reset();
+        await codeLens(false);
+        await open(SERVICES, 'public OrderDto? Find(int id) => _orders', 'public OrderDto? '.length + 1);
+        // Deterministic: the rows come from the host (code/fileStructure); the test hook says when they are shown.
+        void vscode.commands.executeCommand('refyntra.fileStructure');
+        await waitFor(() => a.fileStructure.state().open && a.fileStructure.state().ready && a.fileStructure.state().source === 'host' && /^OrderService\.Find@/.test(a.fileStructure.state().activeId || ''), 'File Structure rows', 120000);
+        await shot('file-structure', 1500);
+        key('Escape');
+        await codeLens(true);
         await reset();
       },
     ],

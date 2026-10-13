@@ -314,10 +314,12 @@ const scenarios = visual
         settings: { 'refyntra.rename.apply': true, 'files.autoSave': 'off', 'refyntra.preview.style': 'native' },
         env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' },
       },
-      // Navigate To (Alt+`) and Find Usages grouped (protocol 1.12) on a temp copy of Shop; nothing is edited.
+      // Navigate To (Alt+`), Find Usages grouped (protocol 1.12), Recent Files / Locations and File Structure (protocol
+      // 1.13, plus a file with a base class, regions and a nested type) on a temp copy of Shop; edits are reverted.
       {
         name: 'navigation',
         copy: 'navigation',
+        copyOpts: { extra: (dest) => { for (const [rel, text] of Object.entries(createRequire(import.meta.url)('./suite/navigation.cjs').extraFiles)) fs.writeFileSync(path.join(dest, ...rel.split('/')), text); } },
         trusted: true,
         env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' },
       },

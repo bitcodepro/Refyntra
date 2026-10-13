@@ -477,6 +477,21 @@
         "enablement": "editorLangId == csharp"
       },
       {
+        "command": "refyntra.recentFiles",
+        "title": "Recent Files",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.recentLocations",
+        "title": "Recent Locations",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.fileStructure",
+        "title": "File Structure",
+        "category": "Refyntra"
+      },
+      {
         "command": "refyntra.usages.next",
         "title": "Next Usage",
         "category": "Refyntra",
@@ -1664,6 +1679,11 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Show values of C# locals, parameters and assigned fields after the lines of the stopped method (up to the stopped line) while debugging with `refyntra-dotnet`. Only names and `this.member` are evaluated (watch context), never method calls; netcoredbg may run property getters. VS Code shows them when `#debug.inlineValues#` is `auto` (the default, which uses language providers like this one) or `on`."
+        },
+        "refyntra.fileStructure.preview": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "File Structure (Ctrl+F12): moving the selection in the list shows the member in the editor (Esc returns to where the cursor was)."
         }
       }
     },
@@ -1751,6 +1771,42 @@
         "key": "alt+`",
         "mac": "ctrl+alt+`",
         "when": "config.refyntra.keybindings.preset == 'resharper' && editorTextFocus && editorLangId == csharp"
+      },
+      {
+        "command": "refyntra.recentFiles",
+        "key": "ctrl+e",
+        "mac": "cmd+alt+e",
+        "when": "config.refyntra.keybindings.preset == 'visualStudio' && !terminalFocus"
+      },
+      {
+        "command": "refyntra.recentLocations",
+        "key": "ctrl+shift+e",
+        "mac": "cmd+alt+shift+e",
+        "when": "config.refyntra.keybindings.preset == 'visualStudio' && !terminalFocus"
+      },
+      {
+        "command": "refyntra.recentFiles",
+        "key": "ctrl+e",
+        "mac": "cmd+alt+e",
+        "when": "config.refyntra.keybindings.preset == 'resharper' && !terminalFocus"
+      },
+      {
+        "command": "refyntra.recentLocations",
+        "key": "ctrl+shift+e",
+        "mac": "cmd+alt+shift+e",
+        "when": "config.refyntra.keybindings.preset == 'resharper' && !terminalFocus"
+      },
+      {
+        "command": "refyntra.fileStructure",
+        "key": "ctrl+f12",
+        "mac": "cmd+f12",
+        "when": "config.refyntra.keybindings.preset == 'visualStudio' && editorTextFocus"
+      },
+      {
+        "command": "refyntra.fileStructure",
+        "key": "ctrl+f12",
+        "mac": "cmd+f12",
+        "when": "config.refyntra.keybindings.preset == 'resharper' && editorTextFocus"
       },
       {
         "command": "refyntra.usages.next",

@@ -154,6 +154,8 @@ export interface LanguageAdapter {
    * Optional (protocol 1.12): classified usages of the symbol at a position (symbolAt, then code/usages). `subject` is
    * null when there is no symbol; `result` is null when the host is too old.
    */
+  /** Optional (protocol 1.13): File Structure of a document; null when the host is older. */
+  fileStructure?(uri: string, includeInherited: boolean, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').FileStructureResult | null>>;
   usages?(uri: string, position: Position, limit: number, token?: CancellationToken): Promise<RouteResult<{ subject: SymbolRef | null; result: import('@refyntra/contracts').UsagesResult | null }>>;
   /**
    * Optional (protocol 1.8): the loaded projects classified for Run and Debug (workspace/runnableProjects, no barrier).

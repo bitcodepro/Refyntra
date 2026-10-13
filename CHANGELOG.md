@@ -4,6 +4,36 @@ All notable changes are listed here. The project is alpha; nothing has been rele
 
 ## Unreleased
 
+### Added (File Structure)
+
+- **Refyntra: File Structure** (Ctrl+F12 in the `visualStudio` and `resharper` presets; Cmd+F12 on macOS): the members
+  of the current file in a QuickPick grouped by type (nested types as groups) and `#region`, codicons by kind, kind and
+  accessibility in words, short signatures, the member at the cursor selected first, camel-hump type-to-filter, filter
+  buttons (methods, properties, fields, events, nested types, inherited members; kept per workspace), **Show in the
+  Outline view**, optional preview while moving (`refyntra.fileStructure.preview`, off by default).
+- C#: protocol 1.13 `code/fileStructure` (types, members with kind, accessibility, static, signature, ranges and
+  region; inherited members of base classes / base interfaces with their declaring type, navigable when declared in the
+  solution). Other languages: VS Code's document symbols.
+- Tests: .NET (`FileStructureTests`: partial classes, nested types, regions, records, generics, operators, inherited
+  members from base classes, base interfaces and metadata; `FileStructureProtocolTests` on Shop), unit tests of the
+  structure model (grouping, filters, camel humps, the row at the cursor, the document-symbol fallback), e2e cases in
+  the `navigation` scenario, visual baseline `file-structure` (both themes).
+
+### Added (Recent Files and Recent Locations)
+
+- **Refyntra: Recent Files** (Ctrl+E in the `visualStudio` and `resharper` presets; Cmd+Alt+E on macOS): recently
+  opened files of the workspace, most recent first with the current file second (Enter switches back), open editors
+  not yet recorded after them, file icon, relative folder, "modified" for unsaved editors, a remove button, type to
+  filter; at most 50, kept in `workspaceState`; renames and deletes followed.
+- **Refyntra: Recent Locations** (Ctrl+Shift+E; Cmd+Alt+Shift+E on macOS): places where the cursor rested (1.5 s) or
+  you edited, in the sections Edited / Visited with an edited-only toggle, file and line, containing member (document
+  symbols, else a text scan) and code line; positions re-anchored when the document changes, a deleted line drops its
+  location; remove button; at most 50, kept per workspace.
+- The keys override VS Code's Ctrl+E (Quick Open) and Ctrl+Shift+E (Show Explorer) only inside the presets and never
+  in the terminal; macOS keeps Cmd+E (Use Selection for Find) and Cmd+Shift+E.
+- Tests: unit tests of the recent lists (ordering, dedupe, persistence, re-anchoring, containing member), e2e cases in
+  the `navigation` scenario, visual baselines `recent-files` and `recent-locations` (both themes).
+
 ### Added (Navigate To and Find Usages grouped)
 
 - **Refyntra: Navigate To…** (Alt+` in the `visualStudio` and `resharper` presets, C# editors; Ctrl+Alt+` on macOS):

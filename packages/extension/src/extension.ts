@@ -56,6 +56,9 @@ import { STACK_TRACE_VIEW, StackTraceViewProvider, runOpenStackTrace } from './s
 import { type TaskContextViewProvider, registerTaskContext } from './taskContext';
 import { type RunService, registerRun } from './run';
 import { type NavigateToState, acceptNavigateTarget, navigateToState, runNavigateTo } from './navigateTo';
+import { type RecentService, registerRecent } from './recent';
+import { type FileStructureState, acceptStructureRow, fileStructureState, runFileStructure, setStructureFilter, setStructureQuery } from './fileStructure';
+import type { StructureFilter } from './fileStructureModel';
 import { type UsagesViewProvider, registerUsages } from './usages';
 
 export const CSHARP_DESCRIPTOR: AdapterDescriptor = {
@@ -135,6 +138,10 @@ export interface RefyntraTestApi {
   navigateTo: { state(): NavigateToState; accept(id: string): Promise<boolean> };
   /** The Refyntra Usages view (e2e: groupings, filters, Next/Previous, export, pinned tabs). */
   usages: UsagesViewProvider;
+  /** Recent Files / Recent Locations (e2e: the stored lists, the open list, accept / remove / toggle by id). */
+  recent: RecentService;
+  /** File Structure (Ctrl+F12): the open list, choosing a row, filters and the query (e2e / visual wait on it). */
+  fileStructure: { state(): FileStructureState; accept(id: string): Promise<boolean>; setFilter(filter: StructureFilter, on: boolean): Promise<void>; setQuery(text: string): void };
 }
 
 let engineRef: RefyntraEngine | undefined;
@@ -325,6 +332,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
   // Find Usages grouped (protocol 1.12) and Navigate To (Alt+`).
   const usages = registerUsages(engine, context.workspaceState);
   context.subscriptions.push(usages.disposable, vscode.commands.registerCommand('refyntra.navigateTo', () => runNavigateTo(engine)));
+  // Recent Files (Ctrl+E) and Recent Locations (Ctrl+Shift+E): local lists per workspace (recent.ts).
+  const recent = registerRecent(context.workspaceState);
+  context.subscriptions.push(recent.disposable);
+  // File Structure (Ctrl+F12): the C# host's code/fileStructure, VS Code's document symbols for other languages.
+  context.subscriptions.push(vscode.commands.registerCommand('refyntra.fileStructure', () => runFileStructure(engine, context.workspaceState)));
   context.subscriptions.push(taskContext.disposable);
   void vscode.commands.executeCommand('setContext', 'refyntra.relatedPinned', false);
   // Welcome text of the Related view follows trust / solution / backend state (package.json viewsWelcome).
@@ -460,6 +472,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     immediate: immediate.provider,
     navigateTo: { state: () => navigateToState(), accept: (id) => acceptNavigateTarget(id) },
     usages: usages.provider,
+    recent: recent.service,
+    fileStructure: { state: () => fileStructureState(), accept: (id) => acceptStructureRow(id), setFilter: (f, on) => setStructureFilter(f, on), setQuery: (t) => setStructureQuery(t) },
   };
 }
 

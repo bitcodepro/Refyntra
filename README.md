@@ -484,6 +484,47 @@ hierarchy. A target with one location opens directly; several open VS Code's pee
 Related, the host's hierarchy (protocol 1.12 `bases` / `containing`) and incoming calls. Limits: a usage count above
 50 comes from Related's own count; generated files under `obj/` are not listed as related files.
 
+**Recent Files (Ctrl+E).** Refyntra: Recent Files is a list of the files you opened in this workspace, most recent
+first, with the **current file second from the top** (like Rider), so Ctrl+E, Enter switches back to the previous file.
+Each row has the file icon, the name, the folder relative to the workspace and **modified** when the editor has unsaved
+changes; open editors that were never focused are listed after the recorded ones. Type to filter (name and folder);
+the `×` button on a row removes it from the list (an open editor stays listed while it is open). At most 50 files are
+kept per workspace (`workspaceState`, local only); renamed and deleted files follow.
+
+**Recent Locations (Ctrl+Shift+E).** Refyntra: Recent Locations lists the places where the cursor **rested** (more than
+1.5 s) or where you **edited**, in the sections *Edited* and *Visited* (the filter button in the title bar shows edited
+locations only, and again all). Each row shows the file and line, the containing member (`OrderService.Find`, from the
+document symbols of an open document; for C# without a C# extension and for closed files a text scan of the
+declarations around the line) and the code line (for an edit: the edited line). One entry per line; an edited line
+stays *edited* when you visit it again. When a document changes, the stored positions move with the text (lines
+inserted or deleted above), and a location whose line was deleted is dropped. Type to filter (file, member, code); `×`
+removes a row. At most 50 per workspace, local only. Only edits typed in the active editor count (a rename across
+files does not add 50 edited locations); edits of a revert or an undo are recorded like other edits.
+
+Keys: Ctrl+E and Ctrl+Shift+E in the `visualStudio` and `resharper` presets, not while the terminal has focus (the
+shell keeps Ctrl+E). They replace VS Code's Ctrl+E (Quick Open, also on Ctrl+P) and Ctrl+Shift+E (Show Explorer; the
+Activity Bar and **View: Show Explorer** remain) only while a preset is on; `none` binds neither. On macOS the keys
+are **Cmd+Alt+E** and **Cmd+Alt+Shift+E**: Cmd+E is VS Code's "Use Selection for Find" and Cmd+Shift+E the Explorer
+there, and both are kept.
+
+**File Structure (Ctrl+F12).** Refyntra: File Structure lists the members of the current file, grouped by type
+(nested types as their own groups, `Order.Line`) and, inside a type, by `#region` (a new group starts where the region
+changes). Each row shows the codicon of its kind, a short signature (`Find(int) : OrderDto?`, `Total : decimal`) and
+its kind and accessibility in words (`method · private static`). The member at the cursor is selected when the list
+opens; type to filter by name with camel humps (`gOL` finds `GetOrderLines`), Enter jumps to the name. The title bar
+buttons hide or show methods, properties, fields (with constants and enum members), events, nested types and
+**inherited members** (C#: the members of the base classes, nearest first, or of the base interfaces of an interface;
+without `object`'s, constructors and members the type overrides or redeclares; grouped "inherited from Entity<int>").
+Inherited members with source in the solution open on Enter; members of referenced assemblies are listed with "no
+source (metadata)" and do not open (metadata-as-source is not part of File Structure). The filters are kept per
+workspace and the title says which are hidden. **Show in the Outline view** (the last button) opens VS Code's Outline.
+`refyntra.fileStructure.preview` (off by default) shows the member in the editor while you move through the list; Esc
+then returns to where the cursor was. For C# the list comes from the host (protocol 1.13 `code/fileStructure`; members
+of this file only, other partial parts are not listed); other languages use VS Code's document symbols (no
+accessibility, no inherited members; top-level functions form a group named after the file). Ctrl+F12 (Cmd+F12 on
+macOS) in both presets replaces VS Code's Go to Implementations there (still in the editor context menu and in
+Navigate To).
+
 **Find Usages (grouped, C#).** Refyntra: Find Usages (Grouped) fills the **Refyntra Usages** view in the Refyntra side
 bar (it appears with the first search). Every usage is classified by the C# host (protocol 1.12 `code/usages`): read,
 write, read-write (compound assignment, `++`/`--`, `ref`), invocation, `nameof`, attribute, inheritance /
@@ -840,6 +881,9 @@ constructor that needs them (the compile check refuses it).
 | `refyntra.related` | Related symbols for the current position |
 | `refyntra.navigateTo` | Navigate To… (Alt+`, C#): every target of the symbol at the cursor that exists, with counts |
 | `refyntra.findUsages` | Find Usages (Grouped, C#): the Refyntra Usages view, classified and grouped usages |
+| `refyntra.recentFiles` | Recent Files (Ctrl+E): recently opened files, the previous one first |
+| `refyntra.recentLocations` | Recent Locations (Ctrl+Shift+E): edited and visited places with member and code line |
+| `refyntra.fileStructure` | File Structure (Ctrl+F12): members of the current file by type and region, filters, inherited members (C#) |
 | `refyntra.usages.next` / `.previous` | Next / previous usage of the Usages view (F4 / Shift+F4 in a C# editor while it has results) |
 | `refyntra.usages.groupBy` / `.filterKinds` / `.filterTests` / `.clearFilters` | Groupings and filters of the Usages view |
 | `refyntra.usages.export` / `.pin` / `.unpin` / `.refresh` / `.clear` | Export to Markdown, pin, refresh, clear the Usages view |
@@ -886,6 +930,7 @@ constructor that needs them (the compile check refuses it).
 | `refyntra.rename.apply` | boolean, default on | Offer **Apply rename** after the preview (revalidated after you confirm, not saved). Off = preview-only |
 | `refyntra.cleanup.profile` | list of fix ids, default `removeUnnecessaryUsings`, `sortUsings`, `whitespace` | Fixes pre-selected by Code Cleanup (`fileScopedNamespace` is opt-in) |
 | `refyntra.related.followCursor` | boolean, default on | The Related view follows the cursor unless it is pinned |
+| `refyntra.fileStructure.preview` | boolean, default off | File Structure shows the selected member in the editor while you move through the list |
 | `refyntra.http.basePaths` | list of path prefixes, default empty | Frontend ↔ backend links: prefixes that client URLs add but the routes do not have (tried only when the exact match finds nothing) |
 | `refyntra.http.origins` | list of origins, default empty | Frontend ↔ backend links: absolute origins (`https://localhost:5001`) that are this backend; other absolute URLs are never linked |
 | `refyntra.rules.OR1001` | `off`, `information`, `warning` (default) | Severity of the experimental OR1001 rule in the Problems view |

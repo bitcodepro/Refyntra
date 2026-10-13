@@ -391,6 +391,73 @@ public sealed class UsagesResultDto
     public string SnapshotId { get; set; } = "";
 }
 
+/// <summary>code/fileStructure (protocol 1.13): the types and members of one C# document.</summary>
+public sealed class FileStructureParams : WorkspaceParams
+{
+    public string SnapshotId { get; set; } = "";
+    public string Uri { get; set; } = "";
+    /// <summary>Also the members inherited from base classes (an interface: base interfaces).</summary>
+    public bool IncludeInherited { get; set; }
+}
+
+public sealed class StructureMemberDto
+{
+    public string Name { get; set; } = "";
+    /// <summary>method | constructor | destructor | property | indexer | field | constant | event | operator | enumMember.</summary>
+    public string Kind { get; set; } = "method";
+    /// <summary>public | internal | protected | private | protectedInternal | privateProtected.</summary>
+    public string Accessibility { get; set; } = "private";
+    public bool IsStatic { get; set; }
+    /// <summary>Short signature: "Find(int) : OrderDto?", "Total : decimal".</summary>
+    public string Signature { get; set; } = "";
+    /// <summary>The declaration (own members: in the requested document; inherited: in <see cref="Uri"/>).</summary>
+    public RangeDto Range { get; set; } = new();
+    /// <summary>The name.</summary>
+    public RangeDto SelectionRange { get; set; } = new();
+    /// <summary>Innermost #region around the member (own members only).</summary>
+    public string? Region { get; set; }
+    /// <summary>Inherited members: the declaring type ("Base&lt;T&gt;").</summary>
+    public string? DeclaringType { get; set; }
+    /// <summary>Inherited members declared in the solution: their file. Null for metadata (not navigable).</summary>
+    public string? Uri { get; set; }
+    public bool Navigable { get; set; } = true;
+}
+
+public sealed class StructureTypeDto
+{
+    public string Name { get; set; } = "";
+    /// <summary>With the containing types: "Outer.Inner&lt;T&gt;".</summary>
+    public string FullName { get; set; } = "";
+    /// <summary>class | struct | interface | enum | record | recordStruct | delegate.</summary>
+    public string Kind { get; set; } = "class";
+    public string Accessibility { get; set; } = "internal";
+    public bool IsStatic { get; set; }
+    public string Signature { get; set; } = "";
+    public RangeDto Range { get; set; } = new();
+    public RangeDto SelectionRange { get; set; } = new();
+    public string? Region { get; set; }
+    /// <summary>Nested types: the full name of the containing type.</summary>
+    public string? ContainingType { get; set; }
+    public List<StructureMemberDto> Members { get; set; } = new();
+    public List<StructureMemberDto> Inherited { get; set; } = new();
+}
+
+public sealed class StructureRegionDto
+{
+    public string Name { get; set; } = "";
+    public RangeDto Range { get; set; } = new();
+}
+
+public sealed class FileStructureResultDto
+{
+    public List<StructureTypeDto> Types { get; set; } = new();
+    public List<StructureRegionDto> Regions { get; set; } = new();
+    /// <summary>"DocumentNotFound" when the document is not part of the loaded solution.</summary>
+    public string? ReasonCode { get; set; }
+    public string Completeness { get; set; } = "complete";
+    public string SnapshotId { get; set; } = "";
+}
+
 /// <summary>workspace/runnableProjects (protocol 1.8): one loaded project as Run and Debug sees it.</summary>
 public sealed class RunnableProjectDto
 {

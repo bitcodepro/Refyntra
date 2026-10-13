@@ -290,6 +290,24 @@ a test class. It is not part of `initialize.capabilities`.
     or event: the overridden chain, then the interface members implemented by it or by a member it overrides; source
     symbols only, in that order) and `containing` (the type that declares a member or nested type; for a local or a
     parameter the type of its member). Sent only to hosts with minor ≥ 12; an older host answers `InvalidParams`.
+- 1.13 (additive): File Structure.
+  - `code/fileStructure` `FileStructureParams` `{traceId, workspaceId, snapshotId, uri, includeInherited?}` →
+    `FileStructureResult` `{types, regions, reasonCode?, completeness, snapshotId}`. `types` lists every type declared
+    in the document in source order (nested types too, as types of their own with `containingType`; every partial part
+    in this document), each `StructureType` with `name`, `fullName` (containing types, no namespace: `Order.Line`),
+    `kind` (`class`, `struct`, `interface`, `enum`, `record`, `recordStruct`, `delegate`), `accessibility`
+    (`public`, `internal`, `protected`, `private`, `protectedInternal`, `privateProtected`), `isStatic`,
+    `signature` (`OrderService : IOrderService`), `range`, `selectionRange` (the name), `region`, `members` and
+    `inherited`. A `StructureMember` has `name`, `kind` (`method`, `constructor`, `destructor`, `property`,
+    `indexer`, `field`, `constant`, `event`, `operator`, `enumMember`), `accessibility`, `isStatic`, `signature`
+    (`Find(int) : OrderDto?`, `Total : decimal`, `this[int] : string`), `range`, `selectionRange`, `region` (the
+    innermost `#region`), and for inherited members `declaringType`, `uri` (null for metadata) and `navigable`.
+    Members are those written in this document (positional record parameters count as properties); other partial parts
+    are not listed. With `includeInherited`, `inherited` lists the members of the base classes nearest first (an
+    interface: of all its base interfaces), without `object`, `ValueType` and `Enum`, constructors, accessors,
+    implicitly declared members, members inaccessible from the type, and members the type (any partial part) overrides
+    or redeclares. `regions` are the `#region` / `#endregion` pairs (name, range). `reasonCode` `DocumentNotFound`:
+    the document is not in the snapshot. Sent only to hosts with minor ≥ 13.
 - Additive (EF Core): relation kinds `efcore.*` and group `data` (above); `SearchFilters.entity?: boolean` ("entity:")
   and `SearchFilters.table?: string` ("table:NAME") return EF Core entities as symbol items. Older hosts ignore the
   filters (they return a normal symbol search); older clients render the kinds and the group generically. The
@@ -352,6 +370,7 @@ issuing semantic requests.
 | `code/postfix` | req | `PostfixParams` `{…, uri, position}` | `PostfixResult` (since 1.10; postfix templates) |
 | `code/generate` | req | `GenerateParams` `{…, uri, position, kind?, members?, equatable?, operators?}` | `GenerateResult` (since 1.10; Generate) |
 | `code/usages` | req | `UsagesParams` `{…, symbolId, limit?}` | `UsagesResult` (since 1.12; Find Usages grouped) |
+| `code/fileStructure` | req | `FileStructureParams` `{…, uri, includeInherited?}` | `FileStructureResult` (since 1.13; File Structure) |
 | `code/constructorActions` | req | `ConstructorActionsParams` `{…, uri, position, actionId?, member?, members?, type?, constructorId?, typeId?}` | `ConstructorActionsResult` (since 1.11; constructor / DI helpers) |
 | `workspace/didDeleteFiles` | notif | `{workspaceId, sequence, workspaceRevision, files: [{uri}]}` | – (since 1.6; consumes a document sequence) |
 | `analysis/run` | req | `AnalysisRunParams` `{traceId, workspaceId, snapshotId, uri?}` | `AnalysisRunResult` (since 1.1, additive; see "Analysis") |

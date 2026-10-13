@@ -30,8 +30,10 @@ public sealed class Engine : IRpcHandler, IDisposable
     /// missing / overriding / delegating members).
     /// 1.11: code/constructorActions (constructor and DI helpers on Roslyn), actions csharp.registerDi
     /// (PrepareParams.registration) and csharp.fixAll (PrepareParams.fixAll: an edit action in a document, project or solution).
+    /// 1.12: code/usages (classified usages) and the code/hierarchy directions "bases" / "containing".
+    /// 1.13: code/fileStructure (File Structure: types, members, regions and inherited members of a document).
     /// </summary>
-    public const int ProtocolMinor = 12;
+    public const int ProtocolMinor = 13;
     /// <summary>How long workspace/snapshotBarrier waits for a missing document sequence (tests shorten it).</summary>
     public TimeSpan BarrierTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
@@ -115,6 +117,8 @@ public sealed class Engine : IRpcHandler, IDisposable
                 return await HierarchyAsync(Params<HierarchyParams>(p), ct).ConfigureAwait(false);
             case "code/usages":
                 return await UsagesAsync(Params<UsagesParams>(p), ct).ConfigureAwait(false);
+            case "code/fileStructure":
+                return await FileStructureAsync(Params<FileStructureParams>(p), ct).ConfigureAwait(false);
             case "code/editActions":
                 return await EditActionsAsync(Params<EditActionsParams>(p), ct).ConfigureAwait(false);
             case "code/postfix":
@@ -619,6 +623,33 @@ public sealed class Engine : IRpcHandler, IDisposable
                 LaunchSettingsUri = r.LaunchSettingsPath == null ? null : UriPaths.ToUri(r.LaunchSettingsPath),
             }).ToList(),
         };
+    }
+
+    private async Task<FileStructureResultDto> FileStructureAsync(FileStructureParams p, CancellationToken ct)
+    {
+        var snap = RequireSnapshot(p.WorkspaceId, p.SnapshotId);
+        var result = new FileStructureResultDto { SnapshotId = snap.Id, Completeness = SemanticService.Completeness(snap) };
+        var doc = snap.Session.DocumentIdsForPath(PathOf(p.Uri)).Select(snap.Solution.GetDocument).FirstOrDefault(d => d != null);
+        var model = doc == null ? null : await FileStructure.ComputeAsync(doc, p.IncludeInherited, ct).ConfigureAwait(false);
+        if (model == null)
+        {
+            result.ReasonCode = "DocumentNotFound";
+            return result;
+        }
+        StructureMemberDto Member(StructureMember m) => new()
+        {
+            Name = m.Name, Kind = m.Kind, Accessibility = m.Accessibility, IsStatic = m.IsStatic, Signature = m.Signature,
+            Range = ToRange(m.Range), SelectionRange = ToRange(m.SelectionRange), Region = m.Region, DeclaringType = m.DeclaringType,
+            Uri = m.DeclaringType == null ? null : m.FilePath is { } f ? UriPaths.ToUri(f) : null, Navigable = m.Navigable,
+        };
+        result.Types = model.Types.Select(t => new StructureTypeDto
+        {
+            Name = t.Name, FullName = t.FullName, Kind = t.Kind, Accessibility = t.Accessibility, IsStatic = t.IsStatic, Signature = t.Signature,
+            Range = ToRange(t.Range), SelectionRange = ToRange(t.SelectionRange), Region = t.Region, ContainingType = t.ContainingType,
+            Members = t.Members.Select(Member).ToList(), Inherited = t.Inherited.Select(Member).ToList(),
+        }).ToList();
+        result.Regions = model.Regions.Select(r => new StructureRegionDto { Name = r.Name, Range = ToRange(r.Range) }).ToList();
+        return result;
     }
 
     private async Task<EditActionsResultDto> EditActionsAsync(EditActionsParams p, CancellationToken ct)

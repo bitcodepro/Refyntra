@@ -2,6 +2,38 @@
 // against the real host (protocol 1.12: code/usages, code/hierarchy "bases" / "containing"). Nothing is edited.
 const assert = require('node:assert/strict');
 
+/** Written into the temp copy before the host loads it (runTest.mjs copyOpts): File Structure's inherited members. */
+exports.extraFiles = {
+  'Shop.Api/Services/Invoices.cs': [
+    'namespace Shop.Api.Services;',
+    '',
+    'public abstract class EntityBase',
+    '{',
+    '    public int Id { get; protected set; }',
+    '    protected void Touch() { }',
+    '    public abstract string Describe();',
+    '}',
+    '',
+    'public sealed class Invoice : EntityBase',
+    '{',
+    '    #region State',
+    '    private decimal _amount;',
+    '    public decimal Amount => _amount;',
+    '    #endregion',
+    '',
+    '    public override string Describe() => "invoice";',
+    '',
+    '    public void AddLine(decimal value) => _amount += value;',
+    '',
+    '    public sealed class InvoiceLine',
+    '    {',
+    '        public string Sku { get; init; } = "";',
+    '    }',
+    '}',
+    '',
+  ].join('\n'),
+};
+
 exports.cases = ({ api, csharp, waitFor }) => {
   const vscode = require('vscode');
   const file = (rel) => vscode.Uri.joinPath(vscode.workspace.workspaceFolders[0].uri, ...rel.split('/'));
@@ -151,6 +183,173 @@ exports.cases = ({ api, csharp, waitFor }) => {
       assert.equal(a.usages.state().sessions.length, 2);
       a.usages.clear();
       assert.equal(a.usages.state().sessions.length, 0);
+    }],
+    ['recent files: most recent first with the current file second, open editors listed, remove, persisted per workspace', async () => {
+      const a = await ready();
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      const req = await open(REQUESTS, 'record GetOrderQuery');
+      const svc = await open(SERVICES, 'public interface IOrderService');
+      await waitFor(() => a.recent.recentFiles()[0] === svc.doc.uri.toString(), 'Services recorded first', 10000);
+      void vscode.commands.executeCommand('refyntra.recentFiles');
+      await waitFor(() => a.recent.state().open && a.recent.state().ready && a.recent.state().kind === 'files', 'Recent Files list', 10000);
+      const ids = a.recent.state().items.map((i) => i.id);
+      assert.deepEqual(ids.slice(0, 2), [req.doc.uri.toString(), svc.doc.uri.toString()], ids.join('\n'));
+      assert.equal(a.recent.state().items[1].label, 'OrderServices.cs');
+      assert.equal(a.recent.state().items[1].description, 'Shop.Api/Services');
+      // Enter on the first row switches back to the previous file.
+      assert.equal(await a.recent.accept(ids[0]), true);
+      await waitFor(() => vscode.window.activeTextEditor?.document.uri.toString() === req.doc.uri.toString(), 'switched back', 10000);
+      // A modified file says so; the remove button drops a row; the list survives a reload (workspaceState).
+      const ed = vscode.window.activeTextEditor;
+      await ed.edit((e) => e.insert(new vscode.Position(0, 0), '// recent files\n'));
+      void vscode.commands.executeCommand('refyntra.recentFiles');
+      await waitFor(() => a.recent.state().open && a.recent.state().kind === 'files' && a.recent.state().items.some((i) => i.description.startsWith('modified')), 'modified marker', 10000);
+      assert.equal(a.recent.state().items.find((i) => i.description.startsWith('modified')).id, req.doc.uri.toString());
+      assert.equal(a.recent.removeItem(svc.doc.uri.toString()), true);
+      assert.equal(a.recent.recentFiles().includes(svc.doc.uri.toString()), false);
+      // Still open in an editor: the list keeps showing it (open editors are always listed).
+      assert.ok(a.recent.state().items.some((i) => i.id === svc.doc.uri.toString()));
+      await vscode.commands.executeCommand('workbench.action.closeQuickOpen');
+      await waitFor(() => !a.recent.state().open, 'list closed', 10000);
+      await vscode.commands.executeCommand('workbench.action.files.revert');
+      // No editor left: a pending resting-cursor timer records nothing, so the stored value is final after flush().
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      await a.recent.flush();
+      const before = a.recent.recentFiles();
+      a.recent.reload();
+      assert.deepEqual(a.recent.recentFiles(), before);
+    }],
+    ['recent locations: resting cursor and edits with member and code line, re-anchored, deleted line dropped, edited-only, persisted', async () => {
+      const a = await ready();
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      const { doc, pos } = await open(SERVICES, 'public OrderDto? Find(int id) => _orders', 'public OrderDto? '.length + 1);
+      const uri = doc.uri.toString();
+      const at = (line, kind) => a.recent.recentLocations().find((l) => l.uri === uri && l.line === line && (!kind || l.kind === kind));
+      await waitFor(() => at(pos.line, 'visited'), 'the resting cursor is recorded', 15000);
+      const ed = vscode.window.activeTextEditor;
+      const createLine = doc.getText().split(/\r?\n/).findIndex((t) => t.includes('_orders[id] = new OrderDto'));
+      await ed.edit((e) => e.insert(new vscode.Position(createLine, doc.lineAt(createLine).text.length), ' // edited'));
+      await waitFor(() => at(createLine, 'edited'), 'the edit is recorded', 10000);
+      assert.match(at(createLine).lineText, /_orders\[id\] = new OrderDto\(id, customer, total\); \/\/ edited/);
+      // Two lines inserted at the top: both locations move down by two.
+      await ed.edit((e) => e.insert(new vscode.Position(0, 0), '// a\n// b\n'));
+      await waitFor(() => at(pos.line + 2, 'visited') && at(createLine + 2, 'edited'), 're-anchored', 10000);
+      void vscode.commands.executeCommand('refyntra.recentLocations');
+      await waitFor(() => a.recent.state().open && a.recent.state().ready && a.recent.state().kind === 'locations', 'Recent Locations list', 15000);
+      const st = a.recent.state();
+      const edited = st.items.find((i) => i.id === `${uri}#${createLine + 2}`);
+      assert.equal(edited.section, 'Edited');
+      assert.equal(edited.label, `OrderServices.cs:${createLine + 3}`);
+      assert.equal(edited.description, 'OrderService.Create');
+      assert.match(edited.detail, /\/\/ edited$/);
+      const visited = st.items.find((i) => i.id === `${uri}#${pos.line + 2}`);
+      assert.equal(visited.section, 'Visited');
+      assert.equal(visited.description, 'OrderService.Find');
+      assert.match(visited.detail, /^public OrderDto\? Find\(int id\) =>/);
+      // Edited only: the visited rows go; again: back.
+      a.recent.toggleEditedOnly();
+      await waitFor(() => a.recent.state().ready && a.recent.state().mode === 'edited', 'edited only', 10000);
+      assert.ok(a.recent.state().items.every((i) => i.section === 'Edited'));
+      a.recent.toggleEditedOnly();
+      await waitFor(() => a.recent.state().ready && a.recent.state().items.some((i) => i.section === 'Visited'), 'all again', 10000);
+      // Enter opens the location.
+      assert.equal(await a.recent.accept(visited.id), true);
+      await waitFor(() => /public OrderDto\? Find\(int id\) =>/.test(activeLine()) && vscode.window.activeTextEditor.selection.active.line === pos.line + 2, 'opened the visited location', 10000);
+      // The visited line deleted: its location is dropped.
+      await vscode.window.activeTextEditor.edit((e) => e.delete(new vscode.Range(pos.line + 2, 0, pos.line + 3, 0)));
+      await waitFor(() => !a.recent.recentLocations().some((l) => l.uri === uri && /Find\(int id\) => _orders/.test(l.lineText)), 'deleted line dropped', 10000);
+      await vscode.commands.executeCommand('workbench.action.files.revert');
+      // No editor left: a pending resting-cursor timer records nothing, so the stored value is final after flush().
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      await a.recent.flush();
+      const before = a.recent.recentLocations();
+      a.recent.reload();
+      assert.deepEqual(a.recent.recentLocations(), before);
+    }],
+    ['file structure: C# members by type and #region from the host, filters, camel humps, inherited members, Enter jumps', async () => {
+      const a = await ready();
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      await open('Shop.Api/Services/Invoices.cs', 'public void AddLine', 'public void '.length + 1);
+      void vscode.commands.executeCommand('refyntra.fileStructure');
+      await waitFor(() => a.fileStructure.state().open && a.fileStructure.state().ready, 'File Structure list', 120000);
+      // Defaults (stored filters of an earlier case would change the rows).
+      for (const f of ['methods', 'properties', 'fields', 'events', 'nestedTypes']) await a.fileStructure.setFilter(f, true);
+      await a.fileStructure.setFilter('inherited', false);
+      let st = a.fileStructure.state();
+      assert.equal(st.source, 'host');
+      const rows = st.items.map((i) => `${i.section} | ${i.label} | ${i.description}`);
+      assert.deepEqual(rows, [
+        'EntityBase | EntityBase | class · public',
+        'EntityBase | Id : int | property · public',
+        'EntityBase | Touch() : void | method · protected',
+        'EntityBase | Describe() : string | method · public',
+        'Invoice : EntityBase | Invoice | class · public',
+        'Invoice · #region State | _amount : decimal | field · private',
+        'Invoice · #region State | Amount : decimal | property · public',
+        'Invoice | Describe() : string | method · public',
+        'Invoice | AddLine(decimal) : void | method · public',
+        'Invoice.InvoiceLine | Invoice.InvoiceLine | class · public',
+        'Invoice.InvoiceLine | Sku : string | property · public',
+      ], rows.join('\n'));
+      // Filters: no methods, no nested types.
+      await a.fileStructure.setFilter('methods', false);
+      await a.fileStructure.setFilter('nestedTypes', false);
+      st = a.fileStructure.state();
+      assert.deepEqual(st.items.map((i) => i.label), ['EntityBase', 'Id : int', 'Invoice', '_amount : decimal', 'Amount : decimal']);
+      assert.match(st.title, /hidden: methods, nested types/);
+      await a.fileStructure.setFilter('methods', true);
+      await a.fileStructure.setFilter('nestedTypes', true);
+      // Inherited members: from EntityBase, without the overridden Describe.
+      await a.fileStructure.setFilter('inherited', true);
+      await waitFor(() => a.fileStructure.state().ready && a.fileStructure.state().items.some((i) => i.section.includes('inherited')), 'inherited members', 60000);
+      const inherited = a.fileStructure.state().items.filter((i) => i.section === 'Invoice · inherited from EntityBase');
+      assert.deepEqual(inherited.map((i) => [i.label, i.navigable]), [['Id : int', true], ['Touch() : void', true]]);
+      // Camel humps: "aL" finds AddLine only.
+      a.fileStructure.setQuery('aL');
+      await waitFor(() => a.fileStructure.state().ready && a.fileStructure.state().items.length === 1, 'filtered by camel humps', 10000);
+      assert.equal(a.fileStructure.state().items[0].label, 'AddLine(decimal) : void');
+      a.fileStructure.setQuery('');
+      await waitFor(() => a.fileStructure.state().ready && a.fileStructure.state().items.length > 5, 'query cleared', 10000);
+      // Enter on an inherited member opens its declaration.
+      const touch = a.fileStructure.state().items.find((i) => i.section === 'Invoice · inherited from EntityBase' && i.label === 'Touch() : void');
+      assert.equal(await a.fileStructure.accept(touch.id), true);
+      await waitFor(() => /protected void Touch\(\)/.test(activeLine()) && !a.fileStructure.state().open, 'jumped to the inherited member', 10000);
+      await a.fileStructure.setFilter('inherited', false);
+      // A new list starts at the member at the cursor; Enter on an own member moves the cursor.
+      await open('Shop.Api/Services/Invoices.cs', 'public void AddLine', 'public void '.length + 1);
+      void vscode.commands.executeCommand('refyntra.fileStructure');
+      await waitFor(() => a.fileStructure.state().open && a.fileStructure.state().ready, 'File Structure again', 60000);
+      assert.match(a.fileStructure.state().activeId, /^Invoice\.AddLine@/);
+      const amount = a.fileStructure.state().items.find((i) => i.label === 'Amount : decimal');
+      assert.equal(await a.fileStructure.accept(amount.id), true);
+      await waitFor(() => /public decimal Amount =>/.test(activeLine()) && !a.fileStructure.state().open, 'jumped to Amount', 10000);
+    }],
+    ['file structure: other languages use the document symbols (no host call)', async () => {
+      const a = await api();
+      // Built-in language extensions are off in this scenario: the test brings its own document symbol provider.
+      const R = (l) => new vscode.Range(l, 0, l, 5);
+      const provider = vscode.languages.registerDocumentSymbolProvider({ language: 'plaintext' }, {
+        provideDocumentSymbols: () => {
+          const store = new vscode.DocumentSymbol('Store', '', vscode.SymbolKind.Class, new vscode.Range(0, 0, 4, 1), R(0));
+          store.children = [new vscode.DocumentSymbol('get', '(id)', vscode.SymbolKind.Method, R(1), R(1)), new vscode.DocumentSymbol('items', '', vscode.SymbolKind.Field, R(2), R(2))];
+          return [store, new vscode.DocumentSymbol('load', '()', vscode.SymbolKind.Function, R(6), R(6))];
+        },
+      });
+      try {
+        const doc = await vscode.workspace.openTextDocument({ language: 'plaintext', content: 'class Store {\n  get(id) {}\n  items = 1;\n\n}\n\nfunction load() {}\n' });
+        await vscode.window.showTextDocument(doc);
+        void vscode.commands.executeCommand('refyntra.fileStructure');
+        await waitFor(() => a.fileStructure.state().open && a.fileStructure.state().ready, 'File Structure (symbols)', 30000);
+        const st = a.fileStructure.state();
+        assert.equal(st.source, 'symbols');
+        const file = doc.uri.path.slice(doc.uri.path.lastIndexOf('/') + 1);
+        assert.deepEqual(st.items.map((i) => `${i.section} | ${i.label} | ${i.description}`), ['Store | Store | class', 'Store | get(id) | method', 'Store | items | field', `${file} | load() | method`]);
+        await vscode.commands.executeCommand('workbench.action.closeQuickOpen');
+        await waitFor(() => !a.fileStructure.state().open, 'list closed', 10000);
+        await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
+      } finally {
+        provider.dispose();
+      }
     }],
   ];
 };

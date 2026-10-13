@@ -18,8 +18,9 @@ export const PROTOCOL_MAJOR = 1;
  *   (`csharp.fixAll`) as previewed plans.
  * 1.12: Find Usages grouped (`code/usages`: classified usages) and the Navigate To directions `bases` / `containing`
  *   of `code/hierarchy`.
+ * 1.13: File Structure (`code/fileStructure`: types, members, regions and inherited members of one document).
  */
-export const PROTOCOL_MINOR = 12;
+export const PROTOCOL_MINOR = 13;
 
 /** Zero-based line, UTF-16 code unit character. */
 export interface Position {
@@ -511,6 +512,64 @@ export interface UsagesResult {
   snapshotId: string;
 }
 
+/** code/fileStructure (protocol 1.13): what a member is. */
+export type StructureMemberKind = 'method' | 'constructor' | 'destructor' | 'property' | 'indexer' | 'field' | 'constant' | 'event' | 'operator' | 'enumMember';
+export type StructureTypeKind = 'class' | 'struct' | 'interface' | 'enum' | 'record' | 'recordStruct' | 'delegate';
+export type StructureAccessibility = 'public' | 'internal' | 'protected' | 'private' | 'protectedInternal' | 'privateProtected';
+
+export interface FileStructureParams extends WorkspaceParams {
+  snapshotId: string;
+  uri: string;
+  /** Also the members inherited from base classes (an interface: its base interfaces). */
+  includeInherited?: boolean;
+}
+
+export interface StructureMember {
+  name: string;
+  kind: StructureMemberKind;
+  accessibility: StructureAccessibility;
+  isStatic: boolean;
+  /** Short signature: "Find(int) : OrderDto?", "Total : decimal". */
+  signature: string;
+  /** The declaration (own members: in the requested document; inherited: in `uri`). */
+  range: Range;
+  /** The name. */
+  selectionRange: Range;
+  /** Innermost `#region` around an own member. */
+  region?: string | null;
+  /** Inherited members: the declaring type ("Entity<int>"). */
+  declaringType?: string | null;
+  /** Inherited members declared in the solution: their file; null for metadata members (not navigable). */
+  uri?: string | null;
+  navigable: boolean;
+}
+
+export interface StructureType {
+  name: string;
+  /** With the containing types: "Order.Line". */
+  fullName: string;
+  kind: StructureTypeKind;
+  accessibility: StructureAccessibility;
+  isStatic: boolean;
+  signature: string;
+  range: Range;
+  selectionRange: Range;
+  region?: string | null;
+  /** Nested types: the full name of the containing type. */
+  containingType?: string | null;
+  members: StructureMember[];
+  inherited: StructureMember[];
+}
+
+export interface FileStructureResult {
+  types: StructureType[];
+  regions: { name: string; range: Range }[];
+  /** "DocumentNotFound" when the document is not part of the loaded solution. */
+  reasonCode?: string | null;
+  completeness: 'complete' | 'partial' | 'unknown';
+  snapshotId: string;
+}
+
 export interface HierarchyParams extends WorkspaceParams {
   snapshotId: string;
   symbolId: string;
@@ -991,6 +1050,8 @@ export interface MethodMap {
   'code/constructorActions': [ConstructorActionsParams, ConstructorActionsResult];
   /** Protocol 1.12. */
   'code/usages': [UsagesParams, UsagesResult];
+  /** Protocol 1.13. */
+  'code/fileStructure': [FileStructureParams, FileStructureResult];
   'code/references': [SymbolQueryParams, LocationsResult];
   'code/implementations': [SymbolQueryParams, LocationsResult];
   'refactor/prepare': [PrepareParams, PrepareResult];

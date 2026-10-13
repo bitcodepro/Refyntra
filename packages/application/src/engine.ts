@@ -158,6 +158,11 @@ export interface ActionPrepareOptions {
 /** Change Signature: the parameters of the method at the cursor, or why there are none. */
 export type SignatureOutcome = { kind: 'signature'; info: import('@refyntra/contracts').SignatureInfo } | Unavailable;
 
+/** File Structure (protocol 1.13) of a document of an owned route. */
+export type FileStructureOutcome =
+  | { kind: 'structure'; result: import('@refyntra/contracts').FileStructureResult }
+  | { kind: 'unavailable'; reasonCode: string; message: string; recoveryActions: RecoveryAction[] };
+
 /** Find Usages grouped (protocol 1.12) at a position of an owned route. */
 export type UsagesOutcome =
   | { kind: 'usages'; subject: import('@refyntra/contracts').SymbolRef; items: import('@refyntra/contracts').UsageItem[]; total: number; truncated: boolean; completeness: 'complete' | 'partial' | 'unknown' }
@@ -241,6 +246,8 @@ export interface EngineClient {
    * ('subject' resolves only the symbol, with no items).
    */
   hierarchy(target: DocumentTarget, direction: import('@refyntra/contracts').HierarchyDirection | 'subject', token?: CancellationToken): Promise<HierarchyOutcome>;
+  /** File Structure (owned route, protocol 1.13): the types and members of the document, optionally inherited members. */
+  fileStructure?(uri: string, includeInherited: boolean, token?: CancellationToken): Promise<FileStructureOutcome>;
   /** Find Usages grouped (owned route, protocol 1.12): classified usages of the symbol at the position, at most `limit`. */
   usages(target: DocumentTarget, limit: number, token?: CancellationToken): Promise<UsagesOutcome>;
   /** Run and Debug (protocol 1.8): the C# projects of the loaded workspace classified for running and debugging. */
@@ -732,6 +739,23 @@ export class RefyntraEngine implements EngineClient {
       if (!subject) return { kind: 'unavailable', reasonCode: 'NoSymbol', message: 'There is no symbol at the cursor.', recoveryActions: [] };
       if (direction !== 'subject' && !result) return { kind: 'unavailable', reasonCode: 'ProtocolTooOld', message: 'The C# host is too old for the hierarchy; update the extension.', recoveryActions: [] };
       return { kind: 'hierarchy', subject, items: result?.items ?? [], completeness: result?.completeness ?? 'complete', truncated: result?.truncated ?? false };
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      return this.toUnavailable(adapter, e);
+    }
+  }
+
+  async fileStructure(uri: string, includeInherited: boolean, token?: CancellationToken): Promise<FileStructureOutcome> {
+    const adapter = this.o.registry.routeFor(uri);
+    if (!adapter || adapter.descriptor.ownership !== 'owned-semantic' || typeof adapter.fileStructure !== 'function') {
+      return { kind: 'unavailable', reasonCode: 'ActionNotSupported', message: 'File Structure from the host is provided for C# files only.', recoveryActions: [] };
+    }
+    try {
+      const r = await this.withStaleRetry(() => adapter.fileStructure!(uri, includeInherited, token), token);
+      const result = r.value;
+      if (!result) return { kind: 'unavailable', reasonCode: 'ProtocolTooOld', message: 'The C# host is too old for File Structure; update the extension.', recoveryActions: [] };
+      if (result.reasonCode) return { kind: 'unavailable', reasonCode: result.reasonCode, message: 'This file is not part of the loaded solution.', recoveryActions: [] };
+      return { kind: 'structure', result };
     } catch (e) {
       if (e instanceof CancelledError) throw e;
       return this.toUnavailable(adapter, e);

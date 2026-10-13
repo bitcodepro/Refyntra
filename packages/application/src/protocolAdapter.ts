@@ -734,6 +734,27 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
     });
   }
 
+  /** File Structure (protocol 1.13): the types and members of a document; null for an older host. */
+  fileStructure(uri: string, includeInherited: boolean, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').FileStructureResult | null>> {
+    return this.semantic('code/fileStructure', token, async (s, snapshotId, traceId) => {
+      if (s.protocolMinor < 13) return null;
+      const r = await s.transport.request('code/fileStructure', { traceId, workspaceId: this.opts.workspaceId, snapshotId, uri, includeInherited }, token);
+      const isRange = (x: unknown): boolean => !!x && typeof x === 'object' && !!(x as { start?: unknown }).start && !!(x as { end?: unknown }).end;
+      const member = (m: import('@refyntra/contracts').StructureMember): boolean => !!m && typeof m.name === 'string' && typeof m.kind === 'string' && isRange(m.range) && isRange(m.selectionRange);
+      const types = Array.isArray(r?.types)
+        ? r.types
+            .filter((t) => t && typeof t.name === 'string' && typeof t.fullName === 'string' && isRange(t.range) && isRange(t.selectionRange))
+            .map((t) => ({
+              ...t,
+              members: Array.isArray(t.members) ? t.members.filter(member).map((m) => ({ ...m, navigable: m.navigable !== false })) : [],
+              inherited: Array.isArray(t.inherited) ? t.inherited.filter(member).map((m) => ({ ...m, navigable: m.navigable !== false && typeof m.uri === 'string' })) : [],
+            }))
+        : [];
+      const regions = Array.isArray(r?.regions) ? r.regions.filter((x) => x && typeof x.name === 'string' && isRange(x.range)) : [];
+      return { types, regions, reasonCode: r?.reasonCode ?? null, completeness: r?.completeness ?? 'unknown', snapshotId: r?.snapshotId ?? snapshotId };
+    });
+  }
+
   /** Edit actions (protocol 1.9): list at a range, or compute one action; null for an older host. */
   editActions(uri: string, range: import('@refyntra/contracts').Range, actionId: string | undefined, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').EditActionsResult | null>> {
     return this.semantic('code/editActions', token, async (s, snapshotId, traceId) => {

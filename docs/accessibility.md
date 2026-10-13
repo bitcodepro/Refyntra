@@ -34,6 +34,23 @@ checked, and what has **not** been checked by a person with assistive technology
     "Usages, 12 usages") and what Enter does ("opens it", "opens the peek view", "opens the Refyntra Usages view").
     Enter on one location moves focus to the editor at that line; several open VS Code's peek view with the focus in
     its list (Esc returns to the editor). Esc on the list returns focus to the editor.
+  - Recent Files (Ctrl+E): a QuickPick; a row reads the file name, then "modified" when it has unsaved changes and the
+    folder ("OrderServices.cs, modified · Shop.Api/Services"). The first row is the previous file, so Enter goes back;
+    the current file is the second row. The remove button of a row has the tooltip "Remove from Recent Files" (Tab
+    into the row's buttons, Enter). Enter moves focus to the editor; Esc returns to where you were.
+  - Recent Locations (Ctrl+Shift+E): separator rows "Edited" and "Visited" are announced; a row reads the file and line
+    ("OrderServices.cs:20"), the containing member and, as its detail, the code line. Edited and visited rows also
+    differ by icon, but the section says it in words. The title-bar button "Show edited locations only" / "Show edited
+    and visited locations" says its state in its tooltip. Enter opens the location with the cursor at the stored
+    column and focus in the editor.
+  - File Structure (Ctrl+F12): separator rows name the type ("OrderService : IOrderService") or the region
+    ("Order · #region Queries", "Order · inherited from Entity<int>") and are announced; a row reads its signature and
+    then its kind and accessibility in words ("Find(int) : OrderDto?, method · public"), so the codicon is never the only
+    cue. Members of referenced assemblies say "no source (metadata)"; Enter on them shows a message and keeps the list.
+    The filter buttons have tooltips that say what a click does ("Hide methods" / "Show methods"); a hidden kind shows
+    a "circle-slash" icon and the title says it in words ("hidden: methods, nested types"). The row at the cursor has
+    focus when the list opens; Enter moves focus to the editor at the member's name; Esc returns to where you were
+    (with `refyntra.fileStructure.preview` the cursor goes back too).
   - Refyntra Usages view: groups read "Usage Kind Invocation, 3 usages"; a usage reads its kind, "in tests" when it is,
     the containing type and member, file and line, then the source line ("Write · Uses.Run · Uses.cs:12: order.Count
     = 1;"). The highlight of the name in the line is visual only; the label says the same in words. F4 / Shift+F4
