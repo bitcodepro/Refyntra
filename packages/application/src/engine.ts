@@ -190,6 +190,11 @@ export type StepIntoTargetsOutcome =
   | { kind: 'targets'; result: import('@refyntra/contracts').StepIntoTargetsResult }
   | { kind: 'unavailable'; reasonCode: string; message: string; recoveryActions: RecoveryAction[] };
 
+/** EF Core migrations (protocol 1.18) of the owned C# route. */
+export type EfMigrationsOutcome =
+  | { kind: 'migrations'; result: import('@refyntra/contracts').EfMigrationsResult }
+  | { kind: 'unavailable'; reasonCode: string; message: string; recoveryActions: RecoveryAction[] };
+
 /** Test discovery (protocol 1.15) of the owned C# route. */
 export type TestsOutcome =
   | { kind: 'tests'; result: import('@refyntra/contracts').TestsResult }
@@ -293,6 +298,8 @@ export interface EngineClient {
   metadataSource?(params: import('./adapters').MetadataSourceRequest, token?: CancellationToken): Promise<MetadataSourceOutcome>;
   /** Test discovery (owned route, protocol 1.15): every test project, or only the given documents. */
   tests?(uris?: string[], token?: CancellationToken): Promise<TestsOutcome>;
+  /** EF Core migrations (owned route, protocol 1.18): DbContexts, migrations, snapshots and configurations from source. */
+  efMigrations?(token?: CancellationToken): Promise<EfMigrationsOutcome>;
   /** Find Usages grouped (owned route, protocol 1.12): classified usages of the symbol at the position, at most `limit`. */
   usages(target: DocumentTarget, limit: number, token?: CancellationToken): Promise<UsagesOutcome>;
   /** Run and Debug (protocol 1.8): the C# projects of the loaded workspace classified for running and debugging. */
@@ -864,6 +871,19 @@ export class RefyntraEngine implements EngineClient {
       const { result } = r.value;
       if (!result) return { kind: 'unavailable', reasonCode: 'ProtocolTooOld', message: 'The C# host is too old for Find Usages; update the extension.', recoveryActions: [] };
       return { kind: 'usages', subject: r.value.subject ?? subject, items: result.items, total: result.total, truncated: result.truncated, completeness: result.completeness };
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      return this.toUnavailable(adapter, e);
+    }
+  }
+
+  async efMigrations(token?: CancellationToken): Promise<EfMigrationsOutcome> {
+    const adapter = this.o.registry.languageAdapters().find((a) => a.descriptor.ownership === 'owned-semantic' && typeof a.efMigrations === 'function');
+    if (!adapter) return { kind: 'unavailable', reasonCode: 'NoLanguageRoute', message: 'No Refyntra route reads EF Core migrations.', recoveryActions: [RECOVERY_SHOW_HEALTH] };
+    try {
+      const r = await this.withStaleRetry(() => adapter.efMigrations!(token), token);
+      if (!r.value) return { kind: 'unavailable', reasonCode: 'ProtocolTooOld', message: 'The C# host is too old for the EF Core view; update the extension.', recoveryActions: [] };
+      return { kind: 'migrations', result: r.value };
     } catch (e) {
       if (e instanceof CancelledError) throw e;
       return this.toUnavailable(adapter, e);

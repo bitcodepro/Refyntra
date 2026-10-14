@@ -18,6 +18,7 @@ export const RULE_SETTING_DEFAULTS: Readonly<Record<string, RuleLevel>> = {
   OR1008: 'hint',
   OR1009: 'hint',
   OR1010: 'info',
+  OR1011: 'hint',
 };
 
 /** An unknown or missing setting value falls back to the rule's default (never to a stronger level). */

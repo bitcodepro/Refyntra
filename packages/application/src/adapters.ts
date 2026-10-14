@@ -164,6 +164,8 @@ export interface LanguageAdapter {
   stepIntoTargets?(uri: string, position: Position, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').StepIntoTargetsResult | null>>;
   /** Optional (protocol 1.15): test discovery (every test project, or only `uris`); null when the host is older. */
   tests?(uris: string[] | undefined, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').TestsResult | null>>;
+  /** Optional (protocol 1.18): the DbContexts with their migrations (EF Core view); null when the host is older. */
+  efMigrations?(token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').EfMigrationsResult | null>>;
   usages?(uri: string, position: Position, limit: number, token?: CancellationToken): Promise<RouteResult<{ subject: SymbolRef | null; result: import('@refyntra/contracts').UsagesResult | null }>>;
   /**
    * Optional (protocol 1.8): the loaded projects classified for Run and Debug (workspace/runnableProjects, no barrier).

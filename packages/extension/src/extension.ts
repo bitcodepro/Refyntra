@@ -57,6 +57,7 @@ import { STACK_TRACE_VIEW, StackTraceViewProvider, runOpenStackTrace } from './s
 import { type TaskContextViewProvider, registerTaskContext } from './taskContext';
 import { type RunService, registerRun } from './run';
 import { type TestingService, registerTesting } from './testing';
+import { type EfCoreService, registerEfCore } from './efCore';
 import { type NavigateToState, acceptNavigateTarget, navigateToState, runNavigateTo } from './navigateTo';
 import { type RecentService, registerRecent } from './recent';
 import { type FileStructureState, acceptStructureRow, fileStructureState, runFileStructure, setStructureFilter, setStructureQuery } from './fileStructure';
@@ -141,6 +142,8 @@ export interface RefyntraTestApi {
   debugExtras: DebugExtras;
   /** The test runner (Test Explorer, ADR-009): tree, results, runs by id. */
   testing: TestingService;
+  /** EF Core tools (ADR-011): the migrations view model, dotnet-ef commands, Show SQL for LINQ. */
+  efCore: EfCoreService;
   /** Navigate To (Alt+`): the open list and choosing a target by id (e2e / visual wait on it instead of sleeping). */
   navigateTo: { state(): NavigateToState; accept(id: string): Promise<boolean> };
   /** The Refyntra Usages view (e2e: groupings, filters, Next/Previous, export, pinned tabs). */
@@ -313,7 +316,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
   // Go to metadata / decompiled sources (protocol 1.17): refyntra-metadata: documents, F12 / hover inside them.
   const metadata = registerMetadata(engine);
   context.subscriptions.push(metadata.disposable);
-  const debugStatus = () => ({ ...run.service.debuggers.status(), tests: testing.service.healthText(), decompiler: metadata.service.healthText() });
+  // EF Core tools (ADR-011): migrations view, dotnet-ef tasks, Show SQL for LINQ.
+  const efCore = registerEfCore(context, engine, isTrusted);
+  context.subscriptions.push(efCore.disposable);
+  const debugStatus = () => ({ ...run.service.debuggers.status(), tests: testing.service.healthText(), decompiler: metadata.service.healthText(), efTools: efCore.service.healthText() });
   const health = new HealthDocument(engine, () => solutions.selected(), debugStatus);
   const healthPage = new HealthPage(engine, () => solutions.selected(), isTrusted, debugStatus);
   const previews = new PreviewContentProvider();
@@ -488,6 +494,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     immediate: immediate.provider,
     debugExtras: debugExtras.extras,
     testing: testing.service,
+    efCore: efCore.service,
     navigateTo: { state: () => navigateToState(), accept: (id) => acceptNavigateTarget(id) },
     usages: usages.provider,
     metadata: metadata.service,

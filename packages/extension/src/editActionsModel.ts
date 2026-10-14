@@ -152,6 +152,7 @@ export const FIX_ALL_ACTIONS: ReadonlySet<string> = new Set([
   'csharp.edit.fix.predicateOverload',
   'csharp.edit.fix.removeMaterialization',
   'csharp.edit.fix.removeFormat',
+  'csharp.edit.fix.addInclude',
 ]);
 
 export type FixAllScope = 'document' | 'project' | 'solution';

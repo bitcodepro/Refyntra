@@ -1392,7 +1392,7 @@ scenarios['ts-delegated'] = [
 
 // ---- accessibility -----------------------------------------------------------------------------------
 // Internal commands: invoked by buttons and tree items, hidden from the Command Palette on purpose.
-const INTERNAL_COMMANDS = ['refyntra.openLocation', 'refyntra.openMetadata', 'refyntra.runRestore', 'refyntra.related.open', 'refyntra.nativeRename', 'refyntra.stackTrace.openFrame', 'refyntra.stackTrace.related', 'refyntra.taskContext.addFindItem', 'refyntra.taskContext.addFromRelated', 'refyntra.codeLens.related', 'refyntra.selectRunTargetById', 'refyntra.pickDotnetProcess', 'refyntra.immediate.clear', 'refyntra.editAction', 'refyntra.usages.open', 'refyntra.usages.activate', 'refyntra.usages.closeSession', 'refyntra.usages.showMore', 'refyntra.tests.run', 'refyntra.tests.debug', ...['kind', 'project', 'folder', 'file', 'type', 'member'].flatMap((g) => [`refyntra.usages.group.${g}`, `refyntra.usages.ungroup.${g}`])];
+const INTERNAL_COMMANDS = ['refyntra.openLocation', 'refyntra.openMetadata', 'refyntra.runRestore', 'refyntra.related.open', 'refyntra.nativeRename', 'refyntra.stackTrace.openFrame', 'refyntra.stackTrace.related', 'refyntra.taskContext.addFindItem', 'refyntra.taskContext.addFromRelated', 'refyntra.codeLens.related', 'refyntra.selectRunTargetById', 'refyntra.pickDotnetProcess', 'refyntra.immediate.clear', 'refyntra.editAction', 'refyntra.usages.open', 'refyntra.usages.activate', 'refyntra.usages.closeSession', 'refyntra.usages.showMore', 'refyntra.tests.run', 'refyntra.tests.debug', 'refyntra.ef.open', ...['kind', 'project', 'folder', 'file', 'type', 'member'].flatMap((g) => [`refyntra.usages.group.${g}`, `refyntra.usages.ungroup.${g}`])];
 
 common.push([
   'keyboard: every user command is in the Command Palette and the status bar menu leads to the main ones',
@@ -1559,6 +1559,9 @@ scenarios['rename-file'] = require('./fileRename.cjs').cases({ api, csharp, wait
 scenarios['create-file'] = require('./createFile.cjs').cases({ api, csharp, waitFor });
 // EF Core migrations in a rename (test/suite/efMigrationRename.cjs).
 scenarios['rename-efcore'] = require('./efMigrationRename.cjs').cases({ api, csharp, waitFor });
+// EF Core tools (ADR-011): the migrations view on the EfCore fixture; dotnet-ef tasks, OR1011, Show SQL on EfTools.
+scenarios.efcore.push(...require('./efCore.cjs').treeCases({ api, csharp, waitFor }));
+scenarios['ef-tools'] = require('./efCore.cjs').cases({ api, csharp, waitFor });
 // Code Cleanup (test/suite/cleanup.cjs).
 scenarios.cleanup = require('./cleanup.cjs').cases({ api, csharp, waitFor });
 // Safe Delete, Extract Method, Change Signature (test/suite/codeRefactor.cjs).
@@ -1597,6 +1600,8 @@ scenarios['visual-dark'] = require('./visual.cjs').cases({ api, csharp, waitFor 
 scenarios['visual-light'] = require('./visual.cjs').cases({ api, csharp, waitFor });
 scenarios['visual-tests-dark'] = require('./visualTests.cjs').cases({ api, csharp, waitFor });
 scenarios['visual-tests-light'] = require('./visualTests.cjs').cases({ api, csharp, waitFor });
+scenarios['visual-ef-dark'] = require('./visualEf.cjs').cases({ api, csharp, waitFor });
+scenarios['visual-ef-light'] = require('./visualEf.cjs').cases({ api, csharp, waitFor });
 
 exports.run =async function run() {
   const name = process.env.REFYNTRA_TEST_SCENARIO;

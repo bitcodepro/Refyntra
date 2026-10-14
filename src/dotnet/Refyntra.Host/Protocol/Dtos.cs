@@ -1117,3 +1117,50 @@ public sealed class TestsResultDto
     public string State { get; set; } = "";
     public string SnapshotId { get; set; } = "";
 }
+
+/// <summary>efcore/migrations (protocol 1.18): the DbContexts of the snapshot with their migrations, read from source.</summary>
+public sealed class EfMigrationsParams : WorkspaceParams
+{
+    public string SnapshotId { get; set; } = "";
+}
+
+public sealed class EfMigrationDto
+{
+    /// <summary>The [Migration] id, e.g. "20250101000000_Initial".</summary>
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string ClassName { get; set; } = "";
+    public LocationDto? Location { get; set; }
+    public LocationDto? DesignerLocation { get; set; }
+}
+
+public sealed class EfNamedLocationDto
+{
+    public string Name { get; set; } = "";
+    public LocationDto? Location { get; set; }
+}
+
+public sealed class EfContextDto
+{
+    public string Name { get; set; } = "";
+    public string FullName { get; set; } = "";
+    public string ProjectName { get; set; } = "";
+    /// <summary>The project of the DbContext.</summary>
+    public string ProjectUri { get; set; } = "";
+    /// <summary>The project that holds the migrations (dotnet ef --project).</summary>
+    public string MigrationsProjectUri { get; set; } = "";
+    public string? MigrationsNamespace { get; set; }
+    public LocationDto? Location { get; set; }
+    public LocationDto? OnModelCreating { get; set; }
+    /// <summary>Ordered by id (the order EF Core applies them in).</summary>
+    public List<EfMigrationDto> Migrations { get; set; } = new();
+    public EfNamedLocationDto? Snapshot { get; set; }
+    public List<EfNamedLocationDto> Configurations { get; set; } = new();
+}
+
+public sealed class EfMigrationsResultDto
+{
+    public List<EfContextDto> Contexts { get; set; } = new();
+    public string State { get; set; } = "";
+    public string SnapshotId { get; set; } = "";
+}

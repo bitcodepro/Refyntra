@@ -64,6 +64,7 @@ export function renderHealth(h: HealthSummary, extra: { solution?: string | unde
       `- lldb-dap (Rust debugging): ${d.lldbDap ? esc(d.lldbDap) : 'not found'}`,
       ...(d.tests ? [`- Tests: ${esc(d.tests)}`] : []),
       ...(d.decompiler ? [`- Decompiled sources: ${esc(d.decompiler)}`] : []),
+      ...(d.efTools ? [`- EF Core: ${esc(d.efTools)}`] : []),
       ...(d.netcoredbg.path ? [`- ${esc(dotnetDebugFeaturesText())}`] : []),
       '',
     );

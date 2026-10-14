@@ -35,10 +35,11 @@ public static class CodeInspections
     public const string WhereThenOperator = "OR1008";
     public const string RedundantMaterialization = "OR1009";
     public const string FormatWithoutArguments = "OR1010";
+    public const string PossibleNPlusOne = "OR1011";
 
     public static readonly IReadOnlyList<string> Ids = new[]
     {
-        SyncOverAsync, AsyncVoid, DiscardedTask, UndisposedLocal, MultipleEnumeration, ConcatInLoop, WhereThenOperator, RedundantMaterialization, FormatWithoutArguments,
+        SyncOverAsync, AsyncVoid, DiscardedTask, UndisposedLocal, MultipleEnumeration, ConcatInLoop, WhereThenOperator, RedundantMaterialization, FormatWithoutArguments, PossibleNPlusOne,
     };
 
     public const string FixPrefix = "csharp.edit.fix.";
@@ -52,6 +53,7 @@ public static class CodeInspections
     public const string FixPredicateOverload = FixPrefix + "predicateOverload";
     public const string FixRemoveMaterialization = FixPrefix + "removeMaterialization";
     public const string FixRemoveFormat = FixPrefix + "removeFormat";
+    public const string FixAddInclude = FixPrefix + "addInclude";
 
     /// <summary>Titles of the fixes (also used by Fix in scope).</summary>
     public static readonly IReadOnlyDictionary<string, string> FixTitles = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -66,6 +68,7 @@ public static class CodeInspections
         [FixPredicateOverload] = "Pass the predicate to the operator",
         [FixRemoveMaterialization] = "Remove the redundant copy",
         [FixRemoveFormat] = "Use the string directly",
+        [FixAddInclude] = "Add .Include(...) to the query",
     };
 
     public static string HelpUri(string id) => $"https://github.com/refyntra/refyntra/blob/main/docs/rules/{id}.md";
@@ -356,6 +359,10 @@ public static class CodeInspections
                     CheckWhereThen(inv);
                     CheckRedundantMaterialization(inv);
                     CheckFormat(inv);
+                    CheckNPlusOne(inv);
+                    break;
+                case ForEachStatementSyntax fe:
+                    CheckNPlusOne(fe);
                     break;
             }
         }
@@ -741,6 +748,16 @@ public static class CodeInspections
                 return false;
             }
             return true;
+        }
+
+        // ---------------------------------------------------------------- OR1011 possible N+1 (EfNPlusOne)
+
+        private void CheckNPlusOne(SyntaxNode n)
+        {
+            foreach (var r in EfNPlusOne.Check(_model, n, _ct))
+                Findings.Add(new InspectionFinding(PossibleNPlusOne, r.Span, r.Message,
+                    new[] { new InspectionFix(FixAddInclude, $"Add .Include({r.ParameterName} => {r.ParameterName}.{r.Navigation})") },
+                    new[] { (r.DbSet.Span, "The query") }));
         }
 
         // ---------------------------------------------------------------- suppression

@@ -849,6 +849,15 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
     });
   }
 
+  /** EF Core migrations (protocol 1.18): DbContexts with migrations, snapshot and configurations; null for an older host. */
+  efMigrations(token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').EfMigrationsResult | null>> {
+    return this.semantic('efcore/migrations', token, async (s, snapshotId, traceId) => {
+      if (s.protocolMinor < 18) return null;
+      const r = await s.transport.request('efcore/migrations', { traceId, workspaceId: this.opts.workspaceId, snapshotId }, token);
+      return sanitizeEfMigrations(r, snapshotId);
+    });
+  }
+
   /** Edit actions (protocol 1.9): list at a range, or compute one action; null for an older host. */
   editActions(uri: string, range: import('@refyntra/contracts').Range, actionId: string | undefined, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').EditActionsResult | null>> {
     return this.semantic('code/editActions', token, async (s, snapshotId, traceId) => {
@@ -946,4 +955,40 @@ export function isScopeDetails(v: unknown): v is ScopeDetails {
     Array.isArray(d.frameworks) &&
     d.frameworks.every((f) => f && typeof f === 'object' && typeof f.id === 'string' && typeof f.name === 'string' && typeof f.evidence === 'string' && typeof f.versionVerified === 'boolean')
   );
+}
+
+/** Untrusted host data → the EF Core view's model: drops malformed entries, keeps the host's order. */
+export function sanitizeEfMigrations(r: unknown, snapshotId: string): import('@refyntra/contracts').EfMigrationsResult {
+  const o = (r && typeof r === 'object' ? r : {}) as Record<string, unknown>;
+  const str = (x: unknown): x is string => typeof x === 'string';
+  const loc = (x: unknown): import('@refyntra/contracts').Location | null => {
+    const l = x as { uri?: unknown; range?: { start?: unknown; end?: unknown } } | null | undefined;
+    return l && str(l.uri) && l.range && l.range.start && l.range.end ? (l as import('@refyntra/contracts').Location) : null;
+  };
+  const named = (x: unknown): import('@refyntra/contracts').EfNamedLocation | null => {
+    const n = x as { name?: unknown; location?: unknown } | null | undefined;
+    return n && str(n.name) ? { name: n.name, location: loc(n.location) } : null;
+  };
+  const contexts = Array.isArray(o.contexts)
+    ? o.contexts
+        .filter((c): c is Record<string, unknown> => !!c && typeof c === 'object' && str((c as Record<string, unknown>).name) && str((c as Record<string, unknown>).projectUri))
+        .map((c) => ({
+          name: c.name as string,
+          fullName: str(c.fullName) ? c.fullName : (c.name as string),
+          projectName: str(c.projectName) ? c.projectName : '',
+          projectUri: c.projectUri as string,
+          migrationsProjectUri: str(c.migrationsProjectUri) ? c.migrationsProjectUri : (c.projectUri as string),
+          migrationsNamespace: str(c.migrationsNamespace) ? c.migrationsNamespace : null,
+          location: loc(c.location),
+          onModelCreating: loc(c.onModelCreating),
+          migrations: Array.isArray(c.migrations)
+            ? c.migrations
+                .filter((m): m is Record<string, unknown> => !!m && typeof m === 'object' && str((m as Record<string, unknown>).id))
+                .map((m) => ({ id: m.id as string, name: str(m.name) ? m.name : (m.id as string), className: str(m.className) ? m.className : '', location: loc(m.location), designerLocation: loc(m.designerLocation) }))
+            : [],
+          snapshot: named(c.snapshot),
+          configurations: Array.isArray(c.configurations) ? c.configurations.map(named).filter((x): x is import('@refyntra/contracts').EfNamedLocation => !!x) : [],
+        }))
+    : [];
+  return { contexts, state: str(o.state) ? o.state : 'unknown', snapshotId: str(o.snapshotId) ? o.snapshotId : snapshotId };
 }
