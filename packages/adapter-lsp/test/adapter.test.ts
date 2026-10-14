@@ -482,3 +482,24 @@ describe('refactoring code actions', () => {
     expect((await w.adapter.delegatedRename.listActions!(ORDERS, range)).value).toEqual([]);
   });
 });
+
+describe('file renames (workspace/willRenameFiles)', () => {
+  const range = { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } };
+  it('asks a server that wants it and returns its text edits; others are never asked', async () => {
+    const w = setup();
+    w.open(ORDERS);
+    await w.adapter.delegatedRename.listActions!(ORDERS, range); // starts the server
+    const s = w.servers[0]!;
+    const files = [{ oldUri: USE, newUri: 'file:///ws/app/usage.py' }];
+    expect(await w.adapter.willRenameFiles(files)).toEqual([]);
+    expect(s.requests).not.toContain('workspace/willRenameFiles');
+    s.serverCapabilities = { ...s.serverCapabilities, workspace: { fileOperations: { willRename: { filters: [] }, didRename: { filters: [] } } } };
+    s.handlers['workspace/willRenameFiles'] = (p: any) => {
+      expect(p.files).toEqual(files);
+      return { changes: { [ORDERS]: [{ range, newText: 'x' }] } };
+    };
+    expect(await w.adapter.willRenameFiles(files)).toEqual([{ uri: ORDERS, edits: [{ range, newText: 'x' }] }]);
+    w.adapter.didRenameFiles(files);
+    expect(s.notes.some((n) => n.method === 'workspace/didRenameFiles')).toBe(true);
+  });
+});

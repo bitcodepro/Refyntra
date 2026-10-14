@@ -1320,6 +1320,15 @@ scenarios['pyrust-lsp'] = [
       const applied = await a.engine.applyRename(prep.planId, undefined, { acceptLimited: true });
       assert.equal(applied.status, 'applied', applied.message);
       assert.match(doc.getText(), /let \w+ = get_order\(1\);/);
+      // Renaming the module file in VS Code: rust-analyzer is asked first (willRenameFiles) and `mod usage;` follows.
+      await doc.save();
+      const libUri = vscode.Uri.joinPath(doc.uri, '..', 'lib.rs');
+      const renamed = vscode.Uri.joinPath(doc.uri, '..', 'order_usage.rs');
+      const move = new vscode.WorkspaceEdit();
+      move.renameFile(doc.uri, renamed);
+      assert.equal(await vscode.workspace.applyEdit(move), true);
+      const lib = await vscode.workspace.openTextDocument(libUri);
+      await waitFor(() => /mod order_usage;/.test(lib.getText()), 'mod usage; renamed to mod order_usage; by rust-analyzer', 30000);
     },
   ],
 ];

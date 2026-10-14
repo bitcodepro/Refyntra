@@ -851,6 +851,35 @@ export class LspLanguageAdapter implements LanguageAdapter {
     return this.result(b, { kind: 'prepared', plan });
   }
 
+  // ---------------------------------------------------------------- file renames
+
+  /** True when the running server wants to be asked before files are renamed (workspace/willRenameFiles). */
+  private wantsWillRename(): boolean {
+    const ws = this.session?.conn.serverCapabilities.workspace as { fileOperations?: { willRename?: unknown } } | undefined;
+    return !!ws?.fileOperations?.willRename;
+  }
+
+  /**
+   * Before VS Code renames files of this language: the text edits the server wants (e.g. `mod` declarations, imports).
+   * Only for a running session (a rename never starts the server). Empty when the server has nothing or cannot answer.
+   */
+  async willRenameFiles(files: readonly { oldUri: string; newUri: string }[], token?: CancellationToken): Promise<{ uri: string; edits: { range: { start: Position; end: Position }; newText: string }[] }[]> {
+    if (!this.session || !this.wantsWillRename() || files.length === 0) return [];
+    const b = await this.begin(token);
+    const res = await this.tryReq(b, 'workspace/willRenameFiles', { files: files.map((f) => ({ oldUri: f.oldUri, newUri: f.newUri })) }, token);
+    if (!res.ok || res.value === null || res.value === undefined) return [];
+    const read = readLspWorkspaceEdit(res.value);
+    if (!read.ok) return [];
+    return read.changes.map((c) => ({ uri: this.uri(c.uri), edits: c.edits.map((e) => ({ range: e.range, newText: e.newText })) }));
+  }
+
+  /** After the rename: workspace/didRenameFiles, when the server registered for it. */
+  didRenameFiles(files: readonly { oldUri: string; newUri: string }[]): void {
+    const ws = this.session?.conn.serverCapabilities.workspace as { fileOperations?: { didRename?: unknown } } | undefined;
+    if (!this.session || !ws?.fileOperations?.didRename || files.length === 0) return;
+    this.session.conn.notify('workspace/didRenameFiles', { files: files.map((f) => ({ oldUri: f.oldUri, newUri: f.newUri })) });
+  }
+
   // ---------------------------------------------------------------- refactoring code actions
 
   /** textDocument/codeAction limited to `refactor` kinds; disabled actions and bare commands are left out. */

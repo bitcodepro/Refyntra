@@ -57,6 +57,8 @@ export const CLIENT_CAPABILITIES = {
     symbol: { dynamicRegistration: false, symbolKind: { valueSet: Array.from({ length: 26 }, (_, i) => i + 1) } },
     workspaceEdit: { documentChanges: true, resourceOperations: ['create', 'rename', 'delete'], failureHandling: 'abort' },
     didChangeWatchedFiles: { dynamicRegistration: false },
+    // File renames from VS Code: the server may update imports / `mod` declarations first (willRename).
+    fileOperations: { dynamicRegistration: false, willRename: true, didRename: true },
     applyEdit: false,
   },
   textDocument: {

@@ -53,6 +53,7 @@ import { registerMediatRHover } from './hover';
 import { ChangeSignatureDialog } from './changeSignaturePanel';
 import { parseCodeActionTarget, parseDelegatedActionArg } from './codeActionsModel';
 import { forwardLspDiagnostics } from './lspDiagnostics';
+import { forwardFileRenames } from './lspFileRename';
 import { SolutionService } from './solution';
 import { STACK_TRACE_VIEW, StackTraceViewProvider, runOpenStackTrace } from './stackTrace';
 import { type TaskContextViewProvider, registerTaskContext } from './taskContext';
@@ -266,6 +267,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     });
     registry.registerLanguage(adapter);
     context.subscriptions.push(forwardLspDiagnostics(adapter, name));
+    context.subscriptions.push(forwardFileRenames(adapter, language.descriptor.fileExtensions ?? []));
   };
   addLsp(PYTHON_LSP_LANGUAGE, 'pyright', () => servers.pyright(), (section) => pyrightConfiguration(section, folders()));
   addLsp(RUST_LSP_LANGUAGE, 'rust-analyzer', () => servers.rustAnalyzer(), (section) => (section === 'rust-analyzer' ? RUST_ANALYZER_SETTINGS : null), RUST_ANALYZER_SETTINGS, async () => (findCargo() ? undefined : CARGO_NOT_FOUND));
