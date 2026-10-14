@@ -1,13 +1,11 @@
 {
-  "*": [],
+  "*": [
+    { "x": 0, "y": 270, "width": 47, "height": 96, "why": "activity bar slots below Extensions: VS Code adds the Testing container icon at its own pace (it then shifts the Refyntra icon); never the subject of a case" }
+  ],
   "test-explorer": [
     { "x": 222, "y": 96, "width": 76, "height": 22, "why": "Test Explorer header: the elapsed time of the last run (differs from run to run)" }
   ],
-  "usages": [
-    { "x": 48, "y": 304, "width": 256, "height": 20, "why": "Usages view header: VS Code shows the title or the title-bar actions depending on focus/hover timing" },
-    { "x": 47, "y": 368, "width": 258, "height": 3, "why": "focus outline of the Usages tree (drawn or not depending on focus timing): top" },
-    { "x": 47, "y": 528, "width": 258, "height": 4, "why": "focus outline: bottom" },
-    { "x": 47, "y": 368, "width": 3, "height": 164, "why": "focus outline: left" },
-    { "x": 301, "y": 368, "width": 4, "height": 164, "why": "focus outline: right" }
+  "related": [
+    { "x": 292, "y": 140, "width": 12, "height": 230, "why": "overlay scrollbar of the Related tree: VS Code shows it for a moment after the tree's content changes" }
   ]
 }

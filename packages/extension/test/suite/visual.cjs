@@ -472,6 +472,9 @@ exports.cases = ({ api, csharp, waitFor }) => {
           // provider's short cache, so the Ctrl+. menu below shows them at once).
           const cursor = new vscode.Range(clock, clock);
           await waitFor(async () => ((await vscode.commands.executeCommand('vscode.executeCodeActionProvider', doc.uri, cursor, 'refactor.rewrite')) ?? []).some((a) => a.title === 'Convert to block body (Refyntra)'), 'host edit actions at the parameter', 120000);
+          // The light bulb must be on the line first: VS Code places the menu differently (above or below the line)
+          // depending on whether the light bulb is already shown when Ctrl+. runs.
+          await sleep(1500);
           await vscode.commands.executeCommand('editor.action.quickFix');
           await shot('ctor-actions', 2500);
           key('Escape');
@@ -660,7 +663,11 @@ exports.cases = ({ api, csharp, waitFor }) => {
         // Deterministic: the header (description) and the first row are drawn before the capture (it once caught the view
         // without its header row).
         await waitFor(() => a.usages.renderedFirstRow(), 'the Usages view drawn', 30000);
-        await vscode.commands.executeCommand('list.focusFirst');
+        // Deterministic focus: keyboard focus leaves the side bar (the empty editor group takes it), so the Usages header
+        // shows its title (not the focus-only title-bar actions) and no tree draws a focus outline. With list.focusFirst
+        // the capture depended on whether Xvfb (no window manager) had given the window focus in time.
+        await vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup');
+        parkMouse();
         await shot('usages', 2500);
         a.usages.clear();
       },
