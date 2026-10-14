@@ -325,6 +325,21 @@ a test class. It is not part of `initialize.capabilities`.
     `nextStatement` the next statement of the same block, of the top-level statements, or the closing brace when the
     statement is the last of a member body (null otherwise, e.g. the last statement of a loop body). `reasonCode`:
     `DocumentNotFound`, `NoStatement`. Sent only to hosts with minor ≥ 14.
+- 1.18 (additive): EF Core tools (ADR-011). (1.17 is used by another feature branch; the numbers only grow.)
+  - `efcore/migrations` `EfMigrationsParams` `{traceId, workspaceId, snapshotId}` → `EfMigrationsResult` `{contexts,
+    state, snapshotId}`, read from source only (nothing is built or run, no database is accessed). `contexts`: every
+    non-abstract class deriving from EF Core's `DbContext` (by full name and assembly), ordered by name: `{name, fullName,
+    projectName, projectUri, migrationsProjectUri (the project with its snapshot or migrations, else the context's: the
+    `dotnet ef --project`), migrationsNamespace?, location?, onModelCreating?, migrations, snapshot?, configurations}`.
+    `migrations`: classes deriving from `Migration` with `[Migration("id")]`, belonging to the context of their
+    `[DbContext(typeof(X))]` (or to the only DbContext when that attribute is missing), ordered by id (EF Core's order):
+    `{id, name (the id without its 14-digit timestamp), className, location? (the declaration with `Up`),
+    designerLocation? (the `.Designer.cs` part)}`. `snapshot`: the `ModelSnapshot` of the context `{name, location?}`.
+    `configurations`: `IEntityTypeConfiguration<T>` classes whose `T` is a `DbSet` entity of the context. Null fields
+    are omitted. Applied/pending is not part of the protocol: the client asks `dotnet ef migrations list --json` only on
+    the user's request.
+  - Inspection `OR1011` (possible N+1, docs/rules/OR1011.md) in `analysis/run` `documents`, with the fix
+    `csharp.edit.fix.addInclude` (also accepted by `csharp.fixAll`). Sent only to hosts with minor ≥ 18.
 - 1.16 (additive): inspections. `analysis/run` `documents?` runs OR1002–OR1010 on those documents (section
   Analysis); `RuleDiagnostic.fixes?` lists their quick fixes, edit actions `csharp.edit.fix.awaitSyncCall`,
   `asyncVoidToTask`, `addAwait`, `discardTask`, `usingVar`, `materialize`, `stringBuilder`, `predicateOverload`,
@@ -409,6 +424,7 @@ issuing semantic requests.
 | `code/fileStructure` | req | `FileStructureParams` `{…, uri, includeInherited?}` | `FileStructureResult` (since 1.13; File Structure) |
 | `code/stepIntoTargets` | req | `StepIntoTargetsParams` `{…, uri, position}` | `StepIntoTargetsResult` (since 1.14; Smart Step Into) |
 | `code/tests` | req | `TestsParams` `{…, uris?}` | `TestsResult` (since 1.15; Test Explorer discovery) |
+| `efcore/migrations` | req | `EfMigrationsParams` `{traceId, workspaceId, snapshotId}` | `EfMigrationsResult` (since 1.18; EF Core view) |
 | `code/constructorActions` | req | `ConstructorActionsParams` `{…, uri, position, actionId?, member?, members?, type?, constructorId?, typeId?}` | `ConstructorActionsResult` (since 1.11; constructor / DI helpers) |
 | `workspace/didDeleteFiles` | notif | `{workspaceId, sequence, workspaceRevision, files: [{uri}]}` | – (since 1.6; consumes a document sequence) |
 | `analysis/run` | req | `AnalysisRunParams` `{traceId, workspaceId, snapshotId, uri?}` | `AnalysisRunResult` (since 1.1, additive; see "Analysis") |
@@ -633,4 +649,5 @@ locations where the rule has them, `helpUri` = the rule page) with `fixes?: [{ a
 `csharp.edit.fix.*` that `code/editActions` computes at the diagnostic's start (kind `quickfix.refyntra.<rule id>`) and
 that `refactor/prepare` `csharp.fixAll` applies in a document, project or solution. Results are cached per document text
 version and project dependent semantic version. Suppressions (`#pragma warning disable`, `[SuppressMessage]`) are applied
-by the host. Older clients that send no `documents` get OR1001 only, as before.
+by the host. Older clients that send no `documents` get OR1001 only, as before. Since 1.18 the same documents also get
+`OR1011` (possible N+1, a heuristic; docs/rules/OR1011.md) with the fix `csharp.edit.fix.addInclude`.

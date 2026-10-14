@@ -35,8 +35,9 @@ public sealed class Engine : IRpcHandler, IDisposable
     /// 1.14: code/stepIntoTargets (Smart Step Into: the calls of the statement a debugger stopped at).
     /// 1.15: code/tests (test discovery for the Test Explorer: test projects, classes, methods and data cases).
     /// 1.16: analysis/run `documents` (per-document inspections OR1002–OR1010) and RuleDiagnostic `fixes` (quick fixes as edit actions).
+    /// 1.18: efcore/migrations (the DbContexts with their migrations, snapshot and configurations, from source) and OR1011.
     /// </summary>
-    public const int ProtocolMinor = 16;
+    public const int ProtocolMinor = 18;
     /// <summary>How long workspace/snapshotBarrier waits for a missing document sequence (tests shorten it).</summary>
     public TimeSpan BarrierTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
@@ -138,6 +139,11 @@ public sealed class Engine : IRpcHandler, IDisposable
                 return await TestsAsync(Params<TestsParams>(p), ct).ConfigureAwait(false);
             case "code/resolveFrame":
                 return await ResolveFrameAsync(Params<ResolveFrameParams>(p), ct).ConfigureAwait(false);
+            case "efcore/migrations":
+            {
+                var ep = Params<EfMigrationsParams>(p);
+                return await EfCoreTools.MigrationsAsync(RequireSnapshot(ep.WorkspaceId, ep.SnapshotId), RequireSession(ep.WorkspaceId).State, ct).ConfigureAwait(false);
+            }
             case "analysis/run":
                 return await AnalysisRunAsync(Params<AnalysisRunParams>(p), ct).ConfigureAwait(false);
             default:

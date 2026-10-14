@@ -663,6 +663,67 @@
         "command": "refyntra.usages.ungroup.member",
         "title": "✓ Group by Containing Member",
         "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.ef.refresh",
+        "title": "Refresh EF Core Migrations",
+        "category": "Refyntra",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "refyntra.ef.checkStatus",
+        "title": "EF Core: Check Migration Status",
+        "category": "Refyntra",
+        "icon": "$(database)",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "refyntra.ef.addMigration",
+        "title": "EF Core: Add Migration",
+        "category": "Refyntra",
+        "icon": "$(add)",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "refyntra.ef.removeLastMigration",
+        "title": "EF Core: Remove Last Migration",
+        "category": "Refyntra",
+        "icon": "$(remove)",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "refyntra.ef.updateDatabase",
+        "title": "EF Core: Update Database",
+        "category": "Refyntra",
+        "icon": "$(arrow-up)",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "refyntra.ef.generateScript",
+        "title": "EF Core: Generate SQL Script",
+        "category": "Refyntra",
+        "icon": "$(file-code)",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "refyntra.ef.openSnapshot",
+        "title": "EF Core: Open Model Snapshot",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.ef.openConfiguration",
+        "title": "EF Core: Open Model Configuration",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.ef.open",
+        "title": "Open",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.ef.showSql",
+        "title": "Show SQL for LINQ",
+        "category": "Refyntra"
       }
     ],
     "taskDefinitions": [
@@ -928,6 +989,14 @@
         {
           "command": "refyntra.findUsages",
           "when": "editorLangId == csharp"
+        },
+        {
+          "command": "refyntra.ef.open",
+          "when": "false"
+        },
+        {
+          "command": "refyntra.ef.showSql",
+          "when": "editorLangId == csharp"
         }
       ],
       "view/title": [
@@ -1155,6 +1224,36 @@
           "command": "refyntra.usages.clear",
           "when": "view == refyntra.usagesView",
           "group": "3_results@1"
+        },
+        {
+          "command": "refyntra.ef.addMigration",
+          "when": "view == refyntra.efCoreView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "refyntra.ef.checkStatus",
+          "when": "view == refyntra.efCoreView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "refyntra.ef.refresh",
+          "when": "view == refyntra.efCoreView",
+          "group": "navigation@3"
+        },
+        {
+          "command": "refyntra.ef.updateDatabase",
+          "when": "view == refyntra.efCoreView",
+          "group": "1_ef@1"
+        },
+        {
+          "command": "refyntra.ef.generateScript",
+          "when": "view == refyntra.efCoreView",
+          "group": "1_ef@2"
+        },
+        {
+          "command": "refyntra.ef.removeLastMigration",
+          "when": "view == refyntra.efCoreView",
+          "group": "1_ef@3"
         }
       ],
       "view/item/context": [
@@ -1257,6 +1356,66 @@
           "command": "refyntra.usages.closeSession",
           "when": "view == refyntra.usagesView && viewItem == refyntra.usagesSession",
           "group": "inline"
+        },
+        {
+          "command": "refyntra.ef.addMigration",
+          "when": "view == refyntra.efCoreView && viewItem == refyntra.ef.context",
+          "group": "inline@1"
+        },
+        {
+          "command": "refyntra.ef.checkStatus",
+          "when": "view == refyntra.efCoreView && viewItem == refyntra.ef.context",
+          "group": "inline@2"
+        },
+        {
+          "command": "refyntra.ef.addMigration",
+          "when": "view == refyntra.efCoreView && viewItem == refyntra.ef.context",
+          "group": "1_ef@1"
+        },
+        {
+          "command": "refyntra.ef.checkStatus",
+          "when": "view == refyntra.efCoreView && viewItem == refyntra.ef.context",
+          "group": "1_ef@2"
+        },
+        {
+          "command": "refyntra.ef.updateDatabase",
+          "when": "view == refyntra.efCoreView && viewItem == refyntra.ef.context",
+          "group": "1_ef@3"
+        },
+        {
+          "command": "refyntra.ef.generateScript",
+          "when": "view == refyntra.efCoreView && viewItem == refyntra.ef.context",
+          "group": "1_ef@4"
+        },
+        {
+          "command": "refyntra.ef.removeLastMigration",
+          "when": "view == refyntra.efCoreView && viewItem == refyntra.ef.context",
+          "group": "1_ef@5"
+        },
+        {
+          "command": "refyntra.ef.openSnapshot",
+          "when": "view == refyntra.efCoreView && viewItem == refyntra.ef.context",
+          "group": "2_open@1"
+        },
+        {
+          "command": "refyntra.ef.openConfiguration",
+          "when": "view == refyntra.efCoreView && viewItem == refyntra.ef.context",
+          "group": "2_open@2"
+        },
+        {
+          "command": "refyntra.ef.updateDatabase",
+          "when": "view == refyntra.efCoreView && viewItem =~ /^refyntra\\.ef\\.migration/",
+          "group": "1_ef@1"
+        },
+        {
+          "command": "refyntra.ef.generateScript",
+          "when": "view == refyntra.efCoreView && viewItem =~ /^refyntra\\.ef\\.migration/",
+          "group": "1_ef@2"
+        },
+        {
+          "command": "refyntra.ef.removeLastMigration",
+          "when": "view == refyntra.efCoreView && viewItem == refyntra.ef.migration.last",
+          "group": "1_ef@3"
         }
       ],
       "terminal/context": [
@@ -1283,6 +1442,11 @@
           "submenu": "refyntra.editorContext",
           "when": "editorLangId =~ /^(csharp|typescript|typescriptreact|javascript|javascriptreact|python|rust)$/ && resourceScheme == file",
           "group": "navigation@90"
+        },
+        {
+          "command": "refyntra.ef.showSql",
+          "when": "editorLangId == csharp && inDebugMode && debugType == refyntra-dotnet && editorHasSelection",
+          "group": "refyntra@9"
         }
       ],
       "refyntra.editorContext": [
@@ -1424,6 +1588,12 @@
           "id": "refyntra.taskContextView",
           "name": "Refyntra Task Context",
           "contextualTitle": "Refyntra"
+        },
+        {
+          "id": "refyntra.efCoreView",
+          "name": "Refyntra EF Core",
+          "contextualTitle": "Refyntra",
+          "when": "refyntra.efCore.available"
         }
       ],
       "refyntraImmediate": [
@@ -1812,6 +1982,25 @@
           ],
           "default": "info",
           "markdownDescription": "Inspection OR1010 \"string.Format without arguments\" in open C# files: `string.Format(\"text\")` (or a format that would throw); quick fix *Use the string directly*. Suppress with `#pragma warning disable OR1010` or `[SuppressMessage(\"…\", \"OR1010\")]` ([docs](https://github.com/refyntra/refyntra/blob/main/docs/rules/OR1010.md))."
+        },
+        "refyntra.rules.OR1011": {
+          "type": "string",
+          "enum": [
+            "off",
+            "hint",
+            "info",
+            "warning",
+            "error"
+          ],
+          "enumDescriptions": [
+            "Do not report OR1011.",
+            "Show OR1011 as a hint (dots under the code, not in Problems).",
+            "Report OR1011 as information.",
+            "Report OR1011 as a warning.",
+            "Report OR1011 as an error."
+          ],
+          "default": "hint",
+          "markdownDescription": "Inspection OR1011 \"possible N+1\" (heuristic) in open C# files: a navigation property read in a `foreach` or an in-memory `Select` over the results of an EF Core query that neither includes nor projects it, when lazy loading is not configured; quick fix *Add .Include(x => x.Nav)*. Suppress with `#pragma warning disable OR1011` or `[SuppressMessage(\"…\", \"OR1011\")]` ([docs](https://github.com/refyntra/refyntra/blob/main/docs/rules/OR1011.md))."
         },
         "refyntra.preview.style": {
           "type": "string",

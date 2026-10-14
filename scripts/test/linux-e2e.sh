@@ -24,6 +24,9 @@ RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
       libxss1 libdrm2 libxcomposite1 libxdamage1 libxrandr2 libxshmfence1 libcups2t64 \
       imagemagick xdotool fonts-dejavu-core x11-utils x11vnc novnc websockify >/dev/null \
  && rm -rf /var/lib/apt/lists/*
+# dotnet-ef for the EF Core tools e2e (scenario ef-tools): installed into the image at build time, never by Refyntra.
+RUN dotnet tool install --tool-path /opt/dotnet-tools dotnet-ef --version 9.0.10 >/dev/null
+ENV PATH="${PATH}:/opt/dotnet-tools"
 DOCKERFILE
   # imagemagick (import -window root), xdotool (keys, window size) and one fixed font family serve linux-visual.sh;
   # x11-utils, x11vnc, novnc and websockify the VNC watch mode (REFYNTRA_VNC=1 or --vnc, scripts/test/lib/display.sh).

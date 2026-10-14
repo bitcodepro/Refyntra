@@ -4,6 +4,29 @@ All notable changes are listed here. The project is alpha; nothing has been rele
 
 ## Unreleased
 
+### Added (EF Core tools)
+
+- **Refyntra EF Core view**: DbContexts → migrations in EF Core's order (by `[Migration]` id, custom folders and
+  namespaces included), model snapshot and `IEntityTypeConfiguration<T>` classes, read from source by the host
+  (protocol 1.18, `efcore/migrations`); click to open. Shown only in workspaces with a DbContext.
+- **dotnet ef commands as visible VS Code tasks** (trusted workspaces only, an argument list without a shell, the task
+  named after the exact command line): Add Migration, Remove Last Migration, Update Database (latest / selected / `0`),
+  Generate SQL Script (plain or idempotent, opened in an untitled SQL editor) and Check Status (`migrations list
+  --json`, applied/pending only on request). Commands that connect to a database ask first and show the command. The
+  startup project is chosen once per DbContext and remembered. No Drop Database command on purpose (ADR-011).
+- dotnet-ef detection (`dotnet ef --version`, local tool manifest or global); when missing, Health and the action show
+  `dotnet tool install --global dotnet-ef` as text. Refyntra never installs it.
+- **Show SQL for LINQ**: `ToQueryString()` of the selected IQueryable, evaluated with DAP `evaluate` in the stopped
+  frame of a Refyntra .NET debug session, shown in a read-only SQL editor; outside debugging it explains and offers a
+  breakpoint at the line.
+- **OR1011 possible N+1** (heuristic, hint by default, docs/rules/OR1011.md) with the quick fix *Add .Include(x =>
+  x.Nav)* (also in Fix in scope).
+- Tests: .NET `EfToolsTests` on a new `EfTools` fixture (two contexts, custom migrations folder/namespace, snapshots,
+  OR1011 cases and the fix), unit tests (`efCore.test.ts`: tree model, command lines with spaces/quotes, output
+  parsing, debugger strings), e2e `efcore` (tree of the EfCore fixture) and `ef-tools` (dotnet-ef installed into the
+  Linux test image at build time; update / status / add / script / remove on a temp SQLite file, OR1011 quick fix,
+  Show SQL in netcoredbg), visual baseline `ef-core-view` (both themes). ADR-011.
+
 ### Added (inspections)
 
 - **Refyntra's own C# inspections with quick fixes**, computed by the C# host with Roslyn's public APIs, each checked

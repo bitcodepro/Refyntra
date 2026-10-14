@@ -48,6 +48,7 @@ public static partial class EditActionsPlanner
         CodeInspections.FixPredicateOverload => PredicateOverload(c),
         CodeInspections.FixRemoveMaterialization => RemoveMaterialization(c),
         CodeInspections.FixRemoveFormat => RemoveFormat(c),
+        CodeInspections.FixAddInclude => AddInclude(c),
         _ => null,
     };
 

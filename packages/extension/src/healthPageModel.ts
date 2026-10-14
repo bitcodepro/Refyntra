@@ -88,6 +88,8 @@ export interface DebugHealth {
   dotnet?: string;
   /** The test runner (Test Explorer): what it found and why a language has no tests (e.g. pytest not installed). */
   tests?: string;
+  /** EF Core tools (ADR-011): DbContexts found and whether dotnet-ef is installed; absent without DbContexts. */
+  efTools?: string | undefined;
 }
 
 export interface HealthPageInput {
@@ -336,6 +338,7 @@ export function debugSection(d: DebugHealth, trusted: boolean): LanguageSection 
   parts.push(d.lldbDap ? `Rust: cargo run${d.cargo ? '' : ' (cargo was not found)'}; debugging with lldb-dap from the installed LLVM (${d.lldbDap}).` : `Rust: cargo run${d.cargo ? '' : ' (cargo was not found)'}; debugging needs lldb-dap from an installed LLVM, which was not found (Refyntra does not bundle a Rust debugger, see ADR-008).`);
   parts.push('Node.js: package.json scripts run with npm, pnpm or yarn; debugging uses the JavaScript debugger built into VS Code.');
   if (d.tests) parts.push(`Tests: ${d.tests}`);
+  if (d.efTools) parts.push(`EF Core: ${d.efTools}`);
   if (!trusted) return { adapterId: 'debug', icon: 'locked', headline: 'Run and debug: Restricted Mode', meaning: `Building and running execute code from this workspace, so Refyntra runs and debugs nothing until you trust it. ${parts.join(' ')}`, more: [], groups: [] };
   const icon: StatusIcon = d.netcoredbg.path && d.debugpy.path ? 'ok' : 'warning';
   const headline = d.netcoredbg.path ? 'Run and debug: ready' : 'Run and debug: .NET debugging is unavailable on this platform';

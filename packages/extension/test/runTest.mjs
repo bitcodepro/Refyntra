@@ -196,6 +196,15 @@ const scenarios = visual
         launchArgs: ['--disable-gpu'],
         env: { REFYNTRA_TEST_NO_DURATIONS: '1', REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '', REFYNTRA_VISUAL_OUT: path.join(process.env.REFYNTRA_VISUAL_OUT || path.join(repo, 'test-results', 'visual', 'actual'), theme) },
       })),
+      // The EF Core view (ADR-011) on a temp copy of the EfCore fixture, same fixed settings; nothing runs dotnet ef.
+      Object.entries(visualThemes).map(([theme, colorTheme]) => ({
+        name: `visual-ef-${theme}`,
+        fixtureCopy: ['EfCore', 'EfCore.sln'],
+        trusted: true,
+        settings: { ...visualSettings, 'workbench.colorTheme': colorTheme },
+        launchArgs: ['--disable-gpu'],
+        env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '', REFYNTRA_VISUAL_OUT: path.join(process.env.REFYNTRA_VISUAL_OUT || path.join(repo, 'test-results', 'visual', 'actual'), theme) },
+      })),
     )
   : e2e
   ? [
@@ -278,6 +287,16 @@ const scenarios = visual
         name: 'efcore',
         fixtureCopy: ['EfCore', 'EfCore.sln'],
         trusted: true,
+        env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' },
+      },
+      // EF Core tools (ADR-011) on a temp copy of the EfTools fixture: migrations view, dotnet-ef tasks (when dotnet-ef
+      // is installed; the Linux e2e image has it), OR1011 + Add .Include, Show SQL for LINQ in a netcoredbg session.
+      // Every database is a SQLite file in the temp folder (the fixture's default, eftools-fixture.db).
+      {
+        name: 'ef-tools',
+        fixtureCopy: ['EfTools', 'EfTools.sln'],
+        trusted: true,
+        settings: { 'refyntra.rename.apply': true, 'files.autoSave': 'off', 'refyntra.preview.style': 'native' },
         env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' },
       },
       // Rename of a DbContext referenced from EF Core migrations, on a temp copy of the EfCore fixture: update the

@@ -23,8 +23,10 @@ export const PROTOCOL_MAJOR = 1;
  * 1.15: Test discovery (`code/tests`: test projects, classes, methods and data cases for the Test Explorer).
  * 1.16: Inspections OR1002–OR1010 (`analysis/run` `documents`) with quick fixes (`RuleDiagnostic.fixes`, edit actions
  *   `csharp.edit.fix.*`).
+ * 1.18: EF Core tools (`efcore/migrations`: DbContexts with their migrations, snapshot and configurations, read from
+ *   source) and the inspection OR1011 (possible N+1) with the fix `csharp.edit.fix.addInclude`.
  */
-export const PROTOCOL_MINOR = 16;
+export const PROTOCOL_MINOR = 18;
 
 /** Zero-based line, UTF-16 code unit character. */
 export interface Position {
@@ -665,6 +667,48 @@ export interface TestsResult {
   snapshotId: string;
 }
 
+/** efcore/migrations (protocol 1.18): the DbContexts of the snapshot with their migrations, from source only. */
+export interface EfMigrationsParams extends WorkspaceParams {
+  snapshotId: string;
+}
+
+export interface EfMigrationInfo {
+  /** The [Migration] id, e.g. "20250101000000_Initial". */
+  id: string;
+  name: string;
+  className: string;
+  location?: Location | null;
+  designerLocation?: Location | null;
+}
+
+export interface EfNamedLocation {
+  name: string;
+  location?: Location | null;
+}
+
+export interface EfContextInfo {
+  name: string;
+  fullName: string;
+  projectName: string;
+  /** The project of the DbContext. */
+  projectUri: string;
+  /** The project that holds the migrations (`dotnet ef --project`). */
+  migrationsProjectUri: string;
+  migrationsNamespace?: string | null;
+  location?: Location | null;
+  onModelCreating?: Location | null;
+  /** Ordered by id (the order EF Core applies them in). */
+  migrations: EfMigrationInfo[];
+  snapshot?: EfNamedLocation | null;
+  configurations: EfNamedLocation[];
+}
+
+export interface EfMigrationsResult {
+  contexts: EfContextInfo[];
+  state: string;
+  snapshotId: string;
+}
+
 export interface HierarchyParams extends WorkspaceParams {
   snapshotId: string;
   symbolId: string;
@@ -1151,6 +1195,8 @@ export interface MethodMap {
   'code/stepIntoTargets': [StepIntoTargetsParams, StepIntoTargetsResult];
   /** Protocol 1.15. */
   'code/tests': [TestsParams, TestsResult];
+  /** Protocol 1.18. */
+  'efcore/migrations': [EfMigrationsParams, EfMigrationsResult];
   'code/references': [SymbolQueryParams, LocationsResult];
   'code/implementations': [SymbolQueryParams, LocationsResult];
   'refactor/prepare': [PrepareParams, PrepareResult];
@@ -1225,7 +1271,7 @@ export interface RpcErrorData {
 // ---------------------------------------------------------------- analysis (additive in 1.1; protocol-v1.md "Analysis")
 
 /** Rule ids `analysis/run` can report. */
-export const ANALYSIS_RULE_IDS = ['OR1001', 'OR1002', 'OR1003', 'OR1004', 'OR1005', 'OR1006', 'OR1007', 'OR1008', 'OR1009', 'OR1010'] as const;
+export const ANALYSIS_RULE_IDS = ['OR1001', 'OR1002', 'OR1003', 'OR1004', 'OR1005', 'OR1006', 'OR1007', 'OR1008', 'OR1009', 'OR1010', 'OR1011'] as const;
 export type AnalysisRuleId = (typeof ANALYSIS_RULE_IDS)[number];
 export const OR1001_HELP_URI = 'https://github.com/refyntra/refyntra/blob/main/docs/rules/OR1001.md';
 /** The documentation page of a rule (docs/rules/ORxxxx.md). */

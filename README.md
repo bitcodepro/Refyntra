@@ -27,6 +27,11 @@ Alpha scope is navigation for:
   navigations and relationships (fluent `HasOne/HasMany/WithOne/WithMany/HasForeignKey/OwnsOne/OwnsMany`, conventions
   as *likely*), query sites (`DbSet<T>`, `Set<T>()`, with the enclosing endpoint) and migrations / model snapshots
   (read-only). Dynamic model building is reported as unknown; no model is built at runtime and no database is accessed
+- **EF Core tools**: a *Refyntra EF Core* view (DbContexts → migrations in order, model snapshot, configurations),
+  Add Migration, Remove Last Migration, Update Database, Generate SQL Script and Check Status through `dotnet ef` as
+  visible tasks (trusted workspaces, the exact command shown, a confirmation before anything that connects to a
+  database), *Show SQL for LINQ* while debugging, and the hint OR1011 *possible N+1* with *Add .Include(…)* (see
+  [EF Core tools](#ef-core-tools-c))
 - Explicit dependency injection registrations, including keyed (`AddKeyed*`, with the key; `[FromKeyedServices]`
   parameters), factory (*likely*, with the lambda location), instance and open generic registrations (closed usages
   such as `IRepo<Widget>` as *likely*)
@@ -893,6 +898,7 @@ each page lists its false-positive guards.
 | [OR1008](docs/rules/OR1008.md) | `Where(p).First()` / `Any()` / `Count()` … | *Pass the predicate to the operator* | hint |
 | [OR1009](docs/rules/OR1009.md) | `ToList()` / `ToArray()` enumerated once (`ToList().Any()`, `foreach` over a copy the loop does not change) | *Remove the redundant copy* | hint |
 | [OR1010](docs/rules/OR1010.md) | `string.Format` without arguments | *Use the string directly* | info |
+| [OR1011](docs/rules/OR1011.md) | possible N+1 (heuristic): an EF Core navigation read in a loop over a query that neither includes nor projects it, without lazy loading | *Add .Include(x => x.Nav)* | hint |
 
 - Results appear in the Problems view (source *Refyntra*, the rule id links to its page) for the C# files open in the
   editor; a keystroke re-analyses that document only (results are cached per document version,
@@ -905,6 +911,45 @@ each page lists its false-positive guards.
   `[SuppressMessage("Usage", "OR1002:…")]` on a member, a type or the assembly.
 - Not inspected on purpose: `Count() > 0` (the SDK's CA1827/CA1829 already report it), missing `ConfigureAwait(false)`
   (a project policy, not a defect), unused private members (the IDE reports them).
+
+### EF Core tools (C#)
+
+The **Refyntra EF Core** view (in the Refyntra side bar, shown when the workspace has a DbContext) lists every
+DbContext with its migrations in the order EF Core applies them (by migration id, wherever the files are: custom
+folders and namespaces work), its model snapshot and its `IEntityTypeConfiguration<T>` classes. Everything comes from
+source: nothing is built and no database is contacted to show the tree. Click a migration, the snapshot or a
+configuration to open it; *Open Model Configuration* opens `OnModelCreating` or a configuration class.
+
+Commands (view toolbar, context menu of a DbContext or migration, Command Palette *Refyntra: EF Core: …*):
+
+| Command | Runs | Database |
+|---|---|---|
+| Check Migration Status | `dotnet ef migrations list --json` | connects (asks first); marks migrations *applied* / *pending* until refreshed |
+| Add Migration | `dotnet ef migrations add <Name>` | no |
+| Remove Last Migration | `dotnet ef migrations remove` | connects (asks first); dotnet ef refuses an applied migration, Refyntra never passes `--force` |
+| Update Database | `dotnet ef database update [<migration>]` (latest, the selected migration, or `0`) | connects (asks first) |
+| Generate SQL Script | `dotnet ef migrations script [--idempotent] --output <temp file>`; the script opens in an untitled SQL editor | no |
+
+Each command also passes `--project <migrations project> --startup-project <startup project> --context <DbContext>`.
+The startup project is chosen once per DbContext from the runnable projects and remembered for the workspace. The
+command runs as a VS Code task named after the exact command line, as an argument list without a shell (paths with
+spaces or quotes are safe), only in a trusted workspace. There is **no Drop Database command**: run
+`dotnet ef database drop` yourself if you really need it. SQLite does not support idempotent scripts (dotnet ef says
+so in the task output).
+
+**dotnet-ef** is not bundled and never installed by Refyntra. A global tool or a local tool manifest
+(`.config/dotnet-tools.json`, restored) both work. When it is missing, the action and the Health page say so and show
+`dotnet tool install --global dotnet-ef` as text. The tree, navigation and OR1011 work without it.
+
+**Show SQL for LINQ** (*Refyntra: Show SQL for LINQ*, editor context menu while debugging): stop at a breakpoint in a
+.NET debug session started by Refyntra, select an `IQueryable` expression (best: a variable that holds the query) and
+run the command. Refyntra evaluates `ToQueryString()` in the current frame through the debugger and shows the SQL in a
+read-only editor. `ToQueryString()` only translates; the query is not executed. Outside a debug session the command
+explains this and offers to add a breakpoint at the current line.
+
+**OR1011 possible N+1** (hint by default, [rule page](docs/rules/OR1011.md)): a navigation property read in a `foreach`
+or an in-memory `Select` over the results of a query from the same method that neither `Include`s nor projects it,
+when lazy loading is not configured. The quick fix inserts `.Include(x => x.Nav)` after the query's `DbSet`.
 
 ### Postfix templates (C#)
 
@@ -973,6 +1018,9 @@ constructor that needs them (the compile check refuses it).
 | `refyntra.usages.groupBy` / `.filterKinds` / `.filterTests` / `.clearFilters` | Groupings and filters of the Usages view |
 | `refyntra.usages.export` / `.pin` / `.unpin` / `.refresh` / `.clear` | Export to Markdown, pin, refresh, clear the Usages view |
 | `refyntra.actions` | Available actions and reasons for unavailable ones |
+| `refyntra.ef.checkStatus` / `.addMigration` / `.removeLastMigration` / `.updateDatabase` / `.generateScript` | EF Core: `dotnet ef` commands as tasks (trusted workspaces; database commands ask first) |
+| `refyntra.ef.openSnapshot` / `.openConfiguration` / `.refresh` | EF Core: open the model snapshot or configuration, refresh the EF Core view |
+| `refyntra.ef.showSql` | Show SQL for LINQ: `ToQueryString()` of the selected query in a stopped .NET debug session |
 | `refyntra.rename` | Rename with preview, then apply |
 | `refyntra.moveTypeToFile` | Move the type at the cursor into its own file (preview, then apply) |
 | `refyntra.generateHandler` | Create a MediatR handler for the request at the cursor (preview, then apply) |
@@ -1023,7 +1071,7 @@ constructor that needs them (the compile check refuses it).
 | `refyntra.http.basePaths` | list of path prefixes, default empty | Frontend ↔ backend links: prefixes that client URLs add but the routes do not have (tried only when the exact match finds nothing) |
 | `refyntra.http.origins` | list of origins, default empty | Frontend ↔ backend links: absolute origins (`https://localhost:5001`) that are this backend; other absolute URLs are never linked |
 | `refyntra.rules.OR1001` | `off`, `information`, `warning` (default) | Severity of the experimental OR1001 rule in the Problems view |
-| `refyntra.rules.OR1002` … `OR1010` | `off`, `hint`, `info`, `warning`, `error` | Severity of each inspection (defaults: OR1002–OR1004 `warning`, OR1005–OR1007 and OR1010 `info`, OR1008–OR1009 `hint`) |
+| `refyntra.rules.OR1002` … `OR1011` | `off`, `hint`, `info`, `warning`, `error` | Severity of each inspection (defaults: OR1002–OR1004 `warning`, OR1005–OR1007 and OR1010 `info`, OR1008–OR1009 and OR1011 `hint`) |
 | `refyntra.preview.style` | `native` (default), `quickPick` | Where previews are shown: VS Code's Refactor Preview for text-only plans, or the QuickPick preview for every plan |
 | `refyntra.changeSignature.editor` | `dialog` (default), `quickPick` | Change Signature edits the parameters in a dialog or in QuickPick steps |
 | `refyntra.codeLens.enabled` | boolean, default on | CodeLens above C# types and methods |

@@ -21,7 +21,7 @@ describe('contract constants (protocol-v1.md "Error codes" and "Capability ids")
 describe('analysis/run (additive in 1.1, docs/architecture/protocol-v1.md "Analysis")', () => {
   it('exports the rule catalogue and the OR1001 help page', async () => {
     const c = await import('../src');
-    expect(c.ANALYSIS_RULE_IDS).toEqual(['OR1001', 'OR1002', 'OR1003', 'OR1004', 'OR1005', 'OR1006', 'OR1007', 'OR1008', 'OR1009', 'OR1010']);
+    expect(c.ANALYSIS_RULE_IDS).toEqual(['OR1001', 'OR1002', 'OR1003', 'OR1004', 'OR1005', 'OR1006', 'OR1007', 'OR1008', 'OR1009', 'OR1010', 'OR1011']);
     expect(c.ruleHelpUri('OR1005')).toMatch(/docs\/rules\/OR1005\.md$/);
     expect(c.OR1001_HELP_URI).toMatch(/docs\/rules\/OR1001\.md$/);
   });
