@@ -1,4 +1,4 @@
-import type { Availability, PlannedChange, Position, RecoveryAction, RevalidateResult, ScopeDetails, SymbolRef } from '@refyntra/contracts';
+import type { Availability, PlannedChange, Position, Range, RecoveryAction, RevalidateResult, ScopeDetails, SymbolRef } from '@refyntra/contracts';
 import { CSHARP_CLEANUP_ACTION } from '@refyntra/contracts';
 import {
   type AnyRefactorPlan,
@@ -19,7 +19,7 @@ import {
   unavailable,
   validatePlanStructure,
 } from '@refyntra/domain';
-import type { AdapterRegistry, LanguageAdapter, RouteResult } from './adapters';
+import type { AdapterRegistry, DelegatedActionInfo, DelegatedActionRequest, DelegatedPrepareResult, LanguageAdapter, RouteResult } from './adapters';
 import { type CancellationToken, CancelledError, throwIfCancelled } from './cancellation';
 import type { DocumentTracker } from './documents';
 import { AdapterUnavailableError, RouteUnavailableError, RpcError, StaleResultError, describeError, describeErrorWithRecovery } from './errors';
@@ -278,6 +278,10 @@ export interface EngineClient {
   actions(target: DocumentTarget, token?: CancellationToken): Promise<ActionsOutcome>;
   /** options.renameFile: also rename the files named after a type, when the backend proves it safe. */
   prepareRename(target: DocumentTarget, newName: string, token?: CancellationToken, options?: PrepareOptions): Promise<RenameOutcome>;
+  /** Refactoring code actions of a delegated route's language server (Python, Rust…) for a range. */
+  listDelegatedActions(uri: string, range: Range, token?: CancellationToken): Promise<DelegatedActionInfo[]>;
+  /** One of those as a delegated plan (preview, re-asked before apply). */
+  prepareDelegatedAction(req: DelegatedActionRequest, token?: CancellationToken): Promise<RenameOutcome>;
   /**
    * Prepares a create-file refactoring of the owned route at the cursor (`csharp.moveTypeToFile`, `csharp.generateHandler`).
    * The result is applied with applyRename (same lifecycle, revalidation and EditApplier).
@@ -1079,8 +1083,41 @@ export class RefyntraEngine implements EngineClient {
   private async prepareDelegatedRename(adapter: LanguageAdapter, target: DocumentTarget, newName: string, token?: CancellationToken): Promise<RenameOutcome> {
     const port = adapter.delegatedRename;
     if (!port) return { kind: 'unavailable', reasonCode: 'RenameNotSupported', message: `${adapter.descriptor.displayName}: rename is not provided by Refyntra.`, recoveryActions: [nativeRenameRecovery(target.uri, target.position)] };
+    return this.prepareDelegatedWith(adapter, target, (t) => port.prepare({ uri: target.uri, position: target.position, newName }, t), token);
+  }
+
+  // ---------------------------------------------------------------- refactorings of delegated routes (protocol-free)
+
+  /** Refactoring code actions the language server of a delegated route (Python, Rust, TS/JS…) offers for a range. */
+  async listDelegatedActions(uri: string, range: Range, token?: CancellationToken): Promise<DelegatedActionInfo[]> {
+    const adapter = this.o.registry.routeFor(uri, this.o.tracker.get(uri)?.languageId);
+    const port = adapter?.descriptor.ownership === 'delegated' ? adapter.delegatedRename : undefined;
+    if (!port?.listActions) return [];
     try {
-      const prepared = await port.prepare({ uri: target.uri, position: target.position, newName }, token);
+      return (await port.listActions(uri, range, token)).value;
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      return [];
+    }
+  }
+
+  /** One of those actions as a delegated plan: preview, re-asked before apply, never `valid`. */
+  async prepareDelegatedAction(req: DelegatedActionRequest, token?: CancellationToken): Promise<RenameOutcome> {
+    const adapter = this.o.registry.routeFor(req.uri, this.o.tracker.get(req.uri)?.languageId);
+    const port = adapter?.descriptor.ownership === 'delegated' ? adapter.delegatedRename : undefined;
+    if (!adapter || !port?.prepareAction) return { kind: 'unavailable', reasonCode: 'NotSupported', message: 'Refactorings of this language server are not provided by Refyntra here.', recoveryActions: [] };
+    const prepareAction = port.prepareAction.bind(port);
+    return this.prepareDelegatedWith(adapter, { uri: req.uri, position: req.range.start }, (t) => prepareAction(req, t), token);
+  }
+
+  private async prepareDelegatedWith(
+    adapter: LanguageAdapter,
+    target: DocumentTarget,
+    call: (token?: CancellationToken) => Promise<RouteResult<DelegatedPrepareResult>>,
+    token?: CancellationToken,
+  ): Promise<RenameOutcome> {
+    try {
+      const prepared = await call(token);
       throwIfCancelled(token);
       const result = prepared.value;
       if (result.kind !== 'prepared') {
@@ -1089,7 +1126,7 @@ export class RefyntraEngine implements EngineClient {
       const plan = result.plan;
       // Prepared on a state that is already gone (an edit or a route restart during preparation): refuse at once.
       if (adapter.currentEpoch() !== prepared.sessionEpoch || plan.bridgeEpoch !== prepared.sessionEpoch || this.o.tracker.revision !== prepared.workspaceRevision) {
-        return { kind: 'unavailable', reasonCode: 'DocumentChanged', message: 'The code changed while the rename was being prepared. Run Rename again.', recoveryActions: [] };
+        return { kind: 'unavailable', reasonCode: 'DocumentChanged', message: 'The code changed while the change was being prepared. Run it again.', recoveryActions: [] };
       }
       const issues = validatePlanStructure(plan);
       if (plan.providerRouteId !== adapter.descriptor.providerRouteId) issues.push({ code: 'wrong-kind', message: 'The plan belongs to a different route' });

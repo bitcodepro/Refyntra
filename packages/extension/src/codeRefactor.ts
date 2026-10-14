@@ -242,6 +242,11 @@ async function buildPreview(preview: RenamePreview): Promise<StoredPreview> {
 }
 
 /** Shared flow of the code refactorings: prepare, preview, confirm, apply, report. */
+/** A refactoring of the language server of a Python/Rust route, through the delegated plan pipeline. */
+export async function runDelegatedAction(engine: EngineClient, previews: PreviewContentProvider, applier: VsCodeEditApplier, req: { uri: string; range: Range; kind: string; title: string }): Promise<void> {
+  await runCodePlan(engine, previews, applier, req.title, (token) => engine.prepareDelegatedAction(req, token), () => runDelegatedAction(engine, previews, applier, req));
+}
+
 export async function runCodePlan(
   engine: EngineClient,
   previews: PreviewContentProvider,

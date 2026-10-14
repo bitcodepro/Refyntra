@@ -164,3 +164,12 @@ export function parseCodeActionTarget(arg: unknown): CodeActionTarget | undefine
   const range = r && isPos(r.start) && isPos(r.end) ? { start: { ...r.start }, end: { ...r.end } } : undefined;
   return { uri: a.uri, position: { line: a.position.line, character: a.position.character }, ...(range ? { range } : {}) };
 }
+
+/** Argument of refyntra.delegatedAction (from a code action): document, range, and the server action's kind and title. */
+export function parseDelegatedActionArg(arg: unknown): { uri: string; range: { start: { line: number; character: number }; end: { line: number; character: number } }; kind: string; title: string } | undefined {
+  if (!arg || typeof arg !== 'object') return undefined;
+  const a = arg as { uri?: unknown; range?: { start?: unknown; end?: unknown }; kind?: unknown; title?: unknown };
+  if (typeof a.uri !== 'string' || !a.uri.startsWith('file:') || typeof a.kind !== 'string' || !a.kind.startsWith('refactor') || typeof a.title !== 'string' || a.title.length === 0) return undefined;
+  if (!a.range || !isPos(a.range.start) || !isPos(a.range.end)) return undefined;
+  return { uri: a.uri, range: { start: { ...a.range.start }, end: { ...a.range.end } }, kind: a.kind, title: a.title };
+}

@@ -1,4 +1,4 @@
-import type { DelegatedProvenance, Evidence, InputFingerprint, PlannedChange, PlannedTextChange, Position, RefactorPlanDto } from '@refyntra/contracts';
+import type { DelegatedProvenance, Evidence, InputFingerprint, PlannedChange, PlannedTextChange, Position, Range, RefactorPlanDto } from '@refyntra/contracts';
 import { comparePositions } from './location';
 
 /**
@@ -24,8 +24,11 @@ export interface DelegatedRefactorPlan {
   semanticReadSet: 'unknown';
   /** Shown in the preview: the semantic coverage is the provider's, not Refyntra's. */
   coverage: 'provider-managed';
-  /** Where the provider was asked (re-asked before apply). */
-  origin: { uri: string; position: Position; newName: string };
+  /**
+   * Where the provider was asked (re-asked before apply). `codeAction`: the plan is a refactoring code action of the
+   * language server (e.g. Extract function), identified by its kind and title at `codeAction.range`; `newName` is unused.
+   */
+  origin: { uri: string; position: Position; newName: string; codeAction?: DelegatedCodeActionRef };
   /** Text only: a delegated plan never carries resource operations. */
   writeSet: PlannedTextChange[];
   evidence: Evidence[];
@@ -46,6 +49,13 @@ export interface DelegatedRefactorPlan {
    * `delegated` (ADR-002 amendment); the versions make the re-ask before apply stricter.
    */
   serverSession?: { server: string; serverVersion?: string; processOwner: 'refyntra'; documentVersions: { uri: string; version: number }[] };
+}
+
+/** A refactoring code action of a delegated route's server, found again by kind and title at the same range. */
+export interface DelegatedCodeActionRef {
+  range: Range;
+  kind: string;
+  title: string;
 }
 
 export type AnyRefactorPlan = RefactorPlanDto | DelegatedRefactorPlan;

@@ -406,3 +406,79 @@ describe('Rust language rules', () => {
     expect(RUST_LSP_LANGUAGE.rules.validateNewName!('r#match', 'x')).toBeUndefined();
   });
 });
+
+describe('refactoring code actions', () => {
+  const range = { start: { line: 1, character: 11 }, end: { line: 1, character: 19 } };
+  // "Extract into variable": `order_id` on line 2 becomes a local.
+  const extractEdit = (s: FakeServer) => ({
+    documentChanges: [
+      {
+        textDocument: { uri: ORDERS, version: s.docs.get(ORDERS)!.version },
+        edits: [
+          { range: { start: { line: 1, character: 4 }, end: { line: 1, character: 4 } }, newText: 'value = order_id\n    ' },
+          { range, newText: 'value' },
+        ],
+      },
+    ],
+  });
+  const withActions = (w: ReturnType<typeof setup>, resolve = false) => {
+    const s = w.servers[0]!;
+    s.serverCapabilities = { ...s.serverCapabilities, codeActionProvider: resolve ? { resolveProvider: true } : true };
+    s.handlers['textDocument/codeAction'] = (p: any, srv) => {
+      expect(p.context.only).toEqual(['refactor']);
+      return [
+        { title: 'Extract into variable', kind: 'refactor.extract', ...(resolve ? { data: 1 } : { edit: extractEdit(srv) }) },
+        { title: 'Run a command', kind: 'refactor.rewrite', command: { title: 'x', command: 'server.cmd' } },
+        { title: 'Disabled', kind: 'refactor.inline', disabled: { reason: 'no' }, edit: extractEdit(srv) },
+        { title: 'Organize imports', kind: 'source.organizeImports', edit: extractEdit(srv) },
+        { title: 'Bare command', command: 'x' },
+      ];
+    };
+    s.handlers['codeAction/resolve'] = (a: any, srv) => ({ ...a, edit: extractEdit(srv) });
+  };
+
+  it('lists only edit-based refactor actions; prepare builds a limited delegated plan; revalidate re-asks and compares', async () => {
+    const w = setup();
+    w.open(ORDERS);
+    await w.adapter.delegatedRename.listActions!(ORDERS, range); // starts the server
+    withActions(w);
+    const list = await w.adapter.delegatedRename.listActions!(ORDERS, range);
+    expect(list.value).toEqual([{ title: 'Extract into variable', kind: 'refactor.extract' }]);
+    const r = await w.adapter.delegatedRename.prepareAction!({ uri: ORDERS, range, kind: 'refactor.extract', title: 'Extract into variable' });
+    if (r.value.kind !== 'prepared') throw new Error(JSON.stringify(r.value));
+    const plan = r.value.plan;
+    expect(plan.origin.codeAction).toEqual({ range, kind: 'refactor.extract', title: 'Extract into variable' });
+    expect(plan.title).toBe('Extract into variable');
+    expect(plan.writeSet.map((c) => c.uri)).toEqual([ORDERS]);
+    expect(plan.validation).toMatchObject({ status: 'limited', compilationDelta: 'not-run' });
+    expect((await w.adapter.delegatedRename.revalidate(plan)).status).toBe('limited');
+    expect(plan.validation.returnedEditsMatchedPreview).toBe(true);
+    // The server now returns a different edit for the same action → stale.
+    const s = w.servers[0]!;
+    const h = s.handlers['textDocument/codeAction']!;
+    s.handlers['textDocument/codeAction'] = (p, srv) => (h(p, srv) as any[]).map((a) => (a.edit && a.title === 'Extract into variable' ? { ...a, edit: { changes: { [ORDERS]: [{ range, newText: 'other' }] } } } : a));
+    expect((await w.adapter.delegatedRename.revalidate(plan)).status).toBe('stale');
+    // The action is no longer offered → stale.
+    s.handlers['textDocument/codeAction'] = () => [];
+    expect(await w.adapter.delegatedRename.revalidate(plan)).toMatchObject({ status: 'stale', reasonCode: 'ActionNotOffered' });
+  });
+
+  it('resolves an action without an edit (codeAction/resolve); refuses command actions', async () => {
+    const w = setup();
+    w.open(ORDERS);
+    await w.adapter.delegatedRename.listActions!(ORDERS, range); // starts the server
+    withActions(w, true);
+    const r = await w.adapter.delegatedRename.prepareAction!({ uri: ORDERS, range, kind: 'refactor.extract', title: 'Extract into variable' });
+    expect(r.value.kind).toBe('prepared');
+    expect(w.servers[0]!.requests).toContain('codeAction/resolve');
+    const cmd = await w.adapter.delegatedRename.prepareAction!({ uri: ORDERS, range, kind: 'refactor.rewrite', title: 'Run a command' });
+    expect(cmd.value).toMatchObject({ kind: 'unavailable', reasonCode: 'CommandOnly' });
+  });
+
+  it('no codeActionProvider: nothing is listed', async () => {
+    const w = setup();
+    w.open(ORDERS);
+    await w.adapter.delegatedRename.listActions!(ORDERS, range); // starts the server
+    expect((await w.adapter.delegatedRename.listActions!(ORDERS, range)).value).toEqual([]);
+  });
+});

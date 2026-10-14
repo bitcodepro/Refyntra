@@ -36,7 +36,7 @@ import { RelatedViewProvider, runRelatedGroupPick } from './related';
 import { PREVIEW_SCHEME, PreviewContentProvider, runNativeRename, runRename } from './rename';
 import { runCreateAction, undoCreate } from './createFile';
 import { runCleanup, undoCleanup } from './cleanup';
-import { runChangeSignature, runExtractMethod, runIntroduceParameter, runSafeDelete, undoCode } from './codeRefactor';
+import { runChangeSignature, runDelegatedAction, runExtractMethod, runIntroduceParameter, runSafeDelete, undoCode } from './codeRefactor';
 import { CSHARP_GENERATE_HANDLER_ACTION, CSHARP_MOVE_TYPE_ACTION } from '@refyntra/contracts';
 import { runRestore } from './restore';
 import { registerCodeActions } from './codeActions';
@@ -51,7 +51,7 @@ import { type RefyntraCodeLensProvider, registerCodeLens } from './codeLens';
 import { registerHierarchy } from './hierarchy';
 import { registerMediatRHover } from './hover';
 import { ChangeSignatureDialog } from './changeSignaturePanel';
-import { parseCodeActionTarget } from './codeActionsModel';
+import { parseCodeActionTarget, parseDelegatedActionArg } from './codeActionsModel';
 import { SolutionService } from './solution';
 import { STACK_TRACE_VIEW, StackTraceViewProvider, runOpenStackTrace } from './stackTrace';
 import { type TaskContextViewProvider, registerTaskContext } from './taskContext';
@@ -418,6 +418,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     vscode.commands.registerCommand('refyntra.generateHandler', (arg?: unknown) => runCreateAction(engine, previews, editApplier, CSHARP_GENERATE_HANDLER_ACTION, atTarget(arg))),
     vscode.commands.registerCommand('refyntra.cleanup', (uri?: unknown) => runCleanup(engine, previews, editApplier, uri)),
     vscode.commands.registerCommand('refyntra.safeDelete', (arg?: unknown) => runSafeDelete(engine, previews, editApplier, atTarget(arg))),
+    vscode.commands.registerCommand('refyntra.delegatedAction', (arg?: unknown) => {
+      const r = parseDelegatedActionArg(arg);
+      return r ? runDelegatedAction(engine, previews, editApplier, r) : undefined;
+    }),
     vscode.commands.registerCommand('refyntra.extractMethod', (arg?: unknown) => {
       const t = parseCodeActionTarget(arg);
       return runExtractMethod(engine, previews, editApplier, t?.range ? { uri: t.uri, range: t.range } : undefined);

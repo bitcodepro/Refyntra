@@ -44,6 +44,14 @@ RUN curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
  && bash /tmp/dotnet-install.sh --version 8.0.426 --install-dir /usr/share/dotnet --no-path >/dev/null \
  && bash /tmp/dotnet-install.sh --runtime dotnet --version 9.0.21 --install-dir /usr/share/dotnet --no-path >/dev/null \
  && rm /tmp/dotnet-install.sh && dotnet --list-sdks && dotnet --list-runtimes
+# The Rust toolchain (cargo) so rust-analyzer loads the test crate and Rust features run for real (minimal profile,
+# official rustup installer, pinned toolchain). Only in this test image, never on the host.
+ENV RUSTUP_HOME=/opt/rustup CARGO_HOME=/opt/cargo
+RUN curl -sSf https://sh.rustup.rs -o /tmp/rustup.sh \
+ && sh /tmp/rustup.sh -y --profile minimal --default-toolchain 1.90.0 --no-modify-path >/dev/null \
+ && /opt/cargo/bin/rustup component add rust-src >/dev/null \
+ && rm /tmp/rustup.sh && /opt/cargo/bin/cargo --version
+ENV PATH="${PATH}:/opt/cargo/bin"
 DOCKERFILE
   for a in "$@"; do
     [ "$a" = "--vnc" ] && export REFYNTRA_VNC=1

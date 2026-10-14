@@ -25,6 +25,7 @@ const EXPECTED_COMMANDS = [
   'refyntra.keyboardShortcuts',
   'refyntra.goToMetadata',
   'refyntra.openMetadata',
+  'refyntra.delegatedAction',
   'refyntra.structuralSearch',
 ];
 
@@ -1284,6 +1285,22 @@ scenarios['pyrust-lsp'] = [
       const kw = await a.engine.prepareRename(at, 'match');
       assert.equal(kw.kind, 'unavailable');
       assert.equal(kw.reasonCode, 'InvalidName');
+      // A rust-analyzer refactoring through Refyntra: offered on the selection `get_order(1)`, prepared as a delegated
+      // plan (preview, re-asked before apply), applied as one edit.
+      const sel = { start: { line: 3, character: 4 }, end: { line: 3, character: 16 } };
+      const actions = await waitFor(async () => {
+        const l = await a.engine.listDelegatedActions(doc.uri.toString(), sel);
+        return l.some((x) => /extract into variable/i.test(x.title)) ? l : undefined;
+      }, 'rust-analyzer offers Extract into variable', 60000);
+      const extract = actions.find((x) => /extract into variable/i.test(x.title));
+      assert.match(extract.kind, /^refactor\.extract/);
+      const prep = await a.engine.prepareDelegatedAction({ uri: doc.uri.toString(), range: sel, kind: extract.kind, title: extract.title });
+      assert.equal(prep.kind, 'preview', JSON.stringify(prep));
+      assert.equal(prep.plan.origin.codeAction.title, extract.title);
+      assert.deepEqual(prep.plan.writeSet.map((c) => c.uri.split('/').pop()), ['usage.rs']);
+      const applied = await a.engine.applyRename(prep.planId, undefined, { acceptLimited: true });
+      assert.equal(applied.status, 'applied', applied.message);
+      assert.match(doc.getText(), /let \w+ = get_order\(1\);/);
     },
   ],
 ];
@@ -1393,7 +1410,7 @@ scenarios['ts-delegated'] = [
 
 // ---- accessibility -----------------------------------------------------------------------------------
 // Internal commands: invoked by buttons and tree items, hidden from the Command Palette on purpose.
-const INTERNAL_COMMANDS = ['refyntra.openLocation', 'refyntra.openMetadata', 'refyntra.runRestore', 'refyntra.related.open', 'refyntra.nativeRename', 'refyntra.stackTrace.openFrame', 'refyntra.stackTrace.related', 'refyntra.taskContext.addFindItem', 'refyntra.taskContext.addFromRelated', 'refyntra.codeLens.related', 'refyntra.selectRunTargetById', 'refyntra.pickDotnetProcess', 'refyntra.immediate.clear', 'refyntra.editAction', 'refyntra.usages.open', 'refyntra.usages.activate', 'refyntra.usages.closeSession', 'refyntra.usages.showMore', 'refyntra.tests.run', 'refyntra.tests.debug', 'refyntra.ef.open', 'refyntra.structuralSearch.showMore', 'refyntra.structuralSearch.openMatch', 'refyntra.structuralSearch.replaceMatch', 'refyntra.solution.open', 'refyntra.solution.revealInExplorer', 'refyntra.solution.revealInOS', 'refyntra.solution.copyPath', 'refyntra.projectFile.loadVersions', ...['kind', 'project', 'folder', 'file', 'type', 'member'].flatMap((g) => [`refyntra.usages.group.${g}`, `refyntra.usages.ungroup.${g}`])];
+const INTERNAL_COMMANDS = ['refyntra.openLocation', 'refyntra.openMetadata', 'refyntra.delegatedAction', 'refyntra.runRestore', 'refyntra.related.open', 'refyntra.nativeRename', 'refyntra.stackTrace.openFrame', 'refyntra.stackTrace.related', 'refyntra.taskContext.addFindItem', 'refyntra.taskContext.addFromRelated', 'refyntra.codeLens.related', 'refyntra.selectRunTargetById', 'refyntra.pickDotnetProcess', 'refyntra.immediate.clear', 'refyntra.editAction', 'refyntra.usages.open', 'refyntra.usages.activate', 'refyntra.usages.closeSession', 'refyntra.usages.showMore', 'refyntra.tests.run', 'refyntra.tests.debug', 'refyntra.ef.open', 'refyntra.structuralSearch.showMore', 'refyntra.structuralSearch.openMatch', 'refyntra.structuralSearch.replaceMatch', 'refyntra.solution.open', 'refyntra.solution.revealInExplorer', 'refyntra.solution.revealInOS', 'refyntra.solution.copyPath', 'refyntra.projectFile.loadVersions', ...['kind', 'project', 'folder', 'file', 'type', 'member'].flatMap((g) => [`refyntra.usages.group.${g}`, `refyntra.usages.ungroup.${g}`])];
 
 common.push([
   'keyboard: every user command is in the Command Palette and the status bar menu leads to the main ones',

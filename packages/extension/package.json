@@ -521,6 +521,11 @@
         "category": "Refyntra"
       },
       {
+        "command": "refyntra.delegatedAction",
+        "title": "Run Language Server Refactoring (Preview)",
+        "category": "Refyntra"
+      },
+      {
         "command": "refyntra.recentFiles",
         "title": "Recent Files",
         "category": "Refyntra"
@@ -1199,6 +1204,10 @@
         },
         {
           "command": "refyntra.openMetadata",
+          "when": "false"
+        },
+        {
+          "command": "refyntra.delegatedAction",
           "when": "false"
         },
         {

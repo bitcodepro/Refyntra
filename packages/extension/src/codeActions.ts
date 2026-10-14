@@ -9,6 +9,8 @@ import { unavailableDescription } from './terminology';
 export const CODE_ACTION_SELECTOR: vscode.DocumentSelector = ['csharp', 'typescript', 'typescriptreact', 'javascript', 'javascriptreact', 'python', 'rust'].map((language) => ({ scheme: 'file', language }));
 
 const CACHE_MS = 4000;
+/** Routes whose language server Refyntra runs itself (its refactorings are not VS Code providers). */
+const DELEGATED_ACTION_LANGUAGES = new Set(['python', 'rust']);
 
 /**
  * Refyntra's refactorings in the lightbulb, Ctrl+. and the Refactor… / Source Action… menus. Every action runs the
@@ -27,6 +29,7 @@ export class RefyntraCodeActionProvider implements vscode.CodeActionProvider {
     vscode.CodeActionKind.RefactorRewrite.append('rename'),
     vscode.CodeActionKind.RefactorRewrite.append('generateHandler'),
     vscode.CodeActionKind.Source.append('refyntra').append('cleanup'),
+    vscode.CodeActionKind.Refactor,
   ];
 
   private cache: { key: string; at: number; runnable: string[]; unavailable: { capabilityId: string; reason: string }[] } | undefined;
@@ -69,6 +72,7 @@ export class RefyntraCodeActionProvider implements vscode.CodeActionProvider {
       }
     }
     if (token.isCancellationRequested) return [];
+    if (DELEGATED_ACTION_LANGUAGES.has(document.languageId)) out.push(...(await this.delegatedActions(document, range, only, token)));
     for (const offer of planOffers({ runnable, unavailable, extractable, emptySelection: empty, ...(only ? { only } : {}) })) out.push(this.toAction(offer, document, range));
     if (csharp && only && kindMatches(only, CLEANUP_SPEC.kind) && only.startsWith('source')) {
       const a = new vscode.CodeAction(CLEANUP_SPEC.title, vscode.CodeActionKind.Source.append('refyntra').append('cleanup'));
@@ -76,6 +80,27 @@ export class RefyntraCodeActionProvider implements vscode.CodeActionProvider {
       out.push(a);
     }
     return out;
+  }
+
+  /**
+   * Python and Rust: their language servers run inside Refyntra (not as VS Code providers), so their refactorings
+   * would be invisible; they are offered here and run through the delegated plan (preview, re-asked before apply).
+   */
+  private async delegatedActions(document: vscode.TextDocument, range: vscode.Range, only: string | undefined, token: vscode.CancellationToken): Promise<vscode.CodeAction[]> {
+    const r = { start: toPosition(range.start), end: toPosition(range.end) };
+    let list: { title: string; kind: string }[];
+    try {
+      list = await this.engine.listDelegatedActions(document.uri.toString(), r, token);
+    } catch {
+      return [];
+    }
+    return list
+      .filter((a) => kindMatches(only, a.kind))
+      .map((a) => {
+        const action = new vscode.CodeAction(`${a.title} (Refyntra, preview first)`, vscode.CodeActionKind.Empty.append(a.kind));
+        action.command = { command: 'refyntra.delegatedAction', title: a.title, arguments: [{ uri: document.uri.toString(), range: r, kind: a.kind, title: a.title }] };
+        return action;
+      });
   }
 
   private toAction(offer: Offer, document: vscode.TextDocument, range: vscode.Range): vscode.CodeAction {

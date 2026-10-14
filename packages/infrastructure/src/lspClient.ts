@@ -66,6 +66,16 @@ export const CLIENT_CAPABILITIES = {
     implementation: { linkSupport: true },
     references: {},
     rename: { prepareSupport: true, honorsChangeAnnotations: false },
+    // Refactorings: CodeAction literals with kinds (a server without this answers bare Commands, which Refyntra
+    // cannot preview), resolved lazily through codeAction/resolve. No snippet edits are advertised.
+    codeAction: {
+      dynamicRegistration: false,
+      codeActionLiteralSupport: { codeActionKind: { valueSet: ['', 'quickfix', 'refactor', 'refactor.extract', 'refactor.inline', 'refactor.rewrite', 'source', 'source.organizeImports'] } },
+      isPreferredSupport: true,
+      disabledSupport: true,
+      dataSupport: true,
+      resolveSupport: { properties: ['edit'] },
+    },
     publishDiagnostics: { relatedInformation: false },
   },
   window: { workDoneProgress: true },

@@ -1,6 +1,7 @@
 import type {
   Availability,
   Position,
+  Range,
   PrepareResult,
   RefactorPlanDto,
   RelatedResult,
@@ -113,6 +114,22 @@ export interface DelegatedRenamePort {
    * preview and every observed fingerprint is unchanged; `stale` otherwise. Never `valid`.
    */
   revalidate(plan: DelegatedRefactorPlan, token?: CancellationToken): Promise<RevalidateResult>;
+  /** Refactoring code actions the route's server offers for a range (kind `refactor.*`); only edit-based ones. */
+  listActions?(uri: string, range: Range, token?: CancellationToken): Promise<RouteResult<DelegatedActionInfo[]>>;
+  /** Like `prepare`, for one of the listed actions: the server's edit as a delegated plan (never `valid`). */
+  prepareAction?(req: DelegatedActionRequest, token?: CancellationToken): Promise<RouteResult<DelegatedPrepareResult>>;
+}
+
+export interface DelegatedActionInfo {
+  title: string;
+  kind: string;
+}
+
+export interface DelegatedActionRequest {
+  uri: string;
+  range: Range;
+  kind: string;
+  title: string;
 }
 
 /** Port for one language owner. One instance per route. */

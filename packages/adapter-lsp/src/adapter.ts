@@ -6,6 +6,7 @@ import type {
   PlannedTextChange,
   Position,
   PrepareResult,
+  Range,
   RecoveryAction,
   RefactorPlanDto,
   Relation,
@@ -21,6 +22,8 @@ import {
   type CancellationToken,
   type CapabilityTarget,
   type Clock,
+  type DelegatedActionInfo,
+  type DelegatedActionRequest,
   type DelegatedPrepareResult,
   type DelegatedRenamePort,
   type DelegatedRenameRequest,
@@ -103,6 +106,15 @@ interface Session {
   closedByUs: boolean;
 }
 
+interface LspCodeAction {
+  title: string;
+  kind?: string;
+  edit?: unknown;
+  command?: unknown;
+  disabled?: { reason: string };
+  data?: unknown;
+}
+
 type RenameObservation =
   | { kind: 'ok'; oldName: string; changes: PlannedTextChange[]; inputs: InputFingerprint[]; versions: { uri: string; version: number }[] }
   | { kind: 'unavailable'; reasonCode: string; message: string; nativeFallback: boolean };
@@ -151,6 +163,8 @@ export class LspLanguageAdapter implements LanguageAdapter {
   readonly delegatedRename: DelegatedRenamePort = {
     prepare: (req, token) => this.prepareDelegated(req, token),
     revalidate: (plan, token) => this.revalidateDelegated(plan, token),
+    listActions: (uri, range, token) => this.listDelegatedActions(uri, range, token),
+    prepareAction: (req, token) => this.prepareDelegatedAction(req, token),
   };
   /** Number of sessions started (tests: Restricted Mode never starts one). */
   sessionsStarted = 0;
@@ -665,13 +679,33 @@ export class LspLanguageAdapter implements LanguageAdapter {
     const edit = await this.tryReq(b, 'textDocument/rename', { ...pos, newName: req.newName }, token);
     if (!edit.ok) return unavailableObs('NotRenameable', `${S} cannot rename here: ${edit.error}`);
     if (edit.value === null || edit.value === undefined) return unavailableObs('ProviderEmpty', `${S} returned no rename edit.`);
-    const read = readLspWorkspaceEdit(edit.value);
+    return this.observeEdit(req.uri, source, sourceHash, edit.value, oldName, b, token);
+  }
+
+  /**
+   * Shared by rename and refactoring code actions: the server's WorkspaceEdit becomes planned text changes on the exact
+   * texts Refyntra sent (open documents) or read (closed ones). `oldName`: rename only — closed-file edits must replace it.
+   */
+  private async observeEdit(
+    sourceUri: string,
+    source: { ok: true; text: string; open: boolean },
+    sourceHash: string,
+    editValue: unknown,
+    oldName: string | undefined,
+    b: Observation,
+    token?: CancellationToken,
+  ): Promise<RenameObservation> {
+    const hash = this.o.hash;
+    const L = this.language;
+    const S = L.serverName;
+    const req = { uri: sourceUri };
+    const read = readLspWorkspaceEdit(editValue);
     if (!read.ok) return unavailableObs(read.reasonCode, read.message, true);
     if (read.changes.length === 0) return unavailableObs('ProviderEmpty', `${S} returned no changes.`);
     const changes: PlannedTextChange[] = [];
     const inputs = new Map<string, string>([[req.uri, sourceHash]]);
     const versions: { uri: string; version: number }[] = [];
-    const bareOld = oldName.replace(/^r#/, '');
+    const bareOld = oldName?.replace(/^r#/, '');
     const merged = new Map<string, (typeof read.changes)[number]>();
     for (const c of read.changes) {
       const u = this.uri(c.uri);
@@ -689,7 +723,7 @@ export class LspLanguageAdapter implements LanguageAdapter {
       const sent = b.session.open.get(change.uri);
       if (sent) {
         // An open document: the server must have edited exactly the text Refyntra sent it, at the version it sent.
-        if (sent.text !== doc.text) return unavailableObs('DocumentChanged', `${name} changed while ${S} computed the rename. Run Rename again.`);
+        if (sent.text !== doc.text) return unavailableObs('DocumentChanged', `${name} changed while ${S} computed the edit. Run it again.`);
         if (typeof change.version === 'number' && change.version !== sent.version) return unavailableObs('DocumentChanged', `${S} computed the edit of ${name} on version ${change.version}, but Refyntra sent version ${sent.version}. Run Rename again.`);
         versions.push({ uri: change.uri, version: sent.version });
       } else if (hasMixedLineEndings(doc.text)) {
@@ -697,7 +731,7 @@ export class LspLanguageAdapter implements LanguageAdapter {
       }
       const edits = sortEdits(change.edits);
       if (hasOverlap(edits)) return unavailableObs('OverlappingEdits', `The ${S} edit for ${name} has overlapping changes.`, true);
-      if (!sent) {
+      if (!sent && bareOld !== undefined) {
         // A closed file is read by the server from disk; its edits must replace the old name in the text we read.
         for (const e of edits) {
           const old = textInRange(doc.text, e.range.start, e.range.end);
@@ -706,7 +740,7 @@ export class LspLanguageAdapter implements LanguageAdapter {
           }
         }
       }
-      const refused = L.rules.editRefusal?.(doc.text, edits, oldName);
+      const refused = oldName === undefined ? undefined : L.rules.editRefusal?.(doc.text, edits, oldName);
       if (refused) return unavailableObs(refused.reasonCode, `${name}: ${refused.message}`, true);
       let resultText: string;
       try {
@@ -721,11 +755,11 @@ export class LspLanguageAdapter implements LanguageAdapter {
     const again = await this.o.documents.read(req.uri);
     throwIfCancelled(token);
     if (!again.ok || hash(again.text) !== sourceHash || this.o.tracker.revision !== b.revision || this.session?.epoch !== b.epoch) {
-      return unavailableObs('DocumentChanged', 'A document was edited while the rename was being prepared. Run Rename again.');
+      return unavailableObs('DocumentChanged', 'A document was edited while the change was being prepared. Run it again.');
     }
     return {
       kind: 'ok',
-      oldName,
+      oldName: oldName ?? '',
       changes,
       inputs: [...inputs.entries()].map(([input, h]) => ({ input, hash: h })).sort((x, y) => cmpStr(x.input, y.input)),
       versions: versions.sort((x, y) => cmpStr(x.uri, y.uri)),
@@ -763,13 +797,102 @@ export class LspLanguageAdapter implements LanguageAdapter {
     return this.result(b, { kind: 'prepared', plan });
   }
 
+  // ---------------------------------------------------------------- refactoring code actions
+
+  /** textDocument/codeAction limited to `refactor` kinds; disabled actions and bare commands are left out. */
+  private async requestRefactorActions(b: Observation, uri: string, range: Range, token?: CancellationToken): Promise<{ ok: true; actions: LspCodeAction[] } | { ok: false; error: string }> {
+    if (!b.session.conn.serverCapabilities.codeActionProvider) return { ok: true, actions: [] };
+    const res = await this.tryReq(b, 'textDocument/codeAction', { textDocument: { uri }, range, context: { diagnostics: [], only: ['refactor'], triggerKind: 1 } }, token);
+    if (!res.ok) return { ok: false, error: res.error };
+    const list = Array.isArray(res.value) ? (res.value as unknown[]) : [];
+    const actions: LspCodeAction[] = [];
+    for (const a of list) {
+      if (!a || typeof a !== 'object' || typeof (a as LspCodeAction).title !== 'string') continue;
+      const action = a as LspCodeAction;
+      if (typeof action.kind !== 'string' || !action.kind.startsWith('refactor')) continue;
+      if (action.disabled) continue;
+      actions.push(action);
+    }
+    return { ok: true, actions };
+  }
+
+  private canResolveCodeActions(b: Observation): boolean {
+    const p = b.session.conn.serverCapabilities.codeActionProvider as { resolveProvider?: unknown } | boolean | undefined;
+    return typeof p === 'object' && p !== null && p.resolveProvider === true;
+  }
+
+  private async listDelegatedActions(uri: string, range: Range, token?: CancellationToken): Promise<RouteResult<DelegatedActionInfo[]>> {
+    const b = await this.begin(token);
+    const res = await this.requestRefactorActions(b, uri, range, token);
+    if (!res.ok) return this.result(b, []);
+    const resolvable = this.canResolveCodeActions(b);
+    return this.result(
+      b,
+      res.actions.filter((a) => (a.edit && !a.command) || (!a.edit && !a.command && resolvable)).map((a) => ({ title: a.title, kind: a.kind as string })),
+    );
+  }
+
+  /** The action with this kind and title, asked again at the same range, with its edit resolved. */
+  private async observeAction(req: DelegatedActionRequest, b: Observation, token?: CancellationToken): Promise<RenameObservation> {
+    const S = this.language.serverName;
+    const source = await this.o.documents.read(req.uri);
+    if (!source.ok) return unavailableObs('DocumentUnavailable', `${basename(req.uri)} cannot be read.`);
+    const sourceHash = this.o.hash(source.text);
+    const res = await this.requestRefactorActions(b, req.uri, req.range, token);
+    if (!res.ok) return unavailableObs('ProviderError', `${S} failed to list refactorings: ${res.error}`);
+    let action = res.actions.find((a) => a.kind === req.kind && a.title === req.title);
+    if (!action) return unavailableObs('ActionNotOffered', `${S} no longer offers "${req.title}" here.`);
+    if (!action.edit) {
+      if (action.command || !this.canResolveCodeActions(b)) return unavailableObs('CommandOnly', `"${req.title}" runs a ${S} command that Refyntra cannot preview.`, true);
+      const resolved = await this.tryReq(b, 'codeAction/resolve', action, token);
+      if (!resolved.ok) return unavailableObs('ProviderError', `${S} could not resolve "${req.title}": ${resolved.error}`);
+      action = resolved.value as LspCodeAction;
+      if (!action?.edit) return unavailableObs('CommandOnly', `"${req.title}" has no edit Refyntra can preview.`, true);
+    }
+    if (action.command) return unavailableObs('CommandOnly', `"${req.title}" also runs a ${S} command after its edit; Refyntra cannot preview that.`, true);
+    return this.observeEdit(req.uri, source, sourceHash, action.edit, undefined, b, token);
+  }
+
+  private async prepareDelegatedAction(req: DelegatedActionRequest, token?: CancellationToken): Promise<RouteResult<DelegatedPrepareResult>> {
+    const b = await this.begin(token);
+    const obs = await this.observeAction(req, b, token);
+    if (obs.kind === 'unavailable') return this.result(b, obs);
+    this.planCounter += 1;
+    const info = b.session.conn.serverInfo;
+    const S = this.language.serverName;
+    const plan: DelegatedRefactorPlan = {
+      planId: `${b.epoch}-plan-${this.planCounter}`,
+      actionId: `${this.language.capabilityPrefix}.codeAction`,
+      providerRouteId: this.descriptor.providerRouteId,
+      workspaceId: this.o.workspaceId,
+      kind: 'delegated',
+      bridgeEpoch: b.epoch,
+      observationId: b.observationId,
+      observedWorkspaceRevision: b.revision,
+      observedInputs: obs.inputs,
+      backendContext: 'unknown',
+      backendSnapshot: 'unknown',
+      semanticReadSet: 'unknown',
+      coverage: 'provider-managed',
+      origin: { uri: req.uri, position: { line: req.range.start.line, character: req.range.start.character }, newName: '', codeAction: { range: req.range, kind: req.kind, title: req.title } },
+      writeSet: obs.changes,
+      evidence: [{ description: `Edit of the ${S} refactoring "${req.title}" (${req.kind}) for ${basename(req.uri)}:${req.range.start.line + 1}, computed on the document versions Refyntra sent` }],
+      limitations: [`The change is computed by ${S}; Refyntra checks that it applies to the exact texts it was computed on and asks ${S} again before applying, but does not check the result itself.`],
+      validation: { status: 'limited', compilationDelta: 'not-run', providerReprepared: false, returnedEditsMatchedPreview: false },
+      title: req.title,
+      serverSession: { server: S, ...(info?.version ? { serverVersion: info.version } : {}), processOwner: 'refyntra', documentVersions: obs.versions },
+    };
+    return this.result(b, { kind: 'prepared', plan });
+  }
+
   /** Before apply: the same server session is asked again on the same document versions; only an identical edit passes. */
   private async revalidateDelegated(plan: DelegatedRefactorPlan, token?: CancellationToken): Promise<RevalidateResult> {
     if (!this.session || plan.bridgeEpoch !== this.session.epoch || plan.providerRouteId !== this.descriptor.providerRouteId) {
       return { status: 'stale', reasonCode: 'RouteChanged', message: `${this.language.serverName} was restarted since the preview` };
     }
     const b = await this.begin(token);
-    const obs = await this.observeRename(plan.origin, b, token);
+    const ca = plan.origin.codeAction;
+    const obs = ca ? await this.observeAction({ uri: plan.origin.uri, range: ca.range, kind: ca.kind, title: ca.title }, b, token) : await this.observeRename(plan.origin, b, token);
     plan.validation.providerReprepared = true;
     if (obs.kind === 'unavailable') return { status: 'stale', reasonCode: obs.reasonCode, message: obs.message };
     const norm = (changes: readonly PlannedTextChange[]) =>
