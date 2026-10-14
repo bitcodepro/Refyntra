@@ -81,8 +81,10 @@ for (const theme of themes) {
     results.push({ theme, scenario, status: ratio <= MAX_DIFF_RATIO ? 'pass' : 'fail', pixels, ratio, actualPath, baselinePath, diffPath });
   }
 }
-// A baseline without a screenshot is a scenario that did not run.
-if (!update && fs.existsSync(baselineDir)) {
+// A baseline without a screenshot is a scenario that did not run — unless the run was limited with
+// REFYNTRA_VISUAL_ONLY (pnpm test:visual --only=a,b): then only the named cases are expected.
+const onlyCases = (process.env.REFYNTRA_VISUAL_ONLY || '').split(',').filter(Boolean);
+if (!update && onlyCases.length === 0 && fs.existsSync(baselineDir)) {
   for (const theme of fs.readdirSync(baselineDir)) {
     for (const f of fs.readdirSync(path.join(baselineDir, theme)).filter((x) => x.endsWith('.png'))) {
       if (!results.some((r) => r.theme === theme && r.scenario === f.replace(/\.png$/, ''))) results.push({ theme, scenario: f.replace(/\.png$/, ''), status: 'no screenshot', baselinePath: path.join(baselineDir, theme, f) });

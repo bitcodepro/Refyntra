@@ -1605,12 +1605,18 @@ scenarios.shop.push(...require('./solution.cjs').shop({ api, csharp, waitFor }))
 
 scenarios['visual-dark'] = require('./visual.cjs').cases({ api, csharp, waitFor });
 scenarios['visual-light'] = require('./visual.cjs').cases({ api, csharp, waitFor });
-scenarios['visual-tests-dark'] = require('./visualTests.cjs').cases({ api, csharp, waitFor });
-scenarios['visual-tests-light'] = require('./visualTests.cjs').cases({ api, csharp, waitFor });
-scenarios['visual-ef-dark'] = require('./visualEf.cjs').cases({ api, csharp, waitFor });
-scenarios['visual-ef-light'] = require('./visualEf.cjs').cases({ api, csharp, waitFor });
-scenarios['visual-solution-dark'] = require('./visualSolution.cjs').cases({ api, csharp, waitFor });
-scenarios['visual-solution-light'] = require('./visualSolution.cjs').cases({ api, csharp, waitFor });
+// REFYNTRA_VISUAL_ONLY (pnpm test:visual --only=a,b) also applies to these extra suites: the first case (window setup)
+// always runs, the screenshot cases only when named.
+const visualOnly = (cases) => {
+  const only = (process.env.REFYNTRA_VISUAL_ONLY || '').split(',').filter(Boolean);
+  return only.length ? cases.filter(([title], i) => i === 0 || only.some((o) => title.startsWith(`visual: ${o} `))) : cases;
+};
+scenarios['visual-tests-dark'] = visualOnly(require('./visualTests.cjs').cases({ api, csharp, waitFor }));
+scenarios['visual-tests-light'] = visualOnly(require('./visualTests.cjs').cases({ api, csharp, waitFor }));
+scenarios['visual-ef-dark'] = visualOnly(require('./visualEf.cjs').cases({ api, csharp, waitFor }));
+scenarios['visual-ef-light'] = visualOnly(require('./visualEf.cjs').cases({ api, csharp, waitFor }));
+scenarios['visual-solution-dark'] = visualOnly(require('./visualSolution.cjs').cases({ api, csharp, waitFor }));
+scenarios['visual-solution-light'] = visualOnly(require('./visualSolution.cjs').cases({ api, csharp, waitFor }));
 
 exports.run =async function run() {
   const name = process.env.REFYNTRA_TEST_SCENARIO;
