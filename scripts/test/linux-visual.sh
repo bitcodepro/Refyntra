@@ -19,6 +19,7 @@ if [ "${1:-}" != "--inside" ]; then
   for a in "$@"; do
     [ "$a" = "--update" ] && update=1
     [ "$a" = "--vnc" ] && export REFYNTRA_VNC=1
+    case "$a" in --only=*) export REFYNTRA_VISUAL_ONLY="${a#--only=}" ;; esac
   done
   mapfile -t vnc_args < <(vnc_docker_args)
   vnc_note
@@ -33,6 +34,7 @@ if [ "${1:-}" != "--inside" ]; then
     -v "$repo:/src:ro" -v "$repo/test-results/visual:/out" -v "$repo/tests/visual/baselines:/baselines:$baselines_mode" \
     -v "${REFYNTRA_DOCKER_VOLUME_PREFIX:-refyntra}-vscode-test:/cache/vscode-test" -v "${REFYNTRA_DOCKER_VOLUME_PREFIX:-refyntra}-nuget:/root/.nuget/packages" \
     -e DOTNET_CLI_TELEMETRY_OPTOUT=1 -e DOTNET_NOLOGO=1 -e REFYNTRA_TEST_VSCODE_VERSION="${REFYNTRA_TEST_VSCODE_VERSION:-1.90.2}" \
+    -v "${REFYNTRA_DOCKER_VOLUME_PREFIX:-refyntra}-pnpm-store:/cache/pnpm-store" -e REFYNTRA_VISUAL_ONLY="${REFYNTRA_VISUAL_ONLY:-}" \
     -e REFYNTRA_VISUAL_UPDATE=$update -e TZ=UTC -e LANG=C.UTF-8 \
     "${REFYNTRA_E2E_IMAGE:-refyntra-linux-e2e}" bash /src/scripts/test/linux-visual.sh --inside
   exit $?
@@ -48,6 +50,8 @@ corepack enable
 corepack prepare "$(node -p "require('./package.json').packageManager")" --activate
 export REFYNTRA_HOST_PATH=/work/src/dotnet/Refyntra.Host/bin/Release/net10.0/Refyntra.Host.dll
 
+[ -d /cache/pnpm-store ] && pnpm config set store-dir /cache/pnpm-store >/dev/null
+[ -n "${REFYNTRA_VISUAL_ONLY:-}" ] && echo "Only these visual cases: $REFYNTRA_VISUAL_ONLY"
 step "build"
 pnpm install --frozen-lockfile || exit 1
 pnpm -r run build || exit 1

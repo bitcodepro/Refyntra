@@ -45,12 +45,18 @@ RUN curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
  && bash /tmp/dotnet-install.sh --runtime dotnet --version 9.0.21 --install-dir /usr/share/dotnet --no-path >/dev/null \
  && rm /tmp/dotnet-install.sh && dotnet --list-sdks && dotnet --list-runtimes
 DOCKERFILE
-  [ "${1:-}" = "--vnc" ] && export REFYNTRA_VNC=1
+  for a in "$@"; do
+    [ "$a" = "--vnc" ] && export REFYNTRA_VNC=1
+    [ "$a" = "--quick" ] && export REFYNTRA_E2E_QUICK=1
+    case "$a" in --only=*) export REFYNTRA_E2E_ONLY="${a#--only=}" ;; esac
+  done
   mapfile -t vnc_args < <(vnc_docker_args)
   vnc_note
   # --init: a real init reaps orphans (see linux.sh).
   exec docker run --rm --init ${vnc_args[@]+"${vnc_args[@]}"} -v "$repo:/src:ro" -v "${REFYNTRA_DOCKER_VOLUME_PREFIX:-refyntra}-vscode-test:/cache/vscode-test" -v "${REFYNTRA_DOCKER_VOLUME_PREFIX:-refyntra}-nuget:/root/.nuget/packages" \
+    -v "${REFYNTRA_DOCKER_VOLUME_PREFIX:-refyntra}-pnpm-store:/cache/pnpm-store" \
     -e DOTNET_CLI_TELEMETRY_OPTOUT=1 -e DOTNET_NOLOGO=1 -e REFYNTRA_TEST_VSCODE_VERSION="${REFYNTRA_TEST_VSCODE_VERSION:-1.90.2}" \
+    -e REFYNTRA_E2E_QUICK="${REFYNTRA_E2E_QUICK:-0}" -e REFYNTRA_TEST_ONLY="${REFYNTRA_E2E_ONLY:-}" \
     "${REFYNTRA_E2E_IMAGE:-refyntra-linux-e2e}-sdks" bash /src/scripts/test/linux-e2e.sh --inside
 fi
 
@@ -67,6 +73,10 @@ cd /work
 corepack enable
 corepack prepare "$(node -p "require('./package.json').packageManager")" --activate
 export REFYNTRA_HOST_PATH=/work/src/dotnet/Refyntra.Host/bin/Release/net10.0/Refyntra.Host.dll
+# The pnpm store lives in a cache volume, so packages are downloaded once, not on every run.
+[ -d /cache/pnpm-store ] && pnpm config set store-dir /cache/pnpm-store >/dev/null
+quick=${REFYNTRA_E2E_QUICK:-0}
+[ "$quick" = 1 ] && echo "QUICK mode: unit/architecture/dotnet test/package/install are skipped (run them on Windows); scenarios: ${REFYNTRA_TEST_ONLY:-all}"
 
 declare -a ORDER
 declare -A RESULT
@@ -79,19 +89,27 @@ run() { # run <label> <command...>: record the outcome, keep going
 orphans() { ! pgrep -fa 'Refyntra\.Host|Workspaces\.MSBuild\.BuildHost|refyntra-watchdog|netcoredbg|debugpy|ConsoleApp\.dll|WebApp\.dll' | grep -v pgrep; }
 run "pnpm install --frozen-lockfile" pnpm install --frozen-lockfile
 run "pnpm -r run build"              pnpm -r run build
-run "pnpm test:unit"                 pnpm test:unit
-run "pnpm test:architecture"         pnpm test:architecture
+if [ "$quick" != 1 ]; then
+  run "pnpm test:unit"                 pnpm test:unit
+  run "pnpm test:architecture"         pnpm test:architecture
+fi
 run "dotnet build (Release)"         dotnet build src/dotnet/Refyntra.sln -c Release
-run "dotnet test (Release)"          dotnet test src/dotnet/Refyntra.sln -c Release --no-build --blame-hang-timeout 600s --blame-hang-dump-type none
+# In quick mode nothing else restores the fixture solutions (dotnet test does it in a full run): restore them here.
+# Some fixtures are broken or Windows-only on purpose, so a failing restore is only reported, never fatal.
+restore_fixtures() { for s in tests/fixtures/*/*.sln; do dotnet restore "$s" -v q >/dev/null 2>&1 || echo "restore not complete (expected for some fixtures): $s"; done; return 0; }
+[ "$quick" = 1 ] && run "restore fixtures" restore_fixtures
+[ "$quick" != 1 ] && run "dotnet test (Release)" dotnet test src/dotnet/Refyntra.sln -c Release --no-build --blame-hang-timeout 600s --blame-hang-dump-type none
 # The bundled debug adapters for this platform (netcoredbg linux-x64, debugpy): official release URLs, SHA-256 pinned.
 run "stage debug adapters"           node scripts/package/servers.mjs --debuggers
 display_start
 run "xvfb-run pnpm test:integration" xrun -- pnpm test:integration
 run "xvfb-run pnpm test:e2e"         xrun -- pnpm test:e2e
 run "no host/BuildHost left (e2e)"   orphans
-run "pnpm package:vsix"              pnpm package:vsix
-run "xvfb-run pnpm test:install"     xrun -- pnpm test:install
-run "no host/BuildHost left (end)"   orphans
+if [ "$quick" != 1 ]; then
+  run "pnpm package:vsix"              pnpm package:vsix
+  run "xvfb-run pnpm test:install"     xrun -- pnpm test:install
+  run "no host/BuildHost left (end)"   orphans
+fi
 
 step "summary"
 rc=0
