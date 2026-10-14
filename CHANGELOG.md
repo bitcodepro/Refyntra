@@ -4,6 +4,28 @@ All notable changes are listed here. The project is alpha; nothing has been rele
 
 ## Unreleased
 
+### Added (target framework compatibility)
+
+- Verified target frameworks (docs/support/matrix.md, "Target frameworks and SDKs"): net8.0, net9.0, net10.0,
+  netstandard2.0/2.1 and multi-targeting load with one project context per framework; Find, Related (MediatR, DI),
+  Rename and inspections work across them; Run, Debug and the test runner on net8.0/net9.0 apps where their runtime is
+  installed. net6.0, net7.0 and .NET Framework are not supported. README requirements updated.
+- A global.json that pins an installed SDK (8.0 or newer) is honoured: the solution is loaded with that SDK's MSBuild,
+  like `dotnet build` (before, the newest installed SDK was always used).
+- Fixtures `Compat` and `CompatPinned`; .NET `CompatTests`, `GlobalJsonTests`, `SdkPickTests`; e2e scenarios `compat`
+  and `compat-sdk-missing`. The Docker e2e image `refyntra-linux-e2e-sdks` adds SDK 8.0.426 and the .NET 9.0.21 runtime.
+
+### Fixed (C# language versions)
+
+- Edit actions offered syntax the project's C# version does not have (then refused it as a compile error): 'using'
+  declarations and switch expressions (C# 8), class → record (C# 9), 'if' → switch with type or 'or' patterns (C# 9)
+  are no longer offered below those versions; Invert 'if' writes `!(x is null)` instead of `x is not null` before C# 9.
+- Postfix `.notnull` writes `if (!(x is null))` before C# 9; `.using` on an IAsyncDisposable only from C# 8.
+- Generate Equals/GetHashCode without System.HashCode (netstandard2.0, .NET Framework) uses a multiply-and-add hash
+  over EqualityComparer<T>.Default instead of failing to compile.
+- Make method async is refused with a reason when a parameter is a ref struct (Span, ReadOnlySpan).
+- Visual test: the dark/light Usages capture waits until the view has its header and first row drawn.
+
 ### Added (go to metadata / decompiled sources)
 
 - **Read-only decompiled sources for .NET libraries** (ADR-010), Rider-style: a symbol without source in the solution

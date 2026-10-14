@@ -59,6 +59,15 @@ public static partial class EditActionsPlanner
         public SyntaxToken Token => Root.FindToken(Math.Min(Span.Start, Math.Max(0, Root.FullSpan.End - 1)));
     }
 
+    /// <summary>
+    /// True when the document's project compiles with at least C# <paramref name="v"/> (its effective LangVersion: C# 7.3
+    /// for netstandard2.0, 8 for netstandard2.1, 12 for net8.0, 13 for net9.0, 14 for net10.0 by default). Actions whose
+    /// result needs a newer C# are not offered.
+    /// </summary>
+    private static bool LangAtLeast(Ctx c, LanguageVersion v) => LangAtLeast(c.Root.SyntaxTree, v);
+
+    internal static bool LangAtLeast(SyntaxTree tree, LanguageVersion v) => tree.Options is not CSharpParseOptions o || o.LanguageVersion >= v;
+
     /// <summary>A candidate: its info, and the rewrite (runs only when the action is computed).</summary>
     private sealed record Candidate(EditActionInfo Info, Func<Task<Document>> Run);
 
@@ -415,7 +424,8 @@ public static partial class EditActionsPlanner
                 if (flipped is { } kk) return SyntaxFactory.BinaryExpression(kk, b.Left.WithoutTrivia(), b.Right.WithoutTrivia());
                 break;
             }
-            case IsPatternExpressionSyntax { Pattern: ConstantPatternSyntax cp } ip:
+            // 'is not' is C# 9; before it the negation stays '!(x is null)'.
+            case IsPatternExpressionSyntax { Pattern: ConstantPatternSyntax cp } ip when LangAtLeast(model.SyntaxTree, LanguageVersion.CSharp9):
                 return ip.WithPattern(SyntaxFactory.UnaryPattern(cp.WithoutTrivia()));
             case IsPatternExpressionSyntax { Pattern: UnaryPatternSyntax { RawKind: (int)SyntaxKind.NotPattern } np } ip2:
                 return ip2.WithPattern(np.Pattern.WithoutTrivia());

@@ -81,7 +81,7 @@ public static class Fixtures
     /// grandchild that inherited the pipes (MSBuild worker nodes, build servers) can keep them open for a long time.
     /// MSBuild node reuse and the MSBuild server are disabled for these tool runs for the same reason.
     /// </summary>
-    public static async Task<(int code, string output)> RunAsync(string exe, string[] args, string cwd, TimeSpan timeout)
+    public static async Task<(int code, string output)> RunAsync(string exe, string[] args, string cwd, TimeSpan timeout, bool outsideTestHost = false)
     {
         var psi = new ProcessStartInfo(exe)
         {
@@ -93,6 +93,9 @@ public static class Fixtures
         foreach (var a in args) psi.ArgumentList.Add(a);
         psi.Environment["MSBUILDDISABLENODEREUSE"] = "1";
         psi.Environment["DOTNET_CLI_USE_MSBUILD_SERVER"] = "0";
+        // The test host runs under SDK 10 and passes its MSBuild location (MSBuildSDKsPath, MSBUILD_EXE_PATH, …) to its
+        // children; a tool that must pick its own SDK (a global.json that pins another one) starts without them, as from a shell.
+        if (outsideTestHost) ScrubTestHostEnvironment(psi.Environment);
         using var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
         // Process exit itself, not end-of-output: WaitForExitAsync would also wait for the pipes to close.
         var exited = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -118,6 +121,15 @@ public static class Fixtures
         await Task.Delay(200);
         string Text(System.Text.StringBuilder sb) { lock (sb) return sb.ToString(); }
         return (p.ExitCode, Text(stdout) + Text(stderr));
+    }
+
+    /// <summary>Removes the SDK/MSBuild location variables the test host's own SDK set (keeps the node-reuse switches).</summary>
+    public static void ScrubTestHostEnvironment(IDictionary<string, string?> env)
+    {
+        foreach (var key in env.Keys.ToList())
+            if (key.Equals("DOTNET_HOST_PATH", StringComparison.OrdinalIgnoreCase)
+                || key.StartsWith("MSBuild", StringComparison.OrdinalIgnoreCase) && !key.Equals("MSBUILDDISABLENODEREUSE", StringComparison.OrdinalIgnoreCase))
+                env.Remove(key);
     }
 
     public static string HostDll()

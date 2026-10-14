@@ -321,6 +321,16 @@ export class UsagesViewProvider implements vscode.TreeDataProvider<Node>, vscode
     await vscode.window.showTextDocument(doc, { preview: false });
   }
 
+  /**
+   * Visual tests: resolves true once the view is visible, has its header text (description) and has drawn its first row
+   * (TreeView.reveal settles after the tree rendered the element), so a capture never shows a half-drawn view.
+   */
+  async renderedFirstRow(): Promise<boolean> {
+    const first = this.getChildren()[0];
+    if (!this.view?.visible || !first || !this.view.description) return false;
+    return this.view.reveal(first, { select: false, focus: false, expand: false }).then(() => true, () => false);
+  }
+
   state(): UsagesViewState {
     const lines: string[] = [];
     const walk = (nodes: Node[], depth: number) => {

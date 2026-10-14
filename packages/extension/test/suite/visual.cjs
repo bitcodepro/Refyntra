@@ -657,6 +657,9 @@ exports.cases = ({ api, csharp, waitFor }) => {
         await vscode.commands.executeCommand('refyntra.relatedView.focus');
         await vscode.commands.executeCommand('workbench.actions.view.toggleCollapse').then(undefined, () => undefined);
         await vscode.commands.executeCommand('refyntra.usagesView.focus');
+        // Deterministic: the header (description) and the first row are drawn before the capture (it once caught the view
+        // without its header row).
+        await waitFor(() => a.usages.renderedFirstRow(), 'the Usages view drawn', 30000);
         await vscode.commands.executeCommand('list.focusFirst');
         await shot('usages', 2500);
         a.usages.clear();

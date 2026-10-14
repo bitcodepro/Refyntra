@@ -28,13 +28,23 @@ DOCKERFILE
   # imagemagick (import -window root), xdotool (keys, window size) and one fixed font family serve linux-visual.sh;
   # x11-utils, x11vnc, novnc and websockify the VNC watch mode (REFYNTRA_VNC=1 or --vnc, scripts/test/lib/display.sh).
   [ "${1:-}" = "--build-image-only" ] && exit 0 # used by linux-visual.sh, which runs on this image
+  # The target-framework matrix (docs/support/matrix.md) runs the Compat fixture's net8.0 and net9.0 apps and loads a
+  # global.json that pins SDK 8: the .NET 8 SDK (with its runtimes) and the .NET 9 runtime, installed next to SDK 10 by
+  # Microsoft's dotnet-install script, versions pinned (GlobalJsonTests.PinnedSdk). Only in this image, never on the host.
+  docker build -q -t refyntra-linux-e2e-sdks - <<'DOCKERFILE' || exit 1
+FROM refyntra-linux-e2e
+RUN curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
+ && bash /tmp/dotnet-install.sh --version 8.0.426 --install-dir /usr/share/dotnet --no-path >/dev/null \
+ && bash /tmp/dotnet-install.sh --runtime dotnet --version 9.0.21 --install-dir /usr/share/dotnet --no-path >/dev/null \
+ && rm /tmp/dotnet-install.sh && dotnet --list-sdks && dotnet --list-runtimes
+DOCKERFILE
   [ "${1:-}" = "--vnc" ] && export REFYNTRA_VNC=1
   mapfile -t vnc_args < <(vnc_docker_args)
   vnc_note
   # --init: a real init reaps orphans (see linux.sh).
   exec docker run --rm --init ${vnc_args[@]+"${vnc_args[@]}"} -v "$repo:/src:ro" -v refyntra-vscode-test:/cache/vscode-test -v refyntra-nuget:/root/.nuget/packages \
     -e DOTNET_CLI_TELEMETRY_OPTOUT=1 -e DOTNET_NOLOGO=1 -e REFYNTRA_TEST_VSCODE_VERSION="${REFYNTRA_TEST_VSCODE_VERSION:-1.90.2}" \
-    refyntra-linux-e2e bash /src/scripts/test/linux-e2e.sh --inside
+    refyntra-linux-e2e-sdks bash /src/scripts/test/linux-e2e.sh --inside
 fi
 
 step() { printf '\n==== %s ====\n' "$*"; }

@@ -36,3 +36,26 @@ public class SdkMessageTests
         Assert.Contains("Install a .NET SDK", recovery);
     }
 }
+
+/// <summary>Which installed SDK's MSBuild loads the solution (MsBuildBootstrap.PickInstance).</summary>
+public class SdkPickTests
+{
+    private static readonly Version[] Installed = { new("8.0.426"), new("10.0.401"), new("9.0.300") };
+
+    [Theory]
+    [InlineData("8.0.426", "8.0.426")] // global.json pins SDK 8: its MSBuild, like `dotnet build`
+    [InlineData("10.0.401", "10.0.401")]
+    [InlineData("9.0.300", "9.0.300")]
+    [InlineData(null, "10.0.401")] // the CLI resolves nothing: the newest
+    [InlineData("7.0.410", "10.0.401")] // not installed (cannot happen) or too old for the .NET 10 host: the newest
+    [InlineData("10.0.401-rc.1", "10.0.401")]
+    public void PicksTheSdkTheCliResolvesWhenSupported(string? resolved, string expected) =>
+        Assert.Equal(new Version(expected), MsBuildBootstrap.PickInstance(Installed, resolved));
+
+    [Fact]
+    public void OldSdksAreNotPickedEvenWhenResolved() =>
+        Assert.Equal(new Version("10.0.401"), MsBuildBootstrap.PickInstance(new[] { new Version("6.0.428"), new Version("10.0.401") }, "6.0.428"));
+
+    [Fact]
+    public void NothingInstalled() => Assert.Null(MsBuildBootstrap.PickInstance(Array.Empty<Version>(), "8.0.426"));
+}

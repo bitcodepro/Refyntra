@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- netstandard2.0 with the default LangVersion (C# 7.3): no nullable, no file-scoped namespaces, no primary constructors. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Test-only fixture dependency (Apache-2.0). Never redistributed. -->
+    <PackageReference Include="MediatR" Version="12.5.0" />
+  </ItemGroup>
+</Project>

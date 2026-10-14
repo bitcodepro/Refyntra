@@ -26,11 +26,13 @@ public static class MsBuildBootstrap
             VisualStudioInstance? instance = null;
             try
             {
-                instance = MSBuildLocator.QueryVisualStudioInstances(new VisualStudioInstanceQueryOptions
+                var instances = MSBuildLocator.QueryVisualStudioInstances(new VisualStudioInstanceQueryOptions
                 {
                     DiscoveryTypes = DiscoveryType.DotNetSdk,
                     WorkingDirectory = workingDirectory,
-                }).OrderByDescending(i => i.Version).FirstOrDefault();
+                }).ToList();
+                instance = PickInstance(instances.Select(i => i.Version), ResolvedSdkVersion(workingDirectory)) is { } v
+                    ? instances.First(i => i.Version == v) : null;
             }
             catch (Exception ex)
             {
@@ -46,6 +48,37 @@ public static class MsBuildBootstrap
             _registered = new SdkInfo(instance.Version?.ToString(), instance.MSBuildPath, globalJson, requested);
             Log.Info("msbuild", $"MSBuild registered: SDK {instance.Version}");
             return _registered;
+        }
+    }
+
+    /// <summary>
+    /// The SDK whose MSBuild loads the solution: the one the dotnet CLI resolves for the folder (global.json and its
+    /// rollForward policy), so Refyntra evaluates the projects like `dotnet build` does, when it is .NET 8 or newer (older
+    /// MSBuild versions are not supported in the .NET 10 host); otherwise the newest installed SDK. Pure, for tests.
+    /// </summary>
+    public static Version? PickInstance(IEnumerable<Version> installed, string? resolved)
+    {
+        var list = installed.ToList();
+        if (resolved != null && Version.TryParse(resolved.Split('-', '+')[0], out var r) && r.Major >= 8 && list.Contains(r)) return r;
+        return list.OrderByDescending(v => v).FirstOrDefault();
+    }
+
+    /// <summary>`dotnet --version` in the folder: the SDK the CLI uses there (null when none matches or dotnet is missing).</summary>
+    private static string? ResolvedSdkVersion(string workingDirectory)
+    {
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("dotnet") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
+            psi.ArgumentList.Add("--version");
+            psi.WorkingDirectory = workingDirectory;
+            using var p = System.Diagnostics.Process.Start(psi)!;
+            var output = p.StandardOutput.ReadToEnd().Trim();
+            p.StandardError.ReadToEnd();
+            return p.WaitForExit(10_000) && p.ExitCode == 0 && output.Length > 0 ? output : null;
+        }
+        catch (Exception)
+        {
+            return null;
         }
     }
 

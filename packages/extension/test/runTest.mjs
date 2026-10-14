@@ -372,6 +372,12 @@ const scenarios = visual
       // Test runner on a temp copy of the TestRunner fixture (xUnit, NUnit, MSTest), every other extension disabled:
       // discovery, run all, one theory case, debug with a breakpoint in the code under test, Rerun Failed, CodeLens.
       { name: 'tests', fixtureCopy: ['TestRunner', 'TestRunner.sln'], trusted: true, env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' } },
+      // Target frameworks on a temp copy of the Compat fixture (net8.0 web API + console, net9.0 console,
+      // netstandard2.0/2.1, net8.0;net10.0, net8.0 xUnit): Related across them, Run (needs the .NET 8 and 9 runtimes:
+      // the Docker e2e image), Debug of the net8.0 console, the test runner. Every other extension disabled.
+      { name: 'compat', fixtureCopy: ['Compat', 'Compat.sln'], trusted: true, env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' } },
+      // A global.json that pins an SDK installed nowhere (8.0.100, rollForward disable): Health and Open global.json.
+      { name: 'compat-sdk-missing', pinnedCopy: '8.0.100', trusted: true, env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' } },
       // Task context on a temp copy of Shop: add, move by an edit, reload, rename through Refyntra, delete.
       {
         name: 'task-context',
@@ -462,6 +468,15 @@ for (const s of scenarios.filter((x) => only.length === 0 || only.includes(x.nam
   } else if (s.fixtureCopy) {
     copy = fixtureCopy(s.name, ...s.fixtureCopy);
     s.workspace = copy.workspace;
+  } else if (s.pinnedCopy) {
+    // tests/fixtures/CompatPinned with another SDK version in its global.json; not restored (the SDK is missing).
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `refyntra-${s.name}-`));
+    for (const f of fs.readdirSync(path.join(repo, 'tests', 'fixtures'))) if (f.startsWith('Directory.')) fs.copyFileSync(path.join(repo, 'tests', 'fixtures', f), path.join(tmp, f));
+    const dest = path.join(tmp, 'CompatPinned');
+    fs.cpSync(path.join(repo, 'tests', 'fixtures', 'CompatPinned'), dest, { recursive: true, filter: (src) => !/[\\/](bin|obj)$/.test(src) });
+    fs.writeFileSync(path.join(dest, 'global.json'), JSON.stringify({ sdk: { version: s.pinnedCopy, rollForward: 'disable' } }, null, 2) + '\n');
+    copy = { workspace: dest, cleanup: () => fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }) };
+    s.workspace = dest;
   } else if (s.tsProject) {
     copy = tsProject(s.name);
     s.workspace = copy.workspace;

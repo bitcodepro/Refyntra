@@ -81,8 +81,38 @@ or debugged. Rust debugging needs an installed `lldb-dap` (not bundled). Verifie
 VS Code 1.90.2, Xvfb): e2e scenario `run-debug` (netcoredbg breakpoint, locals, evaluate, exit code; web app on its
 profile URL; debugpy breakpoint with the system Python 3.12). Debugging on Windows, macOS and arm64 was not run.
 
+## Target frameworks and SDKs
+
+The machine needs the .NET 10 SDK (the C# host runs on .NET 10 and loads projects with MSBuild). The projects it loads
+may target older frameworks: their targeting packs come from NuGet during restore, so **loading and analysing** needs no
+other SDK or runtime. **Running and debugging** an app needs the runtime of its target framework. Verified 2026-10-14
+with the Compat fixture (`tests/fixtures/Compat`: net8.0 web API with MediatR 12.5, DI and EF Core 8.0.8, net8.0 and
+net9.0 consoles, netstandard2.0 and netstandard2.1 libraries referenced from both, a net8.0;net10.0 library, a net8.0
+xUnit project) and `tests/fixtures/CompatPinned` (global.json pinning SDK 8.0.426, rollForward disable):
+
+| Target / case | Default C# | Load, Find, Related (MediatR, DI), Rename, inspections | Edit actions / postfix / Generate fit the C# version | Run | Debug (netcoredbg) | Tests (xUnit) | Where verified |
+|---|---|---|---|---|---|---|---|
+| net10.0 | 14 | yes (all other fixtures) | yes | yes | yes | yes | Windows 11 + Docker (existing suites) |
+| net9.0 | 13 | yes | yes | yes (console) | not run | not run | load: Windows + Docker; run: Docker (.NET 9.0.21 runtime) |
+| net8.0 | 12 | yes | yes | yes (web API, console) | yes (console, breakpoint) | yes (discover + run) | load: Windows + Docker; run/debug/tests: Docker (SDK 8.0.426 runtimes), console run also on Windows where a .NET 8 runtime happened to be installed |
+| netstandard2.1 | 8.0 | yes | yes | n/a (library) | n/a | n/a | Windows + Docker |
+| netstandard2.0 | 7.3 | yes | yes | n/a (library) | n/a | n/a | Windows + Docker |
+| net8.0;net10.0 (multi-target) | per TFM | yes: one project context per TFM, Find/references once, Rename checks both contexts | yes | n/a (library) | n/a | n/a | Windows + Docker |
+| global.json pins SDK 8.0.426, installed | — | yes: loaded with SDK 8.0.426's MSBuild (`sdk.version` 8.0.426), like `dotnet build` | — | — | — | — | Docker only (`GlobalJsonTests`) |
+| global.json pins an SDK that is not installed | — | Health: *C# is not running*, the global.json path, its rollForward policy, the installed SDKs; **Install .NET SDK**, **Open global.json** | — | — | — | — | Windows (.NET test) + Docker (.NET test, e2e `compat-sdk-missing`) |
+| net6.0, net7.0, .NET Framework, non-SDK-style | — | **not supported, not tested** | | | | | — |
+
+How it is tested: .NET `CompatTests` and `GlobalJsonTests` (Windows with SDK 10 only: the run tests skip with a reason
+where a runtime is missing; Docker: all run), e2e scenarios `compat` and `compat-sdk-missing` (Docker only). The Docker
+e2e image `refyntra-linux-e2e-sdks` adds the .NET 8 SDK 8.0.426 and the .NET 9 runtime 9.0.21 to SDK 10 with Microsoft's
+`dotnet-install.sh` (`scripts/test/linux-e2e.sh`); nothing is installed on the host. The image grows from 2.26 GB to
+3.2 GB.
+
+A global.json that pins an SDK older than 8.0 (unsupported) is not honoured for loading: the newest installed SDK's
+MSBuild loads the solution instead (`MsBuildBootstrap.PickInstance`).
+
 ## Not supported and untested
 
-macOS, Windows ARM64, remote/WSL/Dev Containers, virtual workspaces, non-SDK-style projects, older SDKs, VS Code versions other than the two above.
+macOS, Windows ARM64, remote/WSL/Dev Containers, virtual workspaces, non-SDK-style projects, net6.0 / net7.0 / .NET Framework targets, SDKs older than 8.0, VS Code versions other than the two above.
 
 Known limitations are tracked in [docs/capabilities/alpha.md](../capabilities/alpha.md).

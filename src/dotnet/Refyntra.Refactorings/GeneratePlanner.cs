@@ -483,7 +483,12 @@ public static class GeneratePlanner
                 : $"public override bool Equals(object{c.Q} obj)\n{{\nif (obj is null) return false;\nif (global::System.Object.ReferenceEquals(this, obj)) return true;\nif (obj.GetType() != this.GetType()) return false;\nvar other = ({self})obj;\nreturn {cmp};\n}}\n"));
         }
         string hash;
-        if (members.Count <= 8) hash = $"return global::System.HashCode.Combine({string.Join(", ", members.Select(m => "this." + Esc(m.Name)))});";
+        // System.HashCode is .NET Core 2.1+ / netstandard2.1+; a netstandard2.0 (or .NET Framework) project gets the classic
+        // multiply-and-add hash over EqualityComparer<T>.Default.
+        if (c.Model.Compilation.GetTypeByMetadataName("System.HashCode") == null)
+            hash = "unchecked\n{\nvar hash = 17;\n" + string.Join("\n", members.Select(m => $"hash = hash * 31 + global::System.Collections.Generic.EqualityComparer<{T(TypeOf(m))}>.Default.GetHashCode(this.{Esc(m.Name)});"))
+                + "\nreturn hash;\n}";
+        else if (members.Count <= 8) hash = $"return global::System.HashCode.Combine({string.Join(", ", members.Select(m => "this." + Esc(m.Name)))});";
         else hash = "var hash = new global::System.HashCode();\n" + string.Join("\n", members.Select(m => $"hash.Add(this.{Esc(m.Name)});")) + "\nreturn hash.ToHashCode();";
         list.Add(Parse($"public override int GetHashCode()\n{{\n{hash}\n}}\n"));
         if (o.Operators)

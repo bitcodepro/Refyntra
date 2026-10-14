@@ -196,7 +196,9 @@ public static class PostfixPlanner
         {
             case "if" when isBool && f.Statement: return Statement(f, name, $"if ({e})\n{{\n{Body};\n}}", ct);
             case "ifn" when f.Statement && CanBeNull(t): return Statement(f, name, $"if ({P()} is null)\n{{\n{Body};\n}}", ct);
-            case "notnull" when f.Statement && CanBeNull(t): return Statement(f, name, $"if ({P()} is not null)\n{{\n{Body};\n}}", ct);
+            // 'is not null' is C# 9; before it the same test is '!(x is null)'.
+            case "notnull" when f.Statement && CanBeNull(t):
+                return Statement(f, name, EditActionsPlanner.LangAtLeast(f.Model.SyntaxTree, LanguageVersion.CSharp9) ? $"if ({P()} is not null)\n{{\n{Body};\n}}" : $"if (!({e} is null))\n{{\n{Body};\n}}", ct);
             case "while" when isBool && f.Statement: return Statement(f, name, $"while ({e})\n{{\n{Body};\n}}", ct);
             case "not" when isBool: return Expression(name, "!" + P(), Esc("!" + P()) + "$0");
             case "var" when f.Statement: return Statement(f, name, $"var {Mark(1)} = {e};", ct, (1, SuggestName(f, false)));
@@ -217,7 +219,9 @@ public static class PostfixPlanner
             case "par": return Expression(name, "(" + e + ")", Esc("(" + e + ")") + "$0");
             case "cast": return Expression(name, "((T)" + P() + ")", "((${1:" + EscPlaceholder(Display(f, t)) + "})" + Esc(P()) + ")$0");
             case "arg": return Expression(name, "Method(" + e + ")", "${1:Method}(" + Esc(e) + ")$0");
-            case "using" when f.Statement && (Implements(t, "System.IDisposable") || Implements(t, "System.IAsyncDisposable")):
+            // 'await using' (only IAsyncDisposable) is C# 8.
+            case "using" when f.Statement && (Implements(t, "System.IDisposable")
+                || Implements(t, "System.IAsyncDisposable") && EditActionsPlanner.LangAtLeast(f.Model.SyntaxTree, LanguageVersion.CSharp8)):
             {
                 var aw = !Implements(t, "System.IDisposable") ? "await " : "";
                 return Statement(f, name, $"{aw}using (var {Mark(1)} = {e})\n{{\n{Body};\n}}", ct, (1, SuggestName(f, false)));

@@ -105,11 +105,18 @@ The page updates by itself after a restore, a restart or a solution switch.
   servers too), VS Code 1.90 or newer
 - No other VS Code extension: Python (bundled Pyright) and Rust (bundled rust-analyzer) work on their own; Rust needs
   the Rust toolchain (`cargo`) for full results
-- A .NET SDK 10.0.x installed (Refyntra does not download or bundle it)
+- A .NET SDK 10.0.x installed on the machine (Refyntra does not download or bundle it); the C# host runs on .NET 10
+- SDK-style C# projects targeting **net8.0, net9.0, net10.0, netstandard2.0 or netstandard2.1**, also multi-targeted
+  (one project context per target framework). The targeting packs come from NuGet during restore; to **run** or
+  **debug** a net8.0 / net9.0 app its runtime must be installed. A global.json that pins an older SDK (8.0 or newer) is
+  honoured: the solution is loaded with that SDK's MSBuild, like `dotnet build`; a pinned SDK that is not installed is
+  explained in Health (**Open global.json**)
+- **Not supported or tested:** net6.0, net7.0 (out of support), .NET Framework and non-SDK-style projects
+- Edit actions, postfix templates and Generate follow the project's C# version (C# 7.3 for netstandard2.0, 8 for
+  netstandard2.1, 12 for net8.0, 13 for net9.0, 14 for net10.0, or its LangVersion): nothing newer is offered
 - A **trusted** workspace (see below)
-- SDK-style C# projects
 
-See the [support matrix](docs/support/matrix.md); nothing is listed as verified yet.
+See the [support matrix](docs/support/matrix.md) for what was verified where (target frameworks: "Target frameworks and SDKs").
 
 ## Privacy and local processing
 

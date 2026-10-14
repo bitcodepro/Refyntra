@@ -294,6 +294,11 @@ public static partial class EditActionsPlanner
             patterns.Add(p);
         }
         if (subject == null || !IsReadOnlySubject(c, subject)) return null;
+        // Switch expressions are C# 8; 'or' and type patterns ('case int:') C# 9 (a statement splits 'or' into labels).
+        if (expression && !LangAtLeast(c, LanguageVersion.CSharp8)) return null;
+        if (!LangAtLeast(c, LanguageVersion.CSharp9)
+            && (expression ? patterns : patterns.SelectMany(OrParts)).Any(p => p.DescendantNodesAndSelf().Any(n => n is TypePatternSyntax or BinaryPatternSyntax)))
+            return null;
         if (!expression)
         {
             if (branches.Select(b => b.Body).Append(els).Any(b => b != null && BreaksOut(b))) return null;
@@ -354,7 +359,9 @@ public static partial class EditActionsPlanner
     {
         var sw = c.Token.Parent?.AncestorsAndSelf().OfType<SwitchStatementSyntax>().FirstOrDefault();
         if (sw == null || c.Span.Start < sw.SwitchKeyword.SpanStart || c.Span.Start > sw.CloseParenToken.Span.End || HasInnerComments(sw)) return null;
-        if (sw.Sections.Count == 0) return null;
+        // Switch expressions are C# 8; several labels of one section become an 'or' pattern (C# 9).
+        if (sw.Sections.Count == 0 || !LangAtLeast(c, LanguageVersion.CSharp8)) return null;
+        if (!LangAtLeast(c, LanguageVersion.CSharp9) && sw.Sections.Any(s => s.Labels.Count(l => l is not DefaultSwitchLabelSyntax) > 1)) return null;
         var arms = new List<(PatternSyntax? Pattern, WhenClauseSyntax? When, BranchValue Value)>();
         BranchValue? fallback = null;
         foreach (var section in sw.Sections)
@@ -1018,7 +1025,7 @@ public static partial class EditActionsPlanner
     private static Func<Task<Document>>? ClassRecord(Ctx c)
     {
         if (c.Token.Parent is not ClassDeclarationSyntax cls || c.Token != cls.Identifier || cls.ParameterList != null
-            || cls.Modifiers.Any(SyntaxKind.StaticKeyword) || cls.Modifiers.Any(SyntaxKind.PartialKeyword)) return null;
+            || cls.Modifiers.Any(SyntaxKind.StaticKeyword) || cls.Modifiers.Any(SyntaxKind.PartialKeyword) || !LangAtLeast(c, LanguageVersion.CSharp9)) return null;
         return async () =>
         {
             var t = c.Model.GetDeclaredSymbol(cls, c.Ct)!;
@@ -1268,7 +1275,8 @@ public static partial class EditActionsPlanner
     private static Func<Task<Document>>? UsingDeclaration(Ctx c)
     {
         var us = c.Token.Parent?.AncestorsAndSelf().OfType<UsingStatementSyntax>().FirstOrDefault();
-        if (us == null || c.Span.Start < us.SpanStart || c.Span.Start > us.CloseParenToken.Span.End || us.Parent is not BlockSyntax block) return null;
+        // 'using' declarations are C# 8.
+        if (us == null || c.Span.Start < us.SpanStart || c.Span.Start > us.CloseParenToken.Span.End || us.Parent is not BlockSyntax block || !LangAtLeast(c, LanguageVersion.CSharp8)) return null;
         var chain = new List<UsingStatementSyntax>();
         StatementSyntax inner = us;
         while (inner is UsingStatementSyntax u)
@@ -1349,6 +1357,8 @@ public static partial class EditActionsPlanner
                 throw new Refusal("SignatureFixed", "The method overrides or implements another member; its return type cannot change alone.");
             if (s.ReturnsByRef || s.ReturnsByRefReadonly) throw new Refusal("RefReturn", "Methods that return by reference cannot be async.");
             if (s.Parameters.Any(p => p.RefKind != RefKind.None)) throw new Refusal("RefParameters", "Async methods cannot have ref, out or in parameters.");
+            if (s.Parameters.FirstOrDefault(p => p.Type.IsRefLikeType) is { } span)
+                throw new Refusal("RefStructParameters", $"Async methods cannot have parameters of a ref struct type ('{span.Name}' is {span.Type.Name}).");
             if (OwnNodes(m).Any(n => n is YieldStatementSyntax)) throw new Refusal("Iterator", "Iterators are not made async.");
             if (signatureChanges && s.Name == "Main" && s.IsStatic) throw new Refusal("EntryPoint", "The entry point is not converted.");
             var taskLike = IsTaskLike(s.ReturnType, out var generic);
