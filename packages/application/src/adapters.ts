@@ -154,6 +154,10 @@ export interface LanguageAdapter {
    * Optional (protocol 1.12): classified usages of the symbol at a position (symbolAt, then code/usages). `subject` is
    * null when there is no symbol; `result` is null when the host is too old.
    */
+  /** Optional (protocol 1.16): go to metadata (code/metadataSource); null when the host is older. */
+  metadataSource?(params: MetadataSourceRequest, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').MetadataSourceResult | null>>;
+  /** Optional (protocol 1.16): classified usages of a symbol id (code/usages without symbolAt); null when the host is older. */
+  usagesOfSymbol?(symbolId: string, limit: number, token?: CancellationToken): Promise<RouteResult<{ subject: SymbolRef | null; result: import('@refyntra/contracts').UsagesResult | null }>>;
   /** Optional (protocol 1.13): File Structure of a document; null when the host is older. */
   fileStructure?(uri: string, includeInherited: boolean, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').FileStructureResult | null>>;
   /** Optional (protocol 1.14): the calls of the statement a debugger stopped at (Smart Step Into); null when the host is older. */
@@ -287,6 +291,9 @@ export interface ConstructorRequest {
   constructorId?: string;
   typeId?: string;
 }
+
+/** code/metadataSource (protocol 1.16) without the workspace / snapshot / trace fields the adapter adds. */
+export type MetadataSourceRequest = Omit<import('@refyntra/contracts').MetadataSourceParams, 'traceId' | 'workspaceId' | 'snapshotId'>;
 
 /** What to generate (protocol 1.10, code/generate). */
 export interface GenerateRequest {

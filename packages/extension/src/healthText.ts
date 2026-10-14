@@ -63,6 +63,7 @@ export function renderHealth(h: HealthSummary, extra: { solution?: string | unde
       `- cargo: ${d.cargo ? esc(d.cargo) : 'not found'}`,
       `- lldb-dap (Rust debugging): ${d.lldbDap ? esc(d.lldbDap) : 'not found'}`,
       ...(d.tests ? [`- Tests: ${esc(d.tests)}`] : []),
+      ...(d.decompiler ? [`- Decompiled sources: ${esc(d.decompiler)}`] : []),
       ...(d.netcoredbg.path ? [`- ${esc(dotnetDebugFeaturesText())}`] : []),
       '',
     );

@@ -734,6 +734,48 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
     });
   }
 
+  /** Go to metadata (protocol 1.16): a decompiled / embedded-source document or the symbol in one; null for an older host. */
+  metadataSource(params: import('./adapters').MetadataSourceRequest, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').MetadataSourceResult | null>> {
+    return this.semantic('code/metadataSource', token, async (s, snapshotId, traceId) => {
+      if (s.protocolMinor < 16) return null;
+      const r = await s.transport.request('code/metadataSource', { traceId, workspaceId: this.opts.workspaceId, snapshotId, ...params }, token);
+      const isRange = (x: unknown): boolean => !!x && typeof x === 'object' && !!(x as { start?: unknown }).start && !!(x as { end?: unknown }).end;
+      const d = r?.document;
+      const document =
+        d && typeof d.path === 'string' && typeof d.text === 'string' && typeof d.assemblyName === 'string'
+          ? { ...d, symbols: Array.isArray(d.symbols) ? d.symbols.filter((x) => x && typeof x.documentationId === 'string' && isRange(x.nameRange) && isRange(x.range)) : [] }
+          : null;
+      return {
+        document,
+        symbolRange: isRange(r?.symbolRange) ? r.symbolRange : null,
+        symbol: r?.symbol && typeof r.symbol.name === 'string' ? r.symbol : null,
+        location: r?.location && typeof r.location.uri === 'string' && isRange(r.location.range) ? r.location : null,
+        summary: typeof r?.summary === 'string' ? r.summary : null,
+        reasonCode: r?.reasonCode ?? null,
+        message: typeof r?.message === 'string' ? r.message : null,
+        decompilerVersion: typeof r?.decompilerVersion === 'string' ? r.decompilerVersion : '',
+        snapshotId: r?.snapshotId ?? snapshotId,
+      };
+    });
+  }
+
+  /** Usages of a symbol id (code/usages, protocol 1.12) without symbolAt; null result for an older host. */
+  usagesOfSymbol(symbolId: string, limit: number, token?: CancellationToken): Promise<RouteResult<{ subject: SymbolRef | null; result: import('@refyntra/contracts').UsagesResult | null }>> {
+    return this.semantic('code/usages', token, async (s, snapshotId, traceId) => {
+      if (s.protocolMinor < 12) return { subject: null, result: null };
+      const r = await s.transport.request('code/usages', { traceId, workspaceId: this.opts.workspaceId, snapshotId, symbolId, limit }, token);
+      const items = Array.isArray(r?.items)
+        ? r.items
+            .filter((i) => i && typeof i.uri === 'string' && i.range && i.range.start && i.range.end && typeof i.kind === 'string')
+            .map((i) => ({ ...i, isTest: !!i.isTest, lineText: typeof i.lineText === 'string' ? i.lineText : '' }))
+        : [];
+      return {
+        subject: r?.subject && typeof r.subject.name === 'string' ? r.subject : null,
+        result: { items, total: typeof r?.total === 'number' ? r.total : items.length, truncated: !!r?.truncated, completeness: r?.completeness ?? 'unknown', snapshotId: r?.snapshotId ?? snapshotId },
+      };
+    });
+  }
+
   /** File Structure (protocol 1.13): the types and members of a document; null for an older host. */
   fileStructure(uri: string, includeInherited: boolean, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').FileStructureResult | null>> {
     return this.semantic('code/fileStructure', token, async (s, snapshotId, traceId) => {

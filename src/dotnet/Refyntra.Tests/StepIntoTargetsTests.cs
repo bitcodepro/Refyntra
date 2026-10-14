@@ -121,7 +121,10 @@ public sealed class StepIntoTargetsTests
         Assert.Equal(new[] { "Math.Max(int, int)", "Ext.Plus(int, int)" }, m.Targets.Select(t => t.Label));
         Assert.Equal(StepIntoTargets.Reasons.Metadata, m.Targets[0].Reason);
         Assert.Null(m.Targets[0].BreakAt);
+        Assert.StartsWith("M:System.Math.Max(System.Int32,System.Int32)", m.Targets[0].DocumentationId);
+        Assert.False(string.IsNullOrEmpty(m.Targets[0].AssemblyName));
         Assert.Null(m.Targets[1].Reason);
+        Assert.Null(m.Targets[1].DocumentationId);
     }
 
     [Fact]

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { CancelledError, type EngineClient } from '@refyntra/application';
 import type { SymbolRef } from '@refyntra/contracts';
 import { fromLocation, openLocation, toPosition } from './convert';
+import { metadataService } from './metadata';
 import { type NavigateTarget, companionFiles, navigateTargets, targetOutcome } from './navigateToModel';
 
 // Refyntra: Navigate To… (Rider's Alt+`): one QuickPick with every target of the symbol at the cursor that exists, each
@@ -96,6 +97,9 @@ export async function runNavigateTo(engine: EngineClient): Promise<void> {
         await vscode.window.showTextDocument(origin.uri, { selection: new vscode.Range(origin.position, origin.position) });
         await vscode.commands.executeCommand('references-view.showCallHierarchy');
         return;
+      case 'metadata':
+        await metadataService()?.open({ symbolId: o.symbolId }, 'Navigate To');
+        return;
     }
   };
   current = { qp, choose };
@@ -146,7 +150,7 @@ export async function runNavigateTo(engine: EngineClient): Promise<void> {
     qp.items = targets.map((t) => ({
       label: `$(${t.icon}) ${t.label}`,
       description: t.countText,
-      detail: t.action === 'locations' ? (t.locations.length === 1 ? 'opens it' : 'opens the peek view') : t.action === 'usages' ? 'opens the Refyntra Usages view' : 'opens the call hierarchy',
+      detail: t.action === 'locations' ? (t.locations.length === 1 ? 'opens it' : 'opens the peek view') : t.action === 'usages' ? 'opens the Refyntra Usages view' : t.action === 'metadata' ? 'opens the read-only decompiled source' : 'opens the call hierarchy',
       target: t,
     }));
     qp.placeholder = `Navigate from ${subject.name} to…${incomplete}`;

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import type { EngineClient } from '@refyntra/application';
 import type { Range } from '@refyntra/contracts';
 import { fromRange } from './convert';
+import { metadataService } from './metadata';
 import {
   type DocSymbol,
   FILTER_ICONS,
@@ -198,6 +199,13 @@ export async function runFileStructure(engine: EngineClient, memento: vscode.Mem
   };
 
   const choose = async (row: StructureRow): Promise<boolean> => {
+    if (!row.navigable && row.metadata && metadataService()) {
+      // A library member: its decompiled source (go to metadata, protocol 1.16).
+      accepted = true;
+      qp.hide();
+      const r = await metadataService()!.open({ documentationId: row.metadata.documentationId, ...(row.metadata.assemblyName ? { assemblyName: row.metadata.assemblyName } : {}) }, 'File Structure');
+      return r.kind !== 'none';
+    }
     if (!row.navigable) {
       void vscode.window.showInformationMessage(`Refyntra File Structure: ${row.label} is declared in a referenced assembly; File Structure opens only members with source in the solution.`);
       return false;

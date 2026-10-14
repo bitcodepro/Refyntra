@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import { metadataService } from './metadata';
+import { OPEN_DECOMPILED } from './metadataModel';
 import type { EngineClient } from '@refyntra/application';
 import type { StepIntoTargetsResult } from '@refyntra/contracts';
 import {
@@ -22,7 +24,7 @@ const TYPES_SETTING = 'debug.dotnet.breakOnExceptionTypes';
 
 export type SmartStepOutcome =
   | { kind: SmartStepStop; at?: SourceLine; target: string }
-  | { kind: 'refused' | 'cancelled' | 'unavailable' | 'ended'; message?: string };
+  | { kind: 'refused' | 'cancelled' | 'unavailable' | 'ended'; message?: string; /** refused library call: what "Open Decompiled Source" opens. */ documentationId?: string };
 
 export interface DebugExtrasHooks {
   /** Tests choose the Smart Step Into item instead of the QuickPick (the label without the icon). */
@@ -243,6 +245,16 @@ export class DebugExtras implements vscode.Disposable {
     const t = chosen.target;
     if (!t.breakAt) {
       const message = `Cannot step into ${t.label}: ${chosen.detail ?? 'no source'}.`;
+      if (t.reason === 'metadata' && t.documentationId && metadataService()) {
+        // The library method can still be read: offer its decompiled source (go to metadata, protocol 1.16).
+        this.hooks.messages.push(message);
+        const docId = t.documentationId;
+        const assemblyName = t.assemblyName;
+        void vscode.window.showWarningMessage(message, OPEN_DECOMPILED).then((pick) => {
+          if (pick === OPEN_DECOMPILED) void metadataService()?.open({ documentationId: docId, ...(assemblyName ? { assemblyName } : {}) }, t.label);
+        });
+        return { kind: 'refused', message, documentationId: docId };
+      }
       this.message('warning', message);
       return { kind: 'refused', message };
     }

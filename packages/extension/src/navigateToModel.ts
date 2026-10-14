@@ -4,7 +4,7 @@ import { type MergedRelation, type RelationGroupView, relationLocation } from '@
 // Navigate To (Rider's Alt+`): the targets of the symbol at the cursor, computed from existing services (Related,
 // code/hierarchy with the 1.12 directions "bases" and "containing", incoming calls). Pure: unit-tested with vitest.
 
-export type NavigateAction = 'locations' | 'usages' | 'callHierarchy';
+export type NavigateAction = 'locations' | 'usages' | 'callHierarchy' | 'metadata';
 
 export interface NavigateTarget {
   id: string;
@@ -16,10 +16,12 @@ export interface NavigateTarget {
   countText: string;
   locations: Location[];
   action: NavigateAction;
+  /** action "metadata": the library symbol whose decompiled source opens (protocol 1.16). */
+  symbolId?: string;
 }
 
 export interface NavigateInputs {
-  subject: Pick<SymbolRef, 'name' | 'kind' | 'location'>;
+  subject: Pick<SymbolRef, 'name' | 'kind' | 'location'> & Partial<Pick<SymbolRef, 'origin' | 'symbolId'>>;
   /** The document of the cursor. */
   currentUri: string;
   /** Related groups of the subject (declarations, implementations, references, tests, handlers, endpoints, registrations). */
@@ -113,6 +115,11 @@ export function navigateTargets(input: NavigateInputs): NavigateTarget[] {
   const declarations = located(group(input.groups, 'declarations'));
   add('declaration', declarations.length > 1 ? 'Declarations (partial parts)' : 'Declaration', 'symbol-field', 'declaration', declarations);
 
+  // A library symbol (no source in the solution): its decompiled declaration (go to metadata, protocol 1.16).
+  if (input.subject.origin === 'metadata' && input.subject.symbolId && declarations.length === 0) {
+    out.push({ id: 'metadata', label: 'Decompiled declaration', icon: 'file-binary', count: 1, countText: countWords(1, 'declaration'), locations: [], action: 'metadata', symbolId: input.subject.symbolId });
+  }
+
   const impls = located(group(input.groups, 'implementations'));
   const implLabel = input.subject.kind === 'interface' ? 'Implementations' : isType ? 'Derived types' : 'Implementations and overrides';
   add('implementations', implLabel, 'symbol-class', isType ? 'type' : 'member', impls);
@@ -144,7 +151,8 @@ export function navigateTargets(input: NavigateInputs): NavigateTarget[] {
 }
 
 /** What choosing a target does: open one location, peek several, or run a command. */
-export function targetOutcome(t: NavigateTarget): { kind: 'open'; location: Location } | { kind: 'peek'; locations: Location[] } | { kind: 'usages' } | { kind: 'callHierarchy' } {
+export function targetOutcome(t: NavigateTarget): { kind: 'open'; location: Location } | { kind: 'peek'; locations: Location[] } | { kind: 'usages' } | { kind: 'callHierarchy' } | { kind: 'metadata'; symbolId: string } {
+  if (t.action === 'metadata' && t.symbolId) return { kind: 'metadata', symbolId: t.symbolId };
   if (t.action === 'usages') return { kind: 'usages' };
   if (t.action === 'callHierarchy') return { kind: 'callHierarchy' };
   return t.locations.length === 1 ? { kind: 'open', location: t.locations[0]! } : { kind: 'peek', locations: t.locations };

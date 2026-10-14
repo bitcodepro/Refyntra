@@ -4,6 +4,28 @@ All notable changes are listed here. The project is alpha; nothing has been rele
 
 ## Unreleased
 
+### Added (go to metadata / decompiled sources)
+
+- **Read-only decompiled sources for .NET libraries** (ADR-010), Rider-style: a symbol without source in the solution
+  opens as `refyntra-metadata:/<assembly>/<Namespace.Type>.cs` with the whole type, XML documentation comments and the
+  caret on the symbol. The source file embedded in the assembly's portable PDB is preferred (setting
+  `refyntra.metadata.sourceLink`: `embeddedOnly` by default, `off`); otherwise ICSharpCode.Decompiler 11.1.0.9782 (MIT,
+  bundled in the host) decompiles it. Reference assemblies map to the local implementation (`System.String` from
+  `System.Private.CoreLib`). Nothing is downloaded.
+- Host protocol 1.16 `code/metadataSource`: symbol id, documentation id, a solution position or a position inside a
+  metadata document → document text, declarations with ranges, assembly facts and origin; decompilers cached per
+  assembly MVID, cancellable. `code/fileStructure` inherited members and `code/stepIntoTargets` metadata callees carry
+  `documentationId` / `assemblyName` (additive).
+- **Refyntra: Go to Metadata / Decompiled Source** at the cursor; in metadata documents F12 goes on, Shift+F12 finds
+  usages in the solution, hover shows the symbol and summary. Navigate To (*Decompiled declaration*), Related, Find,
+  File Structure (inherited library members), external stack frames and Smart Step Into's refusal open decompiled
+  sources. Health shows the decompiler, the source policy and the documents.
+- Tests: .NET `MetadataSourceServiceTests` (a library compiled in the test with embedded / side-by-side / no PDB
+  sources, caching per MVID, cancellation, symbol mapping, runtime types and targeting-pack mapping) and
+  `MetadataSourceProtocolTests` on Shop (System.String, MediatR, navigation inside, usages back); unit tests of the
+  URI scheme, store, answers, hover, Navigate To and File Structure rows; e2e cases in the `navigation` scenario;
+  visual baseline `metadata-document` (both themes).
+
 ### Added (test runner)
 
 - **Tests in VS Code's Test Explorer** without other extensions (ADR-009): C# tests (xUnit, NUnit, MSTest) discovered

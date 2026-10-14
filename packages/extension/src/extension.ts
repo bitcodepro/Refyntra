@@ -62,6 +62,7 @@ import { type RecentService, registerRecent } from './recent';
 import { type FileStructureState, acceptStructureRow, fileStructureState, runFileStructure, setStructureFilter, setStructureQuery } from './fileStructure';
 import type { StructureFilter } from './fileStructureModel';
 import { type UsagesViewProvider, registerUsages } from './usages';
+import { type MetadataService, registerMetadata } from './metadata';
 
 export const CSHARP_DESCRIPTOR: AdapterDescriptor = {
   adapterId: 'csharp',
@@ -144,6 +145,8 @@ export interface RefyntraTestApi {
   navigateTo: { state(): NavigateToState; accept(id: string): Promise<boolean> };
   /** The Refyntra Usages view (e2e: groupings, filters, Next/Previous, export, pinned tabs). */
   usages: UsagesViewProvider;
+  /** Go to metadata (protocol 1.16): open decompiled documents, the store, the command at the cursor (e2e / visual). */
+  metadata: MetadataService;
   /** Recent Files / Recent Locations (e2e: the stored lists, the open list, accept / remove / toggle by id). */
   recent: RecentService;
   /** File Structure (Ctrl+F12): the open list, choosing a row, filters and the query (e2e / visual wait on it). */
@@ -307,7 +310,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
   context.subscriptions.push(run.disposable);
   const testing = registerTesting(engine, run.service.debuggers, isTrusted);
   context.subscriptions.push(testing.disposable);
-  const debugStatus = () => ({ ...run.service.debuggers.status(), tests: testing.service.healthText() });
+  // Go to metadata / decompiled sources (protocol 1.16): refyntra-metadata: documents, F12 / hover inside them.
+  const metadata = registerMetadata(engine);
+  context.subscriptions.push(metadata.disposable);
+  const debugStatus = () => ({ ...run.service.debuggers.status(), tests: testing.service.healthText(), decompiler: metadata.service.healthText() });
   const health = new HealthDocument(engine, () => solutions.selected(), debugStatus);
   const healthPage = new HealthPage(engine, () => solutions.selected(), isTrusted, debugStatus);
   const previews = new PreviewContentProvider();
@@ -484,6 +490,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     testing: testing.service,
     navigateTo: { state: () => navigateToState(), accept: (id) => acceptNavigateTarget(id) },
     usages: usages.provider,
+    metadata: metadata.service,
     recent: recent.service,
     fileStructure: { state: () => fileStructureState(), accept: (id) => acceptStructureRow(id), setFilter: (f, on) => setStructureFilter(f, on), setQuery: (t) => setStructureQuery(t) },
   };

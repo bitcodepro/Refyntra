@@ -21,8 +21,9 @@ export const PROTOCOL_MAJOR = 1;
  * 1.13: File Structure (`code/fileStructure`: types, members, regions and inherited members of one document).
  * 1.14: Smart Step Into (`code/stepIntoTargets`: the calls of the statement a debugger stopped at).
  * 1.15: Test discovery (`code/tests`: test projects, classes, methods and data cases for the Test Explorer).
+ * 1.16: Go to metadata (`code/metadataSource`: decompiled or PDB-embedded sources of referenced assemblies).
  */
-export const PROTOCOL_MINOR = 15;
+export const PROTOCOL_MINOR = 16;
 
 /** Zero-based line, UTF-16 code unit character. */
 export interface Position {
@@ -544,6 +545,9 @@ export interface StructureMember {
   /** Inherited members declared in the solution: their file; null for metadata members (not navigable). */
   uri?: string | null;
   navigable: boolean;
+  /** Inherited metadata members (1.16): documentation id and assembly for `code/metadataSource`. */
+  documentationId?: string | null;
+  assemblyName?: string | null;
 }
 
 export interface StructureType {
@@ -595,6 +599,77 @@ export interface StepIntoTarget {
   reason?: StepIntoReason | null;
   /** A virtual call: an override may run instead. */
   isVirtual: boolean;
+  /** Reason "metadata" (1.16): the callee's documentation id and assembly for `code/metadataSource`. */
+  documentationId?: string | null;
+  assemblyName?: string | null;
+}
+
+/** code/metadataSource (protocol 1.16): a metadata document as the client names it (its top-level type and assembly). */
+export interface MetadataDocumentRef {
+  /** "T:Ns.Type" (generic types with arity: "T:Ns.List`1"). */
+  documentationId: string;
+  assemblyName: string;
+}
+
+/**
+ * code/metadataSource: one of `symbolId`, `documentationId` (+ `assemblyName`, `memberName`), `uri` + `position` (a
+ * solution document) or `document` + `position` (inside a metadata document).
+ */
+export interface MetadataSourceParams extends WorkspaceParams {
+  snapshotId: string;
+  symbolId?: string;
+  documentationId?: string;
+  assemblyName?: string;
+  /** With a type's `documentationId`: the caret goes to its first member of this name. */
+  memberName?: string;
+  uri?: string;
+  document?: MetadataDocumentRef;
+  position?: Position;
+  /** "embeddedOnly" (default): sources embedded in the PDB, else decompile. "off": always decompile. Never downloads. */
+  sourcePolicy?: 'embeddedOnly' | 'off';
+  /** Only the symbol (hover), no document text. */
+  symbolOnly?: boolean;
+}
+
+export interface MetadataSymbolSpan {
+  documentationId: string;
+  nameRange: Range;
+  range: Range;
+}
+
+export interface MetadataDocument {
+  /** "<assembly>/<Namespace.Type>.cs": the path of the `refyntra-metadata:` URI. */
+  path: string;
+  assemblyName: string;
+  assemblyVersion: string;
+  /** The referenced file and the file that was read (they differ for reference assemblies). */
+  assemblyPath: string;
+  implementationPath: string;
+  mvid: string;
+  origin: 'decompiled' | 'embeddedSource';
+  /** Embedded sources: the document path recorded in the PDB. */
+  sourceDocument?: string | null;
+  typeDocumentationId: string;
+  text: string;
+  symbols: MetadataSymbolSpan[];
+  note?: string | null;
+}
+
+export type MetadataReasonCode = 'InSource' | 'NoSymbol' | 'SymbolNotFound' | 'AssemblyNotFound' | 'DecompilerFailed' | 'NotMetadata';
+
+export interface MetadataSourceResult {
+  document?: MetadataDocument | null;
+  /** The requested symbol's name in `document`. */
+  symbolRange?: Range | null;
+  symbol?: SymbolRef | null;
+  /** reasonCode "InSource": the declaration in the solution. */
+  location?: Location | null;
+  /** The summary of the symbol's XML documentation. */
+  summary?: string | null;
+  reasonCode?: MetadataReasonCode | null;
+  message?: string | null;
+  decompilerVersion: string;
+  snapshotId: string;
 }
 
 export interface StepIntoTargetsResult {
@@ -1149,6 +1224,8 @@ export interface MethodMap {
   'code/stepIntoTargets': [StepIntoTargetsParams, StepIntoTargetsResult];
   /** Protocol 1.15. */
   'code/tests': [TestsParams, TestsResult];
+  /** Protocol 1.16. */
+  'code/metadataSource': [MetadataSourceParams, MetadataSourceResult];
   'code/references': [SymbolQueryParams, LocationsResult];
   'code/implementations': [SymbolQueryParams, LocationsResult];
   'refactor/prepare': [PrepareParams, PrepareResult];

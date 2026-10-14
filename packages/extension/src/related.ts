@@ -3,7 +3,8 @@ import { CancelledError, type EngineClient, type RelatedOutcome } from '@refyntr
 import type { RecoveryAction } from '@refyntra/contracts';
 import { type MergedRelation, relationGroupTitle, relationLocation } from '@refyntra/domain';
 import { isAllowedRecoveryCommand, runRecovery } from './actions';
-import { openLocation, shortPath, toPosition } from './convert';
+import { shortPath, toPosition } from './convert';
+import { openRelationTarget } from './metadata';
 import { RelatedViewState, findSameRelation } from './relatedState';
 import { groupIcon, languageOfUri, previewLine, relatedHeader, relationIcon } from './relatedPresentation';
 import { scopeLines } from './scopePresentation';
@@ -133,14 +134,14 @@ export class RelatedViewProvider implements vscode.TreeDataProvider<Node>, vscod
 
   /** Opens a relation; from an outdated view the relation is resolved again first (never an old line number). */
   async openRelation(r: MergedRelation): Promise<void> {
-    if (this.state.canOpenDirectly) return openLocation(relationLocation(r));
+    if (this.state.canOpenDirectly) return openRelationTarget(r);
     await this.refresh();
     const fresh = findSameRelation(this.state.outcome, r);
     if (!fresh || !this.state.canOpenDirectly) {
       void vscode.window.showInformationMessage(`Refyntra Related: "${r.target.label}" is no longer related to the symbol; the view was refreshed.`);
       return;
     }
-    await openLocation(relationLocation(fresh));
+    await openRelationTarget(fresh);
   }
 
   private updateDescription(): void {
@@ -280,7 +281,7 @@ export async function runRelatedGroupPick(engine: EngineClient, group: 'handlers
     void vscode.window.showInformationMessage(`${title}: none found for ${outcome.subject?.name ?? 'the symbol at the cursor'}${outcome.completeness !== 'complete' ? ' (results may be incomplete: some projects did not load completely; see Refyntra: Show Health)' : ''}.`);
     return;
   }
-  if (relations.length === 1) return openLocation(relationLocation(relations[0]!));
+  if (relations.length === 1) return openRelationTarget(relations[0]!);
   const pick = await vscode.window.showQuickPick(
     relations.map((r) => {
       const loc = relationLocation(r);
@@ -288,7 +289,7 @@ export async function runRelatedGroupPick(engine: EngineClient, group: 'handlers
     }),
     { placeHolder: title },
   );
-  if (pick) await openLocation(relationLocation(pick.relation));
+  if (pick) await openRelationTarget(pick.relation);
 }
 
 /** One line of a file: from an open document, else from disk (no document is opened: that would be an editor event). */

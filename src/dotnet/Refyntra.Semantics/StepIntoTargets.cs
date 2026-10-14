@@ -21,7 +21,10 @@ public sealed record StepIntoTarget(
     string? FilePath,
     LinePosition? BreakAt,
     string? Reason,
-    bool IsVirtual);
+    bool IsVirtual,
+    /// <summary>Metadata callees: documentation id and assembly for "Open decompiled" (protocol 1.16).</summary>
+    string? DocumentationId = null,
+    string? AssemblyName = null);
 
 /// <summary>
 /// The calls of the stopped statement in the order they run (arguments before the call that receives them), the
@@ -92,7 +95,9 @@ public static class StepIntoTargets
             if (source == null)
             {
                 var reason = target.Locations.Any(l => l.IsInMetadata) ? Reasons.Metadata : target.IsImplicitlyDeclared ? Reasons.Implicit : Reasons.Metadata;
-                targets.Add(new StepIntoTarget(label, detail, kind, span, null, null, reason, isVirtual));
+                var inMetadata = target.Locations.Any(l => l.IsInMetadata);
+                targets.Add(new StepIntoTarget(label, detail, kind, span, null, null, reason, isVirtual,
+                    inMetadata ? DocumentationCommentId.CreateDeclarationId(target) : null, inMetadata ? target.ContainingAssembly?.Identity.Name : null));
                 continue;
             }
             var bodyStart = BodyStart(source);
