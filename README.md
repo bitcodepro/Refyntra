@@ -813,9 +813,22 @@ What the bundled netcoredbg 3.2.0 can do was measured (its DAP capabilities and 
 | **Conditional breakpoints** | VS Code's *Edit Condition* (`i == 2`), evaluated by netcoredbg | — |
 | **Function breakpoints** | VS Code's *+* in the Breakpoints view | — |
 | **Break on exception types** | **Refyntra: Break on Exception Types…**: pick `System.InvalidOperationException` and others (or type full names); stored in `refyntra.debug.dotnet.breakOnExceptionTypes`. netcoredbg matches the exact type (no base types, no wildcards). The `all` and `user-unhandled` checkboxes in the Breakpoints view still apply; with `all` ticked every exception breaks | — |
-| **Set Next Statement / Jump to Cursor** | **Not available**: netcoredbg does not implement `gotoTargets`/`goto`, so VS Code does not offer Jump to Cursor | — |
-| **Hit counts, logpoints** | **Not available**: netcoredbg ignores them and stops like at a plain breakpoint; Refyntra warns when you add one to a C# file. Use a condition instead | — |
+| **Hit counts** | VS Code's *Edit Hit Count*: `3` or `== 3` (the 3rd hit), `>= 3`, `> 3`, `< 3`, `<= 3`, `% 2` (every 2nd hit). netcoredbg has none; **Refyntra emulates them** in its debug adapter proxy. With a condition, only hits where the condition holds count | — |
+| **Logpoints** | VS Code's *Add Logpoint*: `i={i} total={total}` writes a line to the Debug Console and does not stop. `{expression}` is evaluated in the stopped frame (braces inside the expression and in string literals are fine; `\{` `\}` for literal braces); errors show as `<error: …>`. Emulated by Refyntra (netcoredbg has none); a condition and a hit count still apply. **Timing cost**: every hit is a real stop and resume of the program (milliseconds), so a logpoint in a hot loop slows it down noticeably. Step Over a call that runs into a logpoint logs and still ends at the next statement | — |
+| **Set Next Statement / Jump to Cursor** | **Not available**: netcoredbg does not implement `gotoTargets`/`goto` (not in 3.2.0, not in its current source), so VS Code does not offer Jump to Cursor. Not emulated: moving the instruction pointer needs the debugger itself | — |
+| **Edit and Continue (change code while paused)** | **Not available**: netcoredbg cannot apply code changes to a debugged program. Use **Run with Hot Reload** (`dotnet watch`, no debugger) instead | — |
 | **Restart Frame, data breakpoints** | Not available in netcoredbg | — |
+
+### Run with Hot Reload (`dotnet watch`)
+
+**Refyntra: Run with Hot Reload** runs `dotnet watch run` for the selected project in a Refyntra terminal. A status
+bar item shows what watch is doing (*building*, *watching*, *applied*, *restart needed*, *failed*, *waiting for
+changes*); click it to show the terminal (**Refyntra: Show Hot Reload Terminal**). Restart (Run view) restarts it as a
+watch run. On a *rude edit* (a change Hot Reload cannot apply), `refyntra.run.hotReload.rudeEdit` decides: `restart`
+(default, `dotnet watch --non-interactive` restarts the app by itself) or `ask` (Refyntra asks in a notification and
+restarts the run). Refyntra's terminal is not a console, so `dotnet watch` cannot read the `y`/`n` key of its own
+prompt or Ctrl+R (measured with SDK 10). There is no **Debug with Hot Reload**: netcoredbg cannot apply code changes
+while the program is debugged, so applying a change while paused at a breakpoint is not possible.
 
 Completion of variable names inside the breakpoint condition editor is not possible: VS Code gives extensions no hook
 into that input.
@@ -1158,6 +1171,7 @@ take a project out of Find, Rename and the other analyses.
 | `refyntra.findHandler` / `refyntra.findEndpoint` / `refyntra.findRegistration` | Find, narrowed to handlers, endpoints or DI registrations (the same search as Find, with a preset filter) |
 | `refyntra.run` / `refyntra.debug` | Run without debugging / start debugging the selected run target (or the project of the file, the Run view item, the CodeLens) |
 | `refyntra.runWatch` | Run the selected .NET project with `dotnet watch run` (hot reload) |
+| `refyntra.showWatchTerminal` | Show the terminal of the running Hot Reload (`dotnet watch`) run |
 | `refyntra.stop` / `refyntra.restart` | Stop or restart what Refyntra started (Run view, view title) |
 | `refyntra.selectRunTarget` | Choose project, launch profile, target framework and configuration (the status bar item) |
 | `refyntra.showImmediate` | The Refyntra Immediate panel for the stopped frame (Ctrl+Alt+I in the `visualStudio` preset while debugging) |

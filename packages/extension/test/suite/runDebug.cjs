@@ -332,10 +332,10 @@ exports.cases = ({ api, csharp, waitFor }) => {
           assert.equal(f.line, loop + 1);
           assert.equal(await value(session, f.id, 'i'), '2');
           assert.equal(await value(session, f.id, 'total'), '1');
-          // The capabilities netcoredbg announced are the table in ADR-008 (absent = false).
+          // The capabilities VS Code sees: the table in ADR-008 (absent = false) plus what Refyntra's proxy emulates.
           const caps = extras.hooks.capabilities;
           assert.ok(caps, 'the initialize response was seen');
-          for (const [k, v] of Object.entries(extras.expectedCapabilities)) assert.equal(!!caps[k], v, `netcoredbg ${k}`);
+          for (const [k, v] of Object.entries(extras.expectedCapabilities)) assert.equal(!!caps[k], v, `refyntra-dotnet ${k}`);
 
           // 2. Run to Cursor (VS Code's command, Ctrl+F10 in the visualStudio preset): the loop ends without another
           // stop at the conditional breakpoint (i == 3 does not hold).
@@ -388,7 +388,7 @@ exports.cases = ({ api, csharp, waitFor }) => {
       },
     ],
     [
-      'debug extras: Break on Exception Types stops on the chosen type only; logpoints and hit counts get a note',
+      'debug extras: Break on Exception Types stops on the chosen type only',
       async () => {
         const a = await ready();
         track();
@@ -418,16 +418,89 @@ exports.cases = ({ api, csharp, waitFor }) => {
         } finally {
           await vscode.workspace.getConfiguration('refyntra').update('debug.dotnet.breakOnExceptionTypes', undefined, vscode.ConfigurationTarget.Workspace);
         }
-        // netcoredbg has no logpoints and no hit counts (it stops at them): Refyntra says so when one is added in C#.
-        const uri = vscode.Uri.file(file('ConsoleApp/Program.cs'));
-        const log = new vscode.SourceBreakpoint(new vscode.Location(uri, new vscode.Position(2, 0)), true, undefined, undefined, 'greeting={greeting}');
-        const hit = new vscode.SourceBreakpoint(new vscode.Location(uri, new vscode.Position(3, 0)), true, undefined, '3');
-        vscode.debug.addBreakpoints([log, hit]);
+      },
+    ],
+    [
+      'debug extras: hit counts and logpoints (emulated by Refyntra in front of netcoredbg): == 3, % 2, logpoint, logpoint + condition, Step Over a call with a logpoint',
+      async () => {
+        const a = await ready();
+        track();
+        const extras = a.debugExtras;
+        const rel = 'ConsoleApp/Program.cs';
+        const uri = vscode.Uri.file(file(rel));
+        const calc = vscode.Uri.file(file('ConsoleApp/Calc.cs'));
+        const loop = await lineOf(rel, 'total += Calc.Square(i);');
+        const addLine = await lineOf(rel, 'total += Calc.Add(');
+        const bigLine = await lineOf(rel, 'var big = ');
+        const squareLine = await lineOf('ConsoleApp/Calc.cs', 'public static int Square');
+        const at = (u, line, opts = {}) => new vscode.SourceBreakpoint(new vscode.Location(u, new vscode.Position(line, 0)), true, opts.condition, opts.hitCondition, opts.logMessage);
+        const output = (s) => eventsOf(s, 'output').map((e) => e.body.output).join('');
+        /** Debugs ConsoleApp with these breakpoints; at every stop records `i` and continues; returns the stops and the output. */
+        async function debugWith(bps) {
+          vscode.debug.addBreakpoints(bps);
+          try {
+            const session = await startedSession(() => a.run.debug(target(a, 'ConsoleApp').id), 'refyntra-dotnet');
+            const done = ended(session);
+            let finished = false;
+            void done.then(() => (finished = true));
+            const seen = [];
+            for (;;) {
+              const next = await waitFor(() => finished || eventsOf(session, 'stopped')[seen.length], `stop #${seen.length + 1} or the end`, 240000);
+              if (next === true) break;
+              const f = (await session.customRequest('stackTrace', { threadId: next.body.threadId, startFrame: 0, levels: 1 })).stackFrames[0];
+              const i = (await session.customRequest('evaluate', { expression: 'i', frameId: f.id, context: 'watch' })).result;
+              seen.push({ reason: next.body.reason, line: f.line - 1, i });
+              await session.customRequest('continue', { threadId: next.body.threadId });
+            }
+            assert.equal(a.run.hooks.debugExitCodes.get(session.id), 7, 'the program ends normally');
+            return { session, stops: seen, output: output(session) };
+          } finally {
+            vscode.debug.removeBreakpoints(bps);
+          }
+        }
+
+        // The capabilities: netcoredbg's own (ADR-008) and what VS Code sees through Refyntra's proxy.
+        let r = await debugWith([at(uri, loop, { hitCondition: '== 3' })]);
+        assert.deepEqual(r.stops, [{ reason: 'breakpoint', line: loop, i: '2' }], 'hit count == 3 stops once, at the third iteration');
+        const raw = extras.proxyStats().adapterCapabilities;
+        for (const [k, v] of Object.entries(extras.adapterCapabilities)) assert.equal(!!raw[k], v, `netcoredbg ${k}`);
+        assert.equal(extras.hooks.capabilities.supportsLogPoints, true);
+        assert.equal(extras.hooks.capabilities.supportsHitConditionalBreakpoints, true);
+        assert.equal(extras.proxyStats().swallowedStops, 3, 'hits 1, 2 and 4 were real stops the proxy resumed');
+
+        r = await debugWith([at(uri, loop, { hitCondition: '% 2' })]);
+        assert.deepEqual(r.stops.map((x) => x.i), ['1', '3'], 'hit count % 2 stops at every second hit');
+
+        r = await debugWith([at(uri, loop, { logMessage: 'i={i} total={total}' })]);
+        assert.deepEqual(r.stops, [], 'a logpoint never stops');
+        assert.match(r.output, /i=0 total=0\ni=1 total=0\ni=2 total=1\ni=3 total=5\n/);
+        assert.match(r.output, /Total 24 False/);
+
+        r = await debugWith([at(uri, loop, { logMessage: 'late i={i}', condition: 'i >= 2' })]);
+        assert.deepEqual(r.stops, []);
+        assert.equal((r.output.match(/late i=\d/g) ?? []).join(','), 'late i=2,late i=3', 'the condition still filters the logpoint');
+
+        // Step Over a call that runs into a logpoint: it logs, and the step ends at the next statement as usual.
+        const plain = at(uri, addLine);
+        const log = at(calc, squareLine, { logMessage: 'sq {x}' });
+        vscode.debug.addBreakpoints([plain, log]);
         try {
-          await waitFor(() => extras.hooks.messages.some((m) => /does not support logpoints/.test(m)), 'the logpoint note', 10000);
-          await waitFor(() => extras.hooks.messages.some((m) => /does not support hit counts/.test(m)), 'the hit count note', 10000);
+          const session = await startedSession(() => a.run.debug(target(a, 'ConsoleApp').id), 'refyntra-dotnet');
+          const done = ended(session);
+          const first = await waitFor(() => eventsOf(session, 'stopped')[0], 'the breakpoint on the Add line', 240000);
+          assert.equal((await session.customRequest('stackTrace', { threadId: first.body.threadId, startFrame: 0, levels: 1 })).stackFrames[0].line, addLine + 1);
+          assert.match(output(session), /sq 0\nsq 1\nsq 2\nsq 3\n/);
+          await session.customRequest('next', { threadId: first.body.threadId });
+          const step = await waitFor(() => eventsOf(session, 'stopped')[1], 'the end of the step', 120000);
+          assert.equal(step.body.reason, 'step');
+          const f = (await session.customRequest('stackTrace', { threadId: step.body.threadId, startFrame: 0, levels: 1 })).stackFrames[0];
+          assert.equal(f.line, bigLine + 1, 'Step Over ends at the next statement');
+          assert.match(output(session), /sq 3\nsq 2\n/, 'the logpoint inside the stepped-over call logged');
+          await session.customRequest('continue', { threadId: step.body.threadId });
+          await Promise.race([done, new Promise((_, rej) => setTimeout(() => rej(new Error('session did not end')), 60000))]);
+          assert.equal(eventsOf(session, 'stopped').length, 2);
         } finally {
-          vscode.debug.removeBreakpoints([log, hit]);
+          vscode.debug.removeBreakpoints([plain, log]);
         }
       },
     ],
@@ -454,6 +527,26 @@ exports.cases = ({ api, csharp, waitFor }) => {
         assert.match(status.netcoredbg.version, /netcoredbg 3\.2\.0-1092/);
         assert.match(status.debugpy.version, /debugpy 1\.8\.22/);
         assert.match(a.healthPage.model().sections.map((s) => s.headline).join('\n'), /Run and debug: ready/);
+      },
+    ],
+    [
+      'run: Run with Hot Reload (dotnet watch --non-interactive) shows its state in the status bar',
+      async () => {
+        const a = await ready();
+        const session = await a.run.run(target(a, 'ConsoleApp').id, true);
+        try {
+          assert.ok(session.watch, 'a watch run has the Hot Reload indicator');
+          // The console app exits (code 7); dotnet watch then waits for a file change.
+          await waitFor(() => session.watch.status.state === 'waiting', 'the indicator says waiting', 240000).catch((e) => {
+            throw new Error(`${e.message}; state ${session.watch.status.state}; output:
+${session.output.slice(-3000)}`);
+          });
+          assert.equal(session.watch.text(), '$(watch) Hot Reload: waiting for changes');
+        } finally {
+          a.run.stop(target(a, 'ConsoleApp').id);
+          await Promise.race([session.done, new Promise((_, rej) => setTimeout(() => rej(new Error(`watch did not stop: pid ${session.pid}
+${session.output.slice(-1500)}`)), 30000))]);
+        }
       },
     ],
     [

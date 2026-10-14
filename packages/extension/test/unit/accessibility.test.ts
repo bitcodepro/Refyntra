@@ -427,6 +427,8 @@ describe('keyboard reachability of commands (package.json + status bar menu)', (
     const viewToolbar = new Set(['refyntra.showMenu', 'refyntra.statusMenu', 'refyntra.related.pin', 'refyntra.related.unpin', 'refyntra.related.refresh', 'refyntra.stackTrace.clear', 'refyntra.stop', 'refyntra.restart', 'refyntra.run.refresh']);
     for (const c of pkg.contributes.commands.map((x) => x.command)) {
       if (INTERNAL.includes(c) || viewToolbar.has(c)) continue;
+      // The Hot Reload status bar item runs it (shown only during a dotnet watch run); also in the palette.
+      if (c === 'refyntra.showWatchTerminal') continue;
       // Task Context view: title-bar and item commands, all in the palette; the menu leads to the view (Switch).
       if (c.startsWith('refyntra.taskContext.') && inMenu.has('refyntra.taskContext.switch')) continue;
       // EF Core view (shown when the workspace has a DbContext): title-bar and item commands, all in the palette.

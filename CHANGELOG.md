@@ -4,6 +4,20 @@ All notable changes are listed here. The project is alpha; nothing has been rele
 
 ## Unreleased
 
+### Added (debugger)
+
+- **Logpoints and hit counts for C#** (`refyntra-dotnet`): netcoredbg has neither, so Refyntra runs it behind its own
+  DAP proxy, which sends plain breakpoints, counts hits (`N`, `== N`, `>= N`, `> N`, `< N`, `<= N`, `% N`), evaluates the
+  `{expressions}` of a logpoint in the stopped frame, writes the line to the Debug Console and resumes without VS Code
+  seeing the stop. Works with conditions; Step Over a call that runs into a logpoint still ends at the next statement.
+  Each hit is a real stop and resume (slower in hot loops). The warnings that both were unsupported are gone.
+- **Run with Hot Reload status**: a status bar item for `dotnet watch` runs (building, watching, applied, restart
+  needed, failed, waiting), **Refyntra: Show Hot Reload Terminal**, Restart keeps the watch mode, and
+  `refyntra.run.hotReload.rudeEdit` (`restart` = `dotnet watch --non-interactive`, or `ask`): watch's own y/n prompt
+  cannot be answered from Refyntra's terminal (not a console).
+- Documented: Set Next Statement and Edit and Continue (code changes while paused) stay unavailable; netcoredbg has no
+  request for them (ADR-008).
+
 ### Added (EF Core tools)
 
 - **Refyntra EF Core view**: DbContexts → migrations in EF Core's order (by `[Migration]` id, custom folders and

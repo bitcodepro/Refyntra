@@ -3,7 +3,10 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { EngineClient } from '@refyntra/application';
+import { NetcoredbgProxyAdapter } from './dotnetDebugProxy';
 import { pythonInterpreter } from './lspServers';
+import { WatchIndicator, rudeEditPolicy } from './watchStatus';
+import { watchArgs } from './watchModel';
 import {
   DOTNET_DEBUG_TYPE,
   type DotnetDebugConfiguration,
@@ -147,6 +150,8 @@ export interface RunSession {
   exitCode?: number | null;
   output: string;
   execution?: vscode.TaskExecution;
+  /** Run with Hot Reload: the dotnet watch status bar indicator. */
+  watch?: WatchIndicator;
   stop(): void;
   readonly done: Promise<number | null>;
 }
@@ -182,6 +187,8 @@ function spawnCommand(command: string, args: string[], cwd: string, env: Record<
   }
   return spawn(command, args, { cwd, env: fullEnv, detached: process.platform !== 'win32' });
 }
+
+let runInstances = 0;
 
 /** A Pseudoterminal that runs one command, shows its output, forwards input and reports the exit code. */
 class ProcessTerminal implements vscode.Pseudoterminal {
@@ -222,8 +229,13 @@ class ProcessTerminal implements vscode.Pseudoterminal {
     child.stdout?.on('data', onData);
     child.stderr?.on('data', onData);
     child.on('error', (e) => this.finish(null, `Could not start ${step.command}: ${e.message}`));
+    // 'close' waits until every holder of the output pipes is gone; a build server started by the command (dotnet
+    // watch) may keep them open after the command itself exited, so its exit counts after a short grace period.
+    let closed = false;
+    child.on('exit', (code) => setTimeout(() => !closed && child.emit('close', code), 2000).unref());
     child.on('close', (code) => {
-      if (this.child !== child) return;
+      if (closed || this.child !== child) return;
+      closed = true;
       if (code === 0 && i + 1 < this.steps.length) {
         void this.run(i + 1);
         return;
@@ -576,11 +588,13 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
     }
     const profile = r.target.dotnet?.profiles.find((p) => p.name === r.choice.profile);
     const browser = r.target.dotnet?.project.kind === 'web' && profile?.launchBrowser ? profile : undefined;
-    return this.startSession(r.target, this.runSteps(r.target, r.choice, watch), `${watch ? 'Watch' : 'Run'}: ${r.target.label}`, browser ? (url) => this.openBrowser(browserUrl(browser, url)) : undefined);
+    const steps = this.runSteps(r.target, r.choice, watch);
+    if (watch && r.target.language === 'dotnet') steps[0] = { ...steps[0]!, args: watchArgs(steps[0]!.args, rudeEditPolicy()) };
+    return this.startSession(r.target, steps, `${watch ? 'Watch' : 'Run'}: ${r.target.label}`, browser ? (url) => this.openBrowser(browserUrl(browser, url)) : undefined, watch && r.target.language === 'dotnet');
   }
 
   /** Starts a target in a Refyntra terminal (a VS Code task with a custom execution): output, input, exit code. */
-  async startSession(target: RunTarget, steps: { command: string; args: string[]; cwd: string; env: Record<string, string> }[], name: string, onListening?: (url: string) => void): Promise<RunSession> {
+  async startSession(target: RunTarget, steps: { command: string; args: string[]; cwd: string; env: Record<string, string> }[], name: string, onListening?: (url: string) => void, watch = false): Promise<RunSession> {
     const prev = this.sessions.get(target.id);
     if (prev) {
       prev.stop();
@@ -589,10 +603,18 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
     let resolve!: (code: number | null) => void;
     const done = new Promise<number | null>((r) => (resolve = r));
     let opened = false;
+    const indicator = watch
+      ? new WatchIndicator(
+          target.label,
+          () => vscode.window.terminals.find((t) => t.name.includes(name))?.show(true),
+          () => void this.run(target.id, true),
+        )
+      : undefined;
     const state = {
       output: '',
       resolve: (code: number | null) => resolve(code),
       onOutput: (text: string) => {
+        indicator?.onOutput(text);
         if (opened || !onListening) return;
         const url = listeningUrl(state.output.slice(-2000) + text);
         if (url) {
@@ -615,9 +637,12 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
       },
       stop: () => terminal?.stop(),
       done,
+      ...(indicator ? { watch: indicator } : {}),
     };
     const task = new vscode.Task(
-      { type: 'refyntra-run', target: target.id },
+      // A new instance number per start: VS Code treats tasks with equal definitions as the same task (a second start
+      // of the same target would reuse the previous execution).
+      { type: 'refyntra-run', target: target.id, instance: ++runInstances, ...(watch ? { watch: true } : {}) },
       vscode.TaskScope.Workspace,
       name,
       'Refyntra',
@@ -634,6 +659,8 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
     this.changed.fire(undefined);
     session.execution = await vscode.tasks.executeTask(task);
     void done.then(() => {
+      indicator?.ended();
+      indicator?.dispose();
       if (this.sessions.get(target.id) === session) this.sessions.delete(target.id);
       this.updateContext();
       this.changed.fire(undefined);
@@ -654,7 +681,7 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
     const node = arg as TreeNode | undefined;
     const id = node && typeof node === 'object' && 'kind' in node && (node.kind === 'target' || node.kind === 'profile') ? node.target.id : [...this.sessions.keys()][0];
     const t = this.targetsCache.find((x) => x.id === id);
-    if (t) await this.run(t.id);
+    if (t) await this.run(t.id, !!(id && this.sessions.get(id)?.watch));
   }
 
   openBrowser(url: string | undefined): void {
@@ -908,7 +935,8 @@ export function registerRun(context: vscode.ExtensionContext, engine: EngineClie
       createDebugAdapterDescriptor: () => {
         const exe = service.debuggers.netcoredbg();
         if (!exe) throw new Error(`.NET debugging is unavailable on ${process.platform}-${process.arch}: this Refyntra package has no netcoredbg (no official build for this platform). Running still works (Ctrl+F5).`);
-        return new vscode.DebugAdapterExecutable(exe, ['--interpreter=vscode'], { cwd: path.dirname(exe) });
+        // netcoredbg behind Refyntra's DAP proxy, which adds logpoints and hit counts (ADR-008).
+        return new vscode.DebugAdapterInlineImplementation(new NetcoredbgProxyAdapter(exe));
       },
     }),
     vscode.debug.registerDebugConfigurationProvider(
@@ -1089,6 +1117,7 @@ export function registerRun(context: vscode.ExtensionContext, engine: EngineClie
     vscode.languages.registerCodeLensProvider([{ language: 'csharp', scheme: 'file' }, { language: 'python', scheme: 'file' }, { language: 'rust', scheme: 'file' }], service),
     vscode.commands.registerCommand('refyntra.run', (arg?: unknown) => service.run(arg)),
     vscode.commands.registerCommand('refyntra.runWatch', (arg?: unknown) => service.run(arg, true)),
+    vscode.commands.registerCommand('refyntra.showWatchTerminal', () => [...service.sessions.values()].find((s) => s.watch)?.watch?.reveal()),
     vscode.commands.registerCommand('refyntra.debug', (arg?: unknown) => service.debug(arg)),
     vscode.commands.registerCommand('refyntra.stop', (arg?: unknown) => service.stop(arg)),
     vscode.commands.registerCommand('refyntra.restart', (arg?: unknown) => service.restart(arg)),
