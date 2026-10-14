@@ -23,6 +23,8 @@ export const RULE_SETTING_DEFAULTS: Readonly<Record<string, RuleLevel>> = {
 
 /** An unknown or missing setting value falls back to the rule's default (never to a stronger level). */
 export function ruleLevel(ruleId: string, configured: unknown): RuleLevel {
+  // Pattern inspections (protocol 1.19, "ORS-<name>"): on unless a setting turns them off; their severity is the pattern's.
+  if (ruleId.startsWith('ORS-')) return typeof configured === 'string' && (INSPECTION_LEVELS as readonly string[]).includes(configured) ? (configured as RuleLevel) : 'warning';
   const allowed = ruleId === 'OR1001' ? RULE_LEVELS : INSPECTION_LEVELS;
   if (typeof configured === 'string' && (allowed as readonly string[]).includes(configured)) return configured as RuleLevel;
   return RULE_SETTING_DEFAULTS[ruleId] ?? 'off';
@@ -123,4 +125,13 @@ export function explain(diagnostics: readonly RuleDiagnostic[], abstentions: rea
     for (const a of as) lines.push(`- ${a.ruleId} ${a.reason}${a.location ? ` (${shortPath(a.location.uri)}:${a.location.range.start.line + 1})` : ''}: ${a.message ?? ''}`);
   }
   return lines.join('\n') + '\n';
+}
+
+/**
+ * The severity of a pattern inspection result ("ORS-<name>"): a `refyntra.rules.ORS-<name>` setting wins, else the
+ * severity saved with the pattern (the host passes it on).
+ */
+export function structuralSeverity(hostSeverity: unknown, configured: unknown): 'hint' | 'information' | 'warning' | 'error' | undefined {
+  if (typeof configured === 'string' && (INSPECTION_LEVELS as readonly string[]).includes(configured)) return severityOf(configured as RuleLevel);
+  return hostSeverity === 'error' || hostSeverity === 'hint' || hostSeverity === 'information' ? hostSeverity : 'warning';
 }

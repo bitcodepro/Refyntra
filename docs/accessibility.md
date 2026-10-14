@@ -122,6 +122,13 @@ checked, and what has **not** been checked by a person with assistive technology
   announced in a polite live region with the new signature. Esc cancels; focus stays on the moved control. VS Code
   theme colours only, no external files, strict CSP. `refyntra.changeSignature.editor: "quickPick"` keeps the
   QuickPick steps.
+- Structural Search panel (webview): labelled text areas for the pattern and the replacement, a placeholder table with
+  a caption, column headers and a label per input ("Type of $x$"), the scope as a radio group in a fieldset, real
+  buttons with text next to their (aria-hidden, local SVG) icons; result rows are buttons whose label names the line and
+  the code, each with its own "Replace the match at line N of file" button. Problems are a `role="alert"` paragraph;
+  loads, saves and result counts are announced in a polite live region. Ctrl+Enter in the pattern searches. The
+  Structural Search Results view is a normal tree (file: "N matches"; match: "Line N: code; $x$ = value").
+  VS Code theme colours only, no external files, strict CSP.
 - Status bar: the item text has a word for every state (Ready / Loading / Partial / Failed) next to the icon; its
   screen-reader label is the sentence described above; loading also shows as window progress. Enter opens the status
   menu, whose first row states the situation in words.

@@ -26,8 +26,10 @@ export const PROTOCOL_MAJOR = 1;
  * 1.17: Go to metadata (`code/metadataSource`: decompiled or PDB-embedded sources of referenced assemblies).
  * 1.18: EF Core tools (`efcore/migrations`: DbContexts with their migrations, snapshot and configurations, read from
  *   source) and the inspection OR1011 (possible N+1) with the fix `csharp.edit.fix.addInclude`.
+ * 1.19: Structural search and replace (`code/structuralSearch`, `code/structuralReplace`, `analysis/run`
+ *   `structuralPatterns`: pattern inspections ORS-<name> with quick fixes `csharp.edit.fix.structural.*`).
  */
-export const PROTOCOL_MINOR = 18;
+export const PROTOCOL_MINOR = 19;
 
 /** Zero-based line, UTF-16 code unit character. */
 export interface Position {
@@ -1179,6 +1181,8 @@ export interface PrepareParams extends WorkspaceParams {
   registration?: RegistrationParams;
   /** Fix in scope (protocol 1.11): the edit action and the scope around `documentUri`. */
   fixAll?: FixAllParams;
+  /** Structural replace (protocol 1.19, action csharp.structuralReplace). */
+  structural?: import('./structural').StructuralReplaceParams;
 }
 export type PrepareResult =
   | { kind: 'prepared'; plan: RefactorPlanDto }
@@ -1274,6 +1278,10 @@ export interface MethodMap {
   'code/metadataSource': [MetadataSourceParams, MetadataSourceResult];
   /** Protocol 1.18. */
   'efcore/migrations': [EfMigrationsParams, EfMigrationsResult];
+  /** Protocol 1.19. */
+  'code/structuralSearch': [import('./structural').StructuralSearchParams, import('./structural').StructuralSearchResult];
+  /** Protocol 1.19: a plan like refactor/prepare. */
+  'code/structuralReplace': [import('./structural').StructuralReplaceParams, PrepareResult];
   'code/references': [SymbolQueryParams, LocationsResult];
   'code/implementations': [SymbolQueryParams, LocationsResult];
   'refactor/prepare': [PrepareParams, PrepareResult];
@@ -1360,6 +1368,8 @@ export interface AnalysisRunParams extends WorkspaceParams {
   uri?: string;
   /** Protocol 1.16: documents to run the per-document inspections (OR1002–OR1010) on, e.g. the open C# files. */
   documents?: string[];
+  /** Protocol 1.19: pattern inspections (rule ids "ORS-<name>") run on `documents`. */
+  structuralPatterns?: import('./structural').StructuralPattern[];
 }
 
 /** Protocol 1.16: a quick fix of an inspection result, an edit action (`csharp.edit.fix.*`) computed at its start. */
@@ -1376,7 +1386,8 @@ export interface RuleRelatedLocation {
 /** A proven rule result. Published in the Problems view; never produced for an unproven path. */
 export interface RuleDiagnostic {
   id: AnalysisRuleId | string;
-  severity: 'warning';
+  /** "warning" for the built-in rules; pattern inspections (1.19, "ORS-<name>") carry the pattern's severity. */
+  severity: 'warning' | 'error' | 'information' | 'hint';
   message: string;
   /** Primary location (for OR1001: the singleton registration). */
   location: Location;

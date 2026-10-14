@@ -608,6 +608,14 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
   }
 
   prepare(req: PrepareRequest, token?: CancellationToken): Promise<RouteResult<PrepareResult>> {
+    if (req.structural) {
+      // Structural replace (protocol 1.19): code/structuralReplace answers like refactor/prepare.
+      const structural = req.structural;
+      return this.semantic('code/structuralReplace', token, async (s, snapshotId, traceId): Promise<PrepareResult> => {
+        if (s.protocolMinor < 19) return { kind: 'unavailable', reasonCode: 'ProtocolTooOld', message: 'The C# host is too old for structural replace; update the extension.' };
+        return s.transport.request('code/structuralReplace', { traceId, workspaceId: this.opts.workspaceId, snapshotId, ...structural }, token);
+      });
+    }
     return this.semantic('refactor/prepare', token, (s, snapshotId, traceId) =>
       s.transport.request('refactor/prepare', { traceId, workspaceId: this.opts.workspaceId, snapshotId, actionId: req.actionId, symbolId: req.symbolId, newName: req.newName, ...(req.renameFile ? { renameFile: true } : {}), ...(req.targetFolderUri ? { targetFolderUri: req.targetFolderUri } : {}), ...(req.documentUri ? { documentUri: req.documentUri } : {}), ...(req.cleanup ? { cleanup: req.cleanup } : {}), ...(req.generatedEdits ? { generatedEdits: req.generatedEdits } : {}), ...(req.range ? { range: req.range } : {}), ...(req.signature ? { signature: req.signature } : {}), ...(req.registration ? { registration: req.registration } : {}), ...(req.fixAll ? { fixAll: req.fixAll } : {}) }, token),
     );
@@ -628,13 +636,14 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
   }
 
   /** `analysis/run` (rules such as OR1001). Backend output is untrusted: malformed entries are dropped. */
-  analyze(params: { uri?: string; documents?: readonly string[] }, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').AnalysisRunResult>> {
+  analyze(params: import('./adapters').AnalyzeRequest, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').AnalysisRunResult>> {
     return this.semantic(
       'analysis/run',
       token,
       async (s, snapshotId, traceId) => {
         const documents = s.protocolMinor >= 16 && params.documents?.length ? { documents: [...params.documents] } : {};
-        const r = await s.transport.request('analysis/run', { traceId, workspaceId: this.opts.workspaceId, snapshotId, ...(params.uri ? { uri: params.uri } : {}), ...documents }, token);
+        const patterns = s.protocolMinor >= 19 && params.structuralPatterns?.length && params.documents?.length ? { structuralPatterns: [...params.structuralPatterns] } : {};
+        const r = await s.transport.request('analysis/run', { traceId, workspaceId: this.opts.workspaceId, snapshotId, ...(params.uri ? { uri: params.uri } : {}), ...documents, ...patterns }, token);
         const isLoc = (l: unknown): boolean => !!l && typeof (l as { uri?: unknown }).uri === 'string' && !!(l as { range?: unknown }).range;
         return {
           diagnostics: Array.isArray(r?.diagnostics)
@@ -763,6 +772,31 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
         reasonCode: r?.reasonCode ?? null,
         message: typeof r?.message === 'string' ? r.message : null,
         decompilerVersion: typeof r?.decompilerVersion === 'string' ? r.decompilerVersion : '',
+        snapshotId: r?.snapshotId ?? snapshotId,
+      };
+    });
+  }
+
+  /** Structural search (protocol 1.19); null for an older host. Matches without a uri or range are dropped. */
+  structuralSearch(params: import('./adapters').StructuralSearchRequest, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').StructuralSearchResult | null>> {
+    return this.semantic('code/structuralSearch', token, async (s, snapshotId, traceId) => {
+      if (s.protocolMinor < 19) return null;
+      const r = await s.transport.request('code/structuralSearch', { traceId, workspaceId: this.opts.workspaceId, snapshotId, ...params }, token);
+      const matches = Array.isArray(r?.matches)
+        ? r.matches
+            .filter((m) => m && typeof m.uri === 'string' && m.range && m.range.start && m.range.end)
+            .map((m) => ({ uri: m.uri, range: m.range, lineText: typeof m.lineText === 'string' ? m.lineText : '', values: m.values && typeof m.values === 'object' ? m.values : {} }))
+        : [];
+      return {
+        patternKind: r?.patternKind ?? null,
+        matches,
+        truncated: !!r?.truncated,
+        filesSearched: typeof r?.filesSearched === 'number' ? r.filesSearched : 0,
+        filesWithMatches: typeof r?.filesWithMatches === 'number' ? r.filesWithMatches : 0,
+        notes: Array.isArray(r?.notes) ? r.notes.filter((n) => typeof n === 'string') : [],
+        reasonCode: r?.reasonCode ?? null,
+        message: typeof r?.message === 'string' ? r.message : null,
+        elapsedMs: typeof r?.elapsedMs === 'number' ? r.elapsedMs : 0,
         snapshotId: r?.snapshotId ?? snapshotId,
       };
     });

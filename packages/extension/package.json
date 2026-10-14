@@ -682,6 +682,24 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "refyntra.structuralSearch",
+        "title": "Structural Search…",
+        "category": "Refyntra",
+        "icon": "$(search-fuzzy)"
+      },
+      {
+        "command": "refyntra.structuralSearch.replaceAll",
+        "title": "Structural Search: Replace All…",
+        "category": "Refyntra",
+        "icon": "$(replace-all)"
+      },
+      {
+        "command": "refyntra.structuralSearch.rerun",
+        "title": "Structural Search: Search Again",
+        "category": "Refyntra",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "refyntra.ef.checkStatus",
         "title": "EF Core: Check Migration Status",
         "category": "Refyntra",
@@ -735,6 +753,28 @@
         "command": "refyntra.ef.showSql",
         "title": "Show SQL for LINQ",
         "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.structuralSearch.clear",
+        "title": "Structural Search: Clear Results",
+        "category": "Refyntra",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "refyntra.structuralSearch.showMore",
+        "title": "Structural Search: Show More Matches",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.structuralSearch.openMatch",
+        "title": "Structural Search: Open Match",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.structuralSearch.replaceMatch",
+        "title": "Replace This Match…",
+        "category": "Refyntra",
+        "icon": "$(replace)"
       }
     ],
     "taskDefinitions": [
@@ -1016,6 +1056,18 @@
         {
           "command": "refyntra.ef.showSql",
           "when": "editorLangId == csharp"
+        },
+        {
+          "command": "refyntra.structuralSearch.showMore",
+          "when": "false"
+        },
+        {
+          "command": "refyntra.structuralSearch.openMatch",
+          "when": "false"
+        },
+        {
+          "command": "refyntra.structuralSearch.replaceMatch",
+          "when": "false"
         }
       ],
       "view/title": [
@@ -1273,6 +1325,21 @@
           "command": "refyntra.ef.removeLastMigration",
           "when": "view == refyntra.efCoreView",
           "group": "1_ef@3"
+        },
+        {
+          "command": "refyntra.structuralSearch.rerun",
+          "when": "view == refyntra.structuralResultsView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "refyntra.structuralSearch.replaceAll",
+          "when": "view == refyntra.structuralResultsView && refyntra.structuralHasResults",
+          "group": "navigation@2"
+        },
+        {
+          "command": "refyntra.structuralSearch.clear",
+          "when": "view == refyntra.structuralResultsView",
+          "group": "navigation@3"
         }
       ],
       "view/item/context": [
@@ -1435,6 +1502,16 @@
           "command": "refyntra.ef.removeLastMigration",
           "when": "view == refyntra.efCoreView && viewItem == refyntra.ef.migration.last",
           "group": "1_ef@3"
+        },
+        {
+          "command": "refyntra.structuralSearch.replaceMatch",
+          "when": "view == refyntra.structuralResultsView && viewItem == structuralMatch",
+          "group": "inline"
+        },
+        {
+          "command": "refyntra.structuralSearch.replaceMatch",
+          "when": "view == refyntra.structuralResultsView && viewItem == structuralMatch",
+          "group": "1_modification"
         }
       ],
       "terminal/context": [
@@ -1607,6 +1684,12 @@
           "name": "Refyntra Usages",
           "contextualTitle": "Refyntra",
           "when": "refyntra.usagesViewVisible"
+        },
+        {
+          "id": "refyntra.structuralResultsView",
+          "name": "Structural Search Results",
+          "contextualTitle": "Refyntra",
+          "when": "refyntra.structuralResultsVisible"
         },
         {
           "id": "refyntra.stackTraceView",

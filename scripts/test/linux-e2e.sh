@@ -7,6 +7,8 @@
 # Docker volumes keep the downloaded VS Code (refyntra-vscode-test) and the NuGet cache (refyntra-nuget) between runs.
 # REFYNTRA_TEST_VSCODE_VERSION (default 1.90.2) is passed through.
 # REFYNTRA_VNC=1 (or --vnc): watch the run live, see scripts/test/lib/display.sh and the README.
+# REFYNTRA_E2E_IMAGE / REFYNTRA_SMOKE_IMAGE / REFYNTRA_DOCKER_VOLUME_PREFIX: other image tags and cache volumes, so that
+# parallel work trees do not rebuild each other's image (defaults refyntra-linux-e2e, refyntra-linux-smoke, refyntra).
 set -uo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib/display.sh"
 
@@ -16,8 +18,9 @@ if [ "${1:-}" != "--inside" ]; then
   # Base image of linux.sh (.NET SDK 10 on Ubuntu 24.04 + Node 22) plus what Electron needs headless. Ubuntu 24.04 names
   # several libraries with a t64 suffix (64-bit time_t transition).
   bash "$(dirname "${BASH_SOURCE[0]}")/linux.sh" --build-image-only || exit 1
-  docker build -q -t refyntra-linux-e2e - <<'DOCKERFILE' || exit 1
-FROM refyntra-linux-smoke
+  docker build -q -t "${REFYNTRA_E2E_IMAGE:-refyntra-linux-e2e}" --build-arg BASE="${REFYNTRA_SMOKE_IMAGE:-refyntra-linux-smoke}" - <<'DOCKERFILE' || exit 1
+ARG BASE=refyntra-linux-smoke
+FROM ${BASE}
 RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
       xvfb xauth dbus dbus-x11 procps libglib2.0-bin \
       libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libgtk-3-0t64 libgbm1 libasound2t64 libxkbfile1 libsecret-1-0 \
@@ -34,8 +37,9 @@ DOCKERFILE
   # The target-framework matrix (docs/support/matrix.md) runs the Compat fixture's net8.0 and net9.0 apps and loads a
   # global.json that pins SDK 8: the .NET 8 SDK (with its runtimes) and the .NET 9 runtime, installed next to SDK 10 by
   # Microsoft's dotnet-install script, versions pinned (GlobalJsonTests.PinnedSdk). Only in this image, never on the host.
-  docker build -q -t refyntra-linux-e2e-sdks - <<'DOCKERFILE' || exit 1
-FROM refyntra-linux-e2e
+  docker build -q -t "${REFYNTRA_E2E_IMAGE:-refyntra-linux-e2e}-sdks" --build-arg BASE="${REFYNTRA_E2E_IMAGE:-refyntra-linux-e2e}" - <<'DOCKERFILE' || exit 1
+ARG BASE=refyntra-linux-e2e
+FROM ${BASE}
 RUN curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
  && bash /tmp/dotnet-install.sh --version 8.0.426 --install-dir /usr/share/dotnet --no-path >/dev/null \
  && bash /tmp/dotnet-install.sh --runtime dotnet --version 9.0.21 --install-dir /usr/share/dotnet --no-path >/dev/null \
@@ -45,9 +49,9 @@ DOCKERFILE
   mapfile -t vnc_args < <(vnc_docker_args)
   vnc_note
   # --init: a real init reaps orphans (see linux.sh).
-  exec docker run --rm --init ${vnc_args[@]+"${vnc_args[@]}"} -v "$repo:/src:ro" -v refyntra-vscode-test:/cache/vscode-test -v refyntra-nuget:/root/.nuget/packages \
+  exec docker run --rm --init ${vnc_args[@]+"${vnc_args[@]}"} -v "$repo:/src:ro" -v "${REFYNTRA_DOCKER_VOLUME_PREFIX:-refyntra}-vscode-test:/cache/vscode-test" -v "${REFYNTRA_DOCKER_VOLUME_PREFIX:-refyntra}-nuget:/root/.nuget/packages" \
     -e DOTNET_CLI_TELEMETRY_OPTOUT=1 -e DOTNET_NOLOGO=1 -e REFYNTRA_TEST_VSCODE_VERSION="${REFYNTRA_TEST_VSCODE_VERSION:-1.90.2}" \
-    refyntra-linux-e2e-sdks bash /src/scripts/test/linux-e2e.sh --inside
+    "${REFYNTRA_E2E_IMAGE:-refyntra-linux-e2e}-sdks" bash /src/scripts/test/linux-e2e.sh --inside
 fi
 
 step() { printf '\n==== %s ====\n' "$*"; }

@@ -12,7 +12,7 @@ using Refyntra.Workspaces;
 namespace Refyntra.Host;
 
 /// <summary>Protocol v1 method dispatch. Owns the workspace sessions and the prepared plans of this process.</summary>
-public sealed class Engine : IRpcHandler, IDisposable
+public sealed partial class Engine : IRpcHandler, IDisposable
 {
     public const int ProtocolMajor = 1;
     /// <summary>
@@ -37,8 +37,10 @@ public sealed class Engine : IRpcHandler, IDisposable
     /// 1.16: analysis/run `documents` (per-document inspections OR1002–OR1010) and RuleDiagnostic `fixes` (quick fixes as edit actions).
     /// 1.17: code/metadataSource (go to metadata: decompiled or PDB-embedded sources of referenced assemblies).
     /// 1.18: efcore/migrations (the DbContexts with their migrations, snapshot and configurations, from source) and OR1011.
+    /// 1.19: code/structuralSearch and code/structuralReplace (structural search and replace, ADR-012), analysis/run
+    /// <c>structuralPatterns</c> (pattern inspections ORS-name) and their quick fixes csharp.edit.fix.structural.*.
     /// </summary>
-    public const int ProtocolMinor = 18;
+    public const int ProtocolMinor = 19;
     /// <summary>How long workspace/snapshotBarrier waits for a missing document sequence (tests shorten it).</summary>
     public TimeSpan BarrierTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
@@ -126,6 +128,10 @@ public sealed class Engine : IRpcHandler, IDisposable
                 return await UsagesAsync(Params<UsagesParams>(p), ct).ConfigureAwait(false);
             case "code/metadataSource":
                 return await MetadataSourceAsync(Params<MetadataSourceParams>(p), ct).ConfigureAwait(false);
+            case "code/structuralSearch":
+                return await StructuralSearchAsync(Params<StructuralSearchParams>(p), ct).ConfigureAwait(false);
+            case "code/structuralReplace":
+                return await StructuralReplaceAsync(Params<StructuralReplaceParams>(p), ct).ConfigureAwait(false);
             case "code/fileStructure":
                 return await FileStructureAsync(Params<FileStructureParams>(p), ct).ConfigureAwait(false);
             case "code/editActions":
@@ -775,7 +781,7 @@ public sealed class Engine : IRpcHandler, IDisposable
                 result.Items.Add(new EditActionDto { ActionId = a.ActionId, Title = a.Title, Kind = a.Kind });
             return result;
         }
-        var outcome = await EditActionsPlanner.ComputeAsync(snap, path, range, p.ActionId, ct).ConfigureAwait(false);
+        var outcome = await (StructuralFix(snap, path, range.Start, p.ActionId, ct) ?? EditActionsPlanner.ComputeAsync(snap, path, range, p.ActionId, ct)).ConfigureAwait(false);
         result.ReasonCode = outcome.ReasonCode;
         result.Message = outcome.Message;
         result.DocumentHash = outcome.DocumentHash;
@@ -963,6 +969,7 @@ public sealed class Engine : IRpcHandler, IDisposable
             result.Abstentions.Add(new RuleAbstentionDto { RuleId = Semantics.Rules.Or1001Rule.Id, Reason = a.Reason, Message = a.Message, Location = Mapper.Location(a.Location), CompositionRoot = a.CompositionRoot });
         // Per-document inspections (protocol 1.16): only the requested documents, each cached by its versions.
         var inspected = new HashSet<string>(UriPaths.PathComparer);
+        var inspectedDocs = new List<Document>();
         foreach (var uri in p.Documents ?? new List<string>())
         {
             ct.ThrowIfCancellationRequested();
@@ -974,6 +981,7 @@ public sealed class Engine : IRpcHandler, IDisposable
             if (doc == null) continue;
             var tree = await doc.GetSyntaxTreeAsync(ct).ConfigureAwait(false);
             if (tree == null) continue;
+            inspectedDocs.Add(doc);
             foreach (var f in await Semantics.Rules.CodeInspections.AnalyzeDocumentAsync(snap, doc, ct).ConfigureAwait(false))
             {
                 var loc = Mapper.Location(Location.Create(tree, f.Span));
@@ -993,6 +1001,8 @@ public sealed class Engine : IRpcHandler, IDisposable
                 });
             }
         }
+        // Pattern inspections (protocol 1.19): the client's saved patterns marked "show as inspection".
+        await AddStructuralInspectionsAsync(snap, inspectedDocs, p.StructuralPatterns, result, ct).ConfigureAwait(false);
         return result;
     }
 
@@ -1003,7 +1013,7 @@ public sealed class Engine : IRpcHandler, IDisposable
         var snap = RequireSnapshot(p.WorkspaceId, p.SnapshotId);
         if (p.ActionId is not ("csharp.rename" or MoveTypePlanner.ActionId or GenerateHandlerPlanner.ActionId or Refactorings.Cleanup.CleanupPlanner.ActionId
             or SafeDeletePlanner.ActionId or ExtractMethodPlanner.ActionId or ChangeSignaturePlanner.ActionId or EditActionsPlanner.IntroduceParameterAction
-            or DiRegistrationPlanner.ActionId or EditActionsPlanner.FixAllAction))
+            or DiRegistrationPlanner.ActionId or EditActionsPlanner.FixAllAction or Refactorings.Structural.StructuralReplace.ActionId))
             return new PrepareResultDto { Kind = "unavailable", ReasonCode = "UnsupportedAction", Message = $"Action {p.ActionId} is not supported." };
         RenameOutcome outcome;
         if (p.ActionId == Refactorings.Cleanup.CleanupPlanner.ActionId)
@@ -1040,7 +1050,13 @@ public sealed class Engine : IRpcHandler, IDisposable
             // Fix in scope (1.11): one edit action in the document, its project or the solution.
             if (p.DocumentUri == null || p.FixAll == null)
                 return new PrepareResultDto { Kind = "unavailable", ReasonCode = "InvalidParams", Message = "Fix in scope needs documentUri and fixAll." };
-            outcome = await EditActionsPlanner.PrepareFixAllAsync(snap, PathOf(p.DocumentUri), p.FixAll.ActionId, p.FixAll.Scope, ct).ConfigureAwait(false);
+            outcome = await (PrepareStructuralFixAll(snap, PathOf(p.DocumentUri), p.FixAll.ActionId, p.FixAll.Scope, ct)
+                ?? EditActionsPlanner.PrepareFixAllAsync(snap, PathOf(p.DocumentUri), p.FixAll.ActionId, p.FixAll.Scope, ct)).ConfigureAwait(false);
+        }
+        else if (p.ActionId == Refactorings.Structural.StructuralReplace.ActionId)
+        {
+            // Structural replace (1.19): the pattern, its replacement and the scope come in params.structural.
+            outcome = await PrepareStructuralAsync(snap, p.Structural, ct).ConfigureAwait(false);
         }
         else
         {
