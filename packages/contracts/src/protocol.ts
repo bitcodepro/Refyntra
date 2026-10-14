@@ -24,8 +24,9 @@ export const PROTOCOL_MAJOR = 1;
  * 1.16: Inspections OR1002–OR1010 (`analysis/run` `documents`) with quick fixes (`RuleDiagnostic.fixes`, edit actions
  *   `csharp.edit.fix.*`).
  * 1.17: Go to metadata (`code/metadataSource`: decompiled or PDB-embedded sources of referenced assemblies).
+ * 1.20: Solution Explorer (`solution/structure`: solution folders, projects, dependencies and items as MSBuild sees them).
  */
-export const PROTOCOL_MINOR = 17;
+export const PROTOCOL_MINOR = 20;
 
 /** Zero-based line, UTF-16 code unit character. */
 export interface Position {
@@ -783,6 +784,69 @@ export interface RunnableProjectInfo {
   launchSettingsUri?: string | null;
 }
 
+/** solution/structure (protocol 1.20): a solution folder of the .sln / .slnx file. */
+export interface SolutionFolder {
+  /** The folder's GUID (.sln) or its path "/a/b/" (.slnx). */
+  id: string;
+  name: string;
+  parentId?: string | null;
+  /** Solution items (files) of the folder. */
+  fileUris: string[];
+}
+
+/** An item of a project: a Compile item of the evaluation, AdditionalFiles, or another file (None, Content …). */
+export interface ProjectItem {
+  uri: string;
+  itemType: string;
+  /** Where the item shows inside the project, '/'-separated (Link metadata for linked files). */
+  virtualPath: string;
+  /** The file lives outside the project folder (linked). */
+  linked: boolean;
+}
+
+export interface PackageReferenceInfo {
+  id: string;
+  /** The requested version (project file, Directory.Packages.props or VersionOverride); null when not written down. */
+  version?: string | null;
+  /** The version restore resolved (obj/project.assets.json), when restored. */
+  resolvedVersion?: string | null;
+  /** The version comes from Directory.Packages.props (Central Package Management). */
+  central: boolean;
+  versionOverride: boolean;
+}
+
+export interface ProjectStructure {
+  name: string;
+  projectUri: string;
+  folderId?: string | null;
+  /** web, console, worker, desktop, test, library, maui, blazor-wasm. */
+  kind: string;
+  targetFrameworks: string[];
+  /** loaded, partial, failed, notLoaded. */
+  state: string;
+  sdk?: string | null;
+  centralPackageManagement: boolean;
+  packagesPropsUri?: string | null;
+  projectReferences: { name: string; projectUri: string }[];
+  packages: PackageReferenceInfo[];
+  frameworks: string[];
+  analyzers: { name: string; uri?: string | null }[];
+  items: ProjectItem[];
+  /** C# files in the project folder that the evaluation does not compile. */
+  excludedUris: string[];
+  itemsTruncated: boolean;
+}
+
+export interface SolutionStructureResult {
+  state: string;
+  snapshotId?: string | null;
+  solutionUri?: string | null;
+  /** "sln", "slnx" or "project". */
+  format: string;
+  folders: SolutionFolder[];
+  projects: ProjectStructure[];
+}
+
 export interface RunnableProjectsResult {
   projects: RunnableProjectInfo[];
   /** Engine state of the workspace (Loading: the list may still be empty). */
@@ -1228,6 +1292,8 @@ export interface MethodMap {
   'code/tests': [TestsParams, TestsResult];
   /** Protocol 1.17. */
   'code/metadataSource': [MetadataSourceParams, MetadataSourceResult];
+  /** Protocol 1.20. */
+  'solution/structure': [WorkspaceParams, SolutionStructureResult];
   'code/references': [SymbolQueryParams, LocationsResult];
   'code/implementations': [SymbolQueryParams, LocationsResult];
   'refactor/prepare': [PrepareParams, PrepareResult];

@@ -1392,7 +1392,7 @@ scenarios['ts-delegated'] = [
 
 // ---- accessibility -----------------------------------------------------------------------------------
 // Internal commands: invoked by buttons and tree items, hidden from the Command Palette on purpose.
-const INTERNAL_COMMANDS = ['refyntra.openLocation', 'refyntra.openMetadata', 'refyntra.runRestore', 'refyntra.related.open', 'refyntra.nativeRename', 'refyntra.stackTrace.openFrame', 'refyntra.stackTrace.related', 'refyntra.taskContext.addFindItem', 'refyntra.taskContext.addFromRelated', 'refyntra.codeLens.related', 'refyntra.selectRunTargetById', 'refyntra.pickDotnetProcess', 'refyntra.immediate.clear', 'refyntra.editAction', 'refyntra.usages.open', 'refyntra.usages.activate', 'refyntra.usages.closeSession', 'refyntra.usages.showMore', 'refyntra.tests.run', 'refyntra.tests.debug', ...['kind', 'project', 'folder', 'file', 'type', 'member'].flatMap((g) => [`refyntra.usages.group.${g}`, `refyntra.usages.ungroup.${g}`])];
+const INTERNAL_COMMANDS = ['refyntra.openLocation', 'refyntra.openMetadata', 'refyntra.runRestore', 'refyntra.related.open', 'refyntra.nativeRename', 'refyntra.stackTrace.openFrame', 'refyntra.stackTrace.related', 'refyntra.taskContext.addFindItem', 'refyntra.taskContext.addFromRelated', 'refyntra.codeLens.related', 'refyntra.selectRunTargetById', 'refyntra.pickDotnetProcess', 'refyntra.immediate.clear', 'refyntra.editAction', 'refyntra.usages.open', 'refyntra.usages.activate', 'refyntra.usages.closeSession', 'refyntra.usages.showMore', 'refyntra.tests.run', 'refyntra.tests.debug', 'refyntra.solution.open', 'refyntra.solution.revealInExplorer', 'refyntra.solution.revealInOS', 'refyntra.solution.copyPath', 'refyntra.projectFile.loadVersions', ...['kind', 'project', 'folder', 'file', 'type', 'member'].flatMap((g) => [`refyntra.usages.group.${g}`, `refyntra.usages.ungroup.${g}`])];
 
 common.push([
   'keyboard: every user command is in the Command Palette and the status bar menu leads to the main ones',
@@ -1593,10 +1593,16 @@ scenarios.tests = require('./testing.cjs').cases({ api, csharp, waitFor });
 scenarios.compat = require('./compat.cjs').cases({ api, csharp, waitFor });
 scenarios['compat-sdk-missing'] = require('./compat.cjs').sdkMissing({ api, csharp, waitFor });
 
+// Solution Explorer, project operations, NuGet, project file editing (test/suite/solution.cjs); the tree also on Shop.
+scenarios.solution = require('./solution.cjs').cases({ api, csharp, waitFor });
+scenarios.shop.push(...require('./solution.cjs').shop({ api, csharp, waitFor }));
+
 scenarios['visual-dark'] = require('./visual.cjs').cases({ api, csharp, waitFor });
 scenarios['visual-light'] = require('./visual.cjs').cases({ api, csharp, waitFor });
 scenarios['visual-tests-dark'] = require('./visualTests.cjs').cases({ api, csharp, waitFor });
 scenarios['visual-tests-light'] = require('./visualTests.cjs').cases({ api, csharp, waitFor });
+scenarios['visual-solution-dark'] = require('./visualSolution.cjs').cases({ api, csharp, waitFor });
+scenarios['visual-solution-light'] = require('./visualSolution.cjs').cases({ api, csharp, waitFor });
 
 exports.run =async function run() {
   const name = process.env.REFYNTRA_TEST_SCENARIO;

@@ -175,6 +175,10 @@ export interface LanguageAdapter {
    */
   editActions?(uri: string, range: import('@refyntra/contracts').Range, actionId: string | undefined, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').EditActionsResult | null>>;
   runnableProjects?(token?: CancellationToken): Promise<import('@refyntra/contracts').RunnableProjectsResult | null>;
+  /** Optional (protocol 1.20): the Solution Explorer model (solution/structure, no barrier); null when the host is older. */
+  solutionStructure?(token?: CancellationToken): Promise<import('@refyntra/contracts').SolutionStructureResult | null>;
+  /** Optional: reload the workspace in the running host (workspace/reload) after project files changed; false when not running. */
+  reloadWorkspace?(token?: CancellationToken): Promise<boolean>;
   /** Optional (protocol 1.10): postfix templates after the dot before the position (barrier first; null for an older host). */
   postfix?(uri: string, position: Position, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').PostfixResult | null>>;
   /**

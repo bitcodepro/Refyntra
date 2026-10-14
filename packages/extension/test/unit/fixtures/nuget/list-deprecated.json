@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "parameters": "--deprecated",
+  "projects": [
+    {
+      "path": "/work/App/App.csproj",
+      "frameworks": [
+        {
+          "framework": "net8.0",
+          "topLevelPackages": [
+            { "id": "Old.Lib", "requestedVersion": "1.0.0", "resolvedVersion": "1.0.0", "deprecationReasons": ["Legacy"], "alternativePackage": { "id": "New.Lib", "versionRange": ">= 2.0.0" } }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -172,6 +172,8 @@ const visualSettings = {
   'refyntra.run.editorButtons': false,
   'refyntra.run.view': false,
   'refyntra.run.codeLens': false,
+  // The Solution view is off for the older screenshots (their baselines predate it); the solution cases switch it on.
+  'refyntra.solutionExplorer.enabled': false,
 };
 const visualThemes = { dark: 'Default Dark Modern', light: 'Default Light Modern' };
 
@@ -195,6 +197,16 @@ const scenarios = visual
         settings: { ...visualSettings, 'workbench.colorTheme': colorTheme, 'testing.openTesting': 'neverOpen', 'testing.automaticallyOpenPeekView': 'never', 'testing.followRunningTest': false },
         launchArgs: ['--disable-gpu'],
         env: { REFYNTRA_TEST_NO_DURATIONS: '1', REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '', REFYNTRA_VISUAL_OUT: path.join(process.env.REFYNTRA_VISUAL_OUT || path.join(repo, 'test-results', 'visual', 'actual'), theme) },
+      })),
+      // The Solution view and the NuGet panel (ADR-013) on a temp copy of the Explorer fixture (Explorer.sln only).
+      Object.entries(visualThemes).map(([theme, colorTheme]) => ({
+        name: `visual-solution-${theme}`,
+        fixtureCopy: ['Explorer', 'Explorer.sln'],
+        removeAfterCopy: ['Explorer.slnx'],
+        trusted: true,
+        settings: { ...visualSettings, 'workbench.colorTheme': colorTheme, 'refyntra.solutionExplorer.enabled': true },
+        launchArgs: ['--disable-gpu'],
+        env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '', REFYNTRA_VISUAL_OUT: path.join(process.env.REFYNTRA_VISUAL_OUT || path.join(repo, 'test-results', 'visual', 'actual'), theme) },
       })),
     )
   : e2e
@@ -369,6 +381,8 @@ const scenarios = visual
       // Run and Debug on a temp copy of the Runnable fixture, every other extension disabled: the bundled netcoredbg
       // (breakpoint, locals, exit code) and debugpy (system Python), a web app run with its launch profile.
       { name: 'run-debug', fixtureCopy: ['Runnable', 'Runnable.sln'], trusted: true, env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' } },
+      // Solution Explorer, project operations, NuGet from a local feed, csproj editing (test/suite/solution.cjs, ADR-013).
+      { name: 'solution', fixtureCopy: ['Explorer', 'Explorer.sln'], removeAfterCopy: ['Explorer.slnx'], trusted: true, settings: { 'files.autoSave': 'off' }, env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' } },
       // Test runner on a temp copy of the TestRunner fixture (xUnit, NUnit, MSTest), every other extension disabled:
       // discovery, run all, one theory case, debug with a breakpoint in the code under test, Rerun Failed, CodeLens.
       { name: 'tests', fixtureCopy: ['TestRunner', 'TestRunner.sln'], trusted: true, env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' } },
@@ -468,6 +482,7 @@ for (const s of scenarios.filter((x) => only.length === 0 || only.includes(x.nam
   } else if (s.fixtureCopy) {
     copy = fixtureCopy(s.name, ...s.fixtureCopy);
     s.workspace = copy.workspace;
+    for (const f of s.removeAfterCopy ?? []) fs.rmSync(path.join(copy.workspace, f), { force: true });
   } else if (s.pinnedCopy) {
     // tests/fixtures/CompatPinned with another SDK version in its global.json; not restored (the SDK is missing).
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `refyntra-${s.name}-`));

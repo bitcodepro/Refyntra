@@ -1,0 +1,10 @@
+<Project>
+  <!-- Central Package Management for the Explorer fixture (Solution Explorer / NuGet tests). -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- MediatR 12.5.0 is Apache-2.0; later major versions use a different license and must not be used here. -->
+    <PackageVersion Include="MediatR" Version="12.5.0" />
+  </ItemGroup>
+</Project>

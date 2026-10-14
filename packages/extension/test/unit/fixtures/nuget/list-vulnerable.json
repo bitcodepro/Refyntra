@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "parameters": "--vulnerable",
+  "projects": [
+    {
+      "path": "C:\\work\\App\\App.csproj",
+      "frameworks": [
+        {
+          "framework": "net8.0",
+          "topLevelPackages": [
+            { "id": "System.Text.Json", "requestedVersion": "8.0.0", "resolvedVersion": "8.0.0", "vulnerabilities": [{ "severity": "High", "advisoryurl": "https://github.com/advisories/GHSA-hh2w-p6rv-4g7w" }] }
+          ]
+        }
+      ]
+    }
+  ]
+}

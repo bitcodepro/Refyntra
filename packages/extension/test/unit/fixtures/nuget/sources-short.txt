@@ -1,0 +1,5 @@
+Registered Sources:
+  E https://api.nuget.org/v3/index.json
+  D https://disabled.example.test/v3/index.json
+  EM C:\Program Files (x86)\Microsoft SDKs\NuGetPackages\
+  E /tmp/local feed

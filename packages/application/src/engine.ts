@@ -210,6 +210,8 @@ export type HierarchyOutcome =
   | Unavailable;
 
 /** Run and Debug (protocol 1.8): the runnable-project model of the C# route, or why there is none. */
+/** Solution Explorer (protocol 1.20): the solution model, or why there is none. */
+export type SolutionStructureOutcome = { kind: 'structure'; result: import('@refyntra/contracts').SolutionStructureResult } | Unavailable;
 export type RunnableProjectsOutcome = { kind: 'projects'; result: import('@refyntra/contracts').RunnableProjectsResult } | Unavailable;
 
 /** Edit actions (protocol 1.9): the actions at a range, or the edits of one action, or why not. */
@@ -297,6 +299,10 @@ export interface EngineClient {
   usages(target: DocumentTarget, limit: number, token?: CancellationToken): Promise<UsagesOutcome>;
   /** Run and Debug (protocol 1.8): the C# projects of the loaded workspace classified for running and debugging. */
   runnableProjects?(token?: CancellationToken): Promise<RunnableProjectsOutcome>;
+  /** Solution Explorer (protocol 1.20): solution folders, projects, dependencies and items of the loaded workspace. */
+  solutionStructure?(token?: CancellationToken): Promise<SolutionStructureOutcome>;
+  /** Reloads the loaded workspace in the C# host (project files changed); plans become stale. False when nothing reloaded. */
+  reloadWorkspace?(reason: string): Promise<boolean>;
   /**
    * Edit actions (owned route, protocol 1.9): without `actionId` the actions at the range; with it the edits of that
    * action, computed and compile-checked by the backend (or why it is refused).
@@ -970,6 +976,34 @@ export class RefyntraEngine implements EngineClient {
     } catch (e) {
       if (e instanceof CancelledError) throw e;
       return this.toUnavailable(adapter, e);
+    }
+  }
+
+  async solutionStructure(token?: CancellationToken): Promise<SolutionStructureOutcome> {
+    const adapter = this.o.registry.languageAdapters().find((a) => a.descriptor.ownership === 'owned-semantic' && typeof a.solutionStructure === 'function');
+    if (!adapter) return { kind: 'unavailable', reasonCode: 'NoLanguageRoute', message: 'No Refyntra route provides a .NET solution model.', recoveryActions: [RECOVERY_SHOW_HEALTH] };
+    try {
+      const result = await adapter.solutionStructure!(token);
+      if (!result) return { kind: 'unavailable', reasonCode: 'ProtocolTooOld', message: 'The C# host is too old for the Solution Explorer; update the extension.', recoveryActions: [] };
+      return { kind: 'structure', result };
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      return this.toUnavailable(adapter, e);
+    }
+  }
+
+  async reloadWorkspace(reason: string): Promise<boolean> {
+    const adapter = this.o.registry.languageAdapters().find((a) => a.descriptor.ownership === 'owned-semantic' && typeof a.reloadWorkspace === 'function');
+    if (!adapter) return false;
+    this.o.tracker.bumpRevision();
+    this.relatedCache.clear();
+    this.invalidatePlans(adapter, `workspace reloaded: ${reason}`);
+    this.log('info', 'workspace reload', { reason });
+    try {
+      return await adapter.reloadWorkspace!();
+    } catch (e) {
+      this.log('warn', 'workspace reload failed', { reason, error: describeError(e) });
+      return false;
     }
   }
 

@@ -1,0 +1,13 @@
+These templates matched your input:
+
+Template Name                                 Short Name                  Language    Type      Tags
+--------------------------------------------  --------------------------  ----------  --------  --------------------------------------------------
+ASP.NET Core Empty                            web                         [C#],F#     project   Web/Empty
+ASP.NET Core Web API                          webapi                      [C#],F#     project   Web/Web API/API/Service
+Class Library                                 classlib                    [C#],F#,VB  project   Common/Library
+Console App                                   console                     [C#],F#,VB  project   Common/Console
+dotnet gitignore file                         gitignore,.gitignore                    item      Config
+F# only template                              fsonly                      F#          project   Common
+Solution File                                 sln,solution                            solution  Solution
+Worker Service                                worker                      [C#],F#     project   Common/Worker/Web
+xUnit Test Project                            xunit                       [C#],F#,VB  project   Test/xUnit/Desktop/Web

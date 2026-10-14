@@ -411,7 +411,7 @@ describe('keyboard reachability of commands (package.json + status bar menu)', (
   const pkg = JSON.parse(readFileSync(resolve(__dirname, '../../package.json'), 'utf8')) as {
     contributes: { commands: Array<{ command: string; title: string; category?: string }>; menus: { commandPalette: Array<{ command: string; when?: string }> }; keybindings: Array<{ command: string; key: string; when: string }> };
   };
-  const INTERNAL = ['refyntra.openLocation', 'refyntra.openMetadata', 'refyntra.runRestore', 'refyntra.related.open', 'refyntra.nativeRename', 'refyntra.stackTrace.openFrame', 'refyntra.stackTrace.related', 'refyntra.taskContext.addFindItem', 'refyntra.taskContext.addFromRelated', 'refyntra.codeLens.related', 'refyntra.selectRunTargetById', 'refyntra.pickDotnetProcess', 'refyntra.immediate.clear', 'refyntra.editAction', 'refyntra.usages.open', 'refyntra.usages.activate', 'refyntra.usages.closeSession', 'refyntra.usages.showMore', 'refyntra.tests.run', 'refyntra.tests.debug', ...['kind', 'project', 'folder', 'file', 'type', 'member'].flatMap((g) => [`refyntra.usages.group.${g}`, `refyntra.usages.ungroup.${g}`])];
+  const INTERNAL = ['refyntra.openLocation', 'refyntra.openMetadata', 'refyntra.runRestore', 'refyntra.related.open', 'refyntra.nativeRename', 'refyntra.stackTrace.openFrame', 'refyntra.stackTrace.related', 'refyntra.taskContext.addFindItem', 'refyntra.taskContext.addFromRelated', 'refyntra.codeLens.related', 'refyntra.selectRunTargetById', 'refyntra.pickDotnetProcess', 'refyntra.immediate.clear', 'refyntra.editAction', 'refyntra.usages.open', 'refyntra.usages.activate', 'refyntra.usages.closeSession', 'refyntra.usages.showMore', 'refyntra.tests.run', 'refyntra.tests.debug', 'refyntra.solution.open', 'refyntra.solution.revealInExplorer', 'refyntra.solution.revealInOS', 'refyntra.solution.copyPath', 'refyntra.projectFile.loadVersions', ...['kind', 'project', 'folder', 'file', 'type', 'member'].flatMap((g) => [`refyntra.usages.group.${g}`, `refyntra.usages.ungroup.${g}`])];
 
   it('only internal commands are hidden from the Command Palette; every command has a title and the Refyntra category', () => {
     const hidden = pkg.contributes.menus.commandPalette.filter((m) => m.when === 'false').map((m) => m.command);
@@ -431,6 +431,9 @@ describe('keyboard reachability of commands (package.json + status bar menu)', (
       if (c.startsWith('refyntra.taskContext.') && inMenu.has('refyntra.taskContext.switch')) continue;
       // Usages view: title-bar commands, all in the palette; the menu leads to the view (Find Usages).
       if (c.startsWith('refyntra.usages.') && inMenu.has('refyntra.findUsages')) continue;
+      // Solution view (Show Solution Explorer, Manage NuGet Packages, Edit Project File): title bar, item context menus
+      // and the palette; not in the status bar menu, whose screenshot baseline predates the view.
+      if (c.startsWith('refyntra.solution.') || c === 'refyntra.manageNuGet' || c === 'refyntra.editProjectFile') continue;
       expect(inMenu.has(c), `${c} is missing from the status bar menu (MAIN_MENU)`).toBe(true);
     }
   });

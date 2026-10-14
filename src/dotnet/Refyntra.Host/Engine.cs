@@ -36,8 +36,9 @@ public sealed class Engine : IRpcHandler, IDisposable
     /// 1.15: code/tests (test discovery for the Test Explorer: test projects, classes, methods and data cases).
     /// 1.16: analysis/run `documents` (per-document inspections OR1002–OR1010) and RuleDiagnostic `fixes` (quick fixes as edit actions).
     /// 1.17: code/metadataSource (go to metadata: decompiled or PDB-embedded sources of referenced assemblies).
+    /// 1.20: solution/structure (Solution Explorer: solution folders, projects, dependencies and items as MSBuild sees them).
     /// </summary>
-    public const int ProtocolMinor = 17;
+    public const int ProtocolMinor = 20;
     /// <summary>How long workspace/snapshotBarrier waits for a missing document sequence (tests shorten it).</summary>
     public TimeSpan BarrierTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
@@ -139,6 +140,8 @@ public sealed class Engine : IRpcHandler, IDisposable
                 return await StepIntoTargetsAsync(Params<StepIntoTargetsParams>(p), ct).ConfigureAwait(false);
             case "workspace/runnableProjects":
                 return RunnableProjects(Params<WorkspaceParams>(p));
+            case "solution/structure":
+                return SolutionStructureHandler.Handle(RequireSession(Params<WorkspaceParams>(p).WorkspaceId));
             case "code/tests":
                 return await TestsAsync(Params<TestsParams>(p), ct).ConfigureAwait(false);
             case "code/resolveFrame":

@@ -919,6 +919,22 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
     return { projects, state: typeof r?.state === 'string' ? r.state : 'unknown', snapshotId: r?.snapshotId ?? null };
   }
 
+  /** Solution Explorer (protocol 1.20): the solution model of the loaded workspace; null for an older host. */
+  async solutionStructure(token?: CancellationToken): Promise<import('@refyntra/contracts').SolutionStructureResult | null> {
+    const session = await this.whenReady(token);
+    if (session.protocolMinor < 20) return null;
+    const r = await session.transport.request('solution/structure', { traceId: this.traceIds.next(), workspaceId: this.opts.workspaceId }, token);
+    return normalizeSolutionStructure(r);
+  }
+
+  /** workspace/reload in the running host (project files changed). False when no session is up. */
+  async reloadWorkspace(token?: CancellationToken): Promise<boolean> {
+    const session = this.session;
+    if (!session) return false;
+    await session.transport.request('workspace/reload', { traceId: this.traceIds.next(), workspaceId: this.opts.workspaceId }, token);
+    return true;
+  }
+
   discard(planId: string): void {
     try {
       this.session?.transport.notify('refactor/discard', { workspaceId: this.opts.workspaceId, planId });
@@ -946,4 +962,46 @@ export function isScopeDetails(v: unknown): v is ScopeDetails {
     Array.isArray(d.frameworks) &&
     d.frameworks.every((f) => f && typeof f === 'object' && typeof f.id === 'string' && typeof f.name === 'string' && typeof f.evidence === 'string' && typeof f.versionVerified === 'boolean')
   );
+}
+
+/** A well-formed solution/structure result: malformed entries are dropped (the host is a separate process). */
+export function normalizeSolutionStructure(r: unknown): import('@refyntra/contracts').SolutionStructureResult {
+  const o = (r && typeof r === 'object' ? r : {}) as Record<string, unknown>;
+  const str = (x: unknown): x is string => typeof x === 'string';
+  const arr = (x: unknown): unknown[] => (Array.isArray(x) ? x : []);
+  const rec = (x: unknown) => (x && typeof x === 'object' ? (x as Record<string, unknown>) : undefined);
+  const ok = (x: Record<string, unknown> | undefined, ...keys: string[]): x is Record<string, unknown> => !!x && keys.every((k) => str(x[k]));
+  const opt = (x: unknown): string | null => (str(x) ? x : null);
+  const folders = arr(o.folders)
+    .map(rec)
+    .filter((f): f is Record<string, unknown> => ok(f, 'id', 'name'))
+    .map((f) => ({ id: f.id as string, name: f.name as string, parentId: opt(f.parentId), fileUris: arr(f.fileUris).filter(str) }));
+  const projects = arr(o.projects)
+    .map(rec)
+    .filter((p): p is Record<string, unknown> => ok(p, 'name', 'projectUri'))
+    .map((p) => ({
+      name: p.name as string,
+      projectUri: p.projectUri as string,
+      folderId: opt(p.folderId),
+      kind: opt(p.kind) ?? 'unknown',
+      targetFrameworks: arr(p.targetFrameworks).filter(str),
+      state: opt(p.state) ?? 'unknown',
+      sdk: opt(p.sdk),
+      centralPackageManagement: p.centralPackageManagement === true,
+      packagesPropsUri: opt(p.packagesPropsUri),
+      projectReferences: arr(p.projectReferences).map(rec).filter((x): x is Record<string, unknown> => ok(x, 'name', 'projectUri')).map((x) => ({ name: x.name as string, projectUri: x.projectUri as string })),
+      packages: arr(p.packages)
+        .map(rec)
+        .filter((x): x is Record<string, unknown> => ok(x, 'id'))
+        .map((x) => ({ id: x.id as string, version: opt(x.version), resolvedVersion: opt(x.resolvedVersion), central: x.central === true, versionOverride: x.versionOverride === true })),
+      frameworks: arr(p.frameworks).filter(str),
+      analyzers: arr(p.analyzers).map(rec).filter((x): x is Record<string, unknown> => ok(x, 'name')).map((x) => ({ name: x.name as string, uri: opt(x.uri) })),
+      items: arr(p.items)
+        .map(rec)
+        .filter((x): x is Record<string, unknown> => ok(x, 'uri', 'virtualPath'))
+        .map((x) => ({ uri: x.uri as string, itemType: opt(x.itemType) ?? 'None', virtualPath: x.virtualPath as string, linked: x.linked === true })),
+      excludedUris: arr(p.excludedUris).filter(str),
+      itemsTruncated: p.itemsTruncated === true,
+    }));
+  return { state: opt(o.state) ?? 'unknown', snapshotId: opt(o.snapshotId), solutionUri: opt(o.solutionUri), format: opt(o.format) ?? 'unknown', folders, projects };
 }

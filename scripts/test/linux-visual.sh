@@ -31,10 +31,10 @@ if [ "${1:-}" != "--inside" ]; then
   trap 'docker rm -f "$name" >/dev/null 2>&1' EXIT INT TERM
   timeout "${REFYNTRA_VISUAL_TIMEOUT:-4500}" docker run --rm --init --name "$name" ${vnc_args[@]+"${vnc_args[@]}"} \
     -v "$repo:/src:ro" -v "$repo/test-results/visual:/out" -v "$repo/tests/visual/baselines:/baselines:$baselines_mode" \
-    -v refyntra-vscode-test:/cache/vscode-test -v refyntra-nuget:/root/.nuget/packages \
+    -v "${REFYNTRA_DOCKER_VOLUME_PREFIX:-refyntra}-vscode-test:/cache/vscode-test" -v "${REFYNTRA_DOCKER_VOLUME_PREFIX:-refyntra}-nuget:/root/.nuget/packages" \
     -e DOTNET_CLI_TELEMETRY_OPTOUT=1 -e DOTNET_NOLOGO=1 -e REFYNTRA_TEST_VSCODE_VERSION="${REFYNTRA_TEST_VSCODE_VERSION:-1.90.2}" \
     -e REFYNTRA_VISUAL_UPDATE=$update -e TZ=UTC -e LANG=C.UTF-8 \
-    refyntra-linux-e2e bash /src/scripts/test/linux-visual.sh --inside
+    "${REFYNTRA_E2E_IMAGE:-refyntra-linux-e2e}" bash /src/scripts/test/linux-visual.sh --inside
   exit $?
 fi
 

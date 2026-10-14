@@ -365,6 +365,21 @@ a test class. It is not part of `initialize.capabilities`.
     minor ≥ 17.
   - `StructureMember.documentationId?` / `assemblyName?` (inherited metadata members) and
     `StepIntoTarget.documentationId?` / `assemblyName?` (reason `metadata`): for `code/metadataSource`.
+- 1.20 (additive): Solution Explorer (minors 18 and 19 belong to parallel work).
+  - `solution/structure` `WorkspaceParams` → `SolutionStructureResult` `{state, snapshotId?, solutionUri?, format
+    ("sln" | "slnx" | "project"), folders, projects}`. No barrier: the loaded snapshot. `folders`: `SolutionFolder`
+    `{id (the .sln GUID or the .slnx path "/a/b/"), name, parentId?, fileUris (solution items)}`. `projects`:
+    `ProjectStructure` `{name, projectUri, folderId?, kind (web | console | worker | desktop | test | library | maui |
+    blazor-wasm), targetFrameworks, state (loaded | partial | failed | notLoaded), sdk?, centralPackageManagement,
+    packagesPropsUri?, projectReferences [{name, projectUri}], packages [{id, version?, resolvedVersion?, central,
+    versionOverride}], frameworks, analyzers [{name, uri?}], items [{uri, itemType, virtualPath, linked}], excludedUris,
+    itemsTruncated}`. Items: the Compile and AdditionalFiles documents of the evaluation (generated files under `obj/`
+    left out), `virtualPath` from `Link` metadata for linked files; explicit `None`/`Content`/… items with a `Link`;
+    other files of SDK-style projects (default globs: `None`, `Content` for web content, `EmbeddedResource` for .resx).
+    `excludedUris`: C# files in the project folder that are not compiled. Packages from the project file and
+    `Directory.Packages.props`; `resolvedVersion` and framework references from `obj/project.assets.json` when restored.
+    At most 5000 items per project (`itemsTruncated`). Sent only to hosts with minor ≥ 20. After project files change
+    the client sends `workspace/reload`.
 - Additive (EF Core): relation kinds `efcore.*` and group `data` (above); `SearchFilters.entity?: boolean` ("entity:")
   and `SearchFilters.table?: string` ("table:NAME") return EF Core entities as symbol items. Older hosts ignore the
   filters (they return a normal symbol search); older clients render the kinds and the group generically. The
@@ -429,6 +444,7 @@ issuing semantic requests.
 | `code/usages` | req | `UsagesParams` `{…, symbolId, limit?}` | `UsagesResult` (since 1.12; Find Usages grouped) |
 | `code/fileStructure` | req | `FileStructureParams` `{…, uri, includeInherited?}` | `FileStructureResult` (since 1.13; File Structure) |
 | `code/metadataSource` | req | `MetadataSourceParams` `{…, symbolId? \| documentationId? \| uri?+position? \| document?+position?, sourcePolicy?, symbolOnly?}` | `MetadataSourceResult` (since 1.17; go to metadata) |
+| `solution/structure` | req | `WorkspaceParams` | `SolutionStructureResult` (since 1.20; Solution Explorer, no barrier) |
 | `code/stepIntoTargets` | req | `StepIntoTargetsParams` `{…, uri, position}` | `StepIntoTargetsResult` (since 1.14; Smart Step Into) |
 | `code/tests` | req | `TestsParams` `{…, uris?}` | `TestsResult` (since 1.15; Test Explorer discovery) |
 | `code/constructorActions` | req | `ConstructorActionsParams` `{…, uri, position, actionId?, member?, members?, type?, constructorId?, typeId?}` | `ConstructorActionsResult` (since 1.11; constructor / DI helpers) |

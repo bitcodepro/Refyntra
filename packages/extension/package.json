@@ -41,7 +41,8 @@
     "onDebugResolve:refyntra-lldb",
     "onDebugDynamicConfigurations",
     "onView:refyntra.immediateView",
-    "onView:refyntra.usagesView"
+    "onView:refyntra.usagesView",
+    "onView:refyntra.solutionView"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -674,6 +675,131 @@
         "command": "refyntra.usages.ungroup.member",
         "title": "✓ Group by Containing Member",
         "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.solution.show",
+        "title": "Show Solution Explorer",
+        "category": "Refyntra",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "refyntra.solution.refresh",
+        "title": "Reload Solution",
+        "category": "Refyntra",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "refyntra.solution.revealActive",
+        "title": "Reveal Active File in Solution",
+        "category": "Refyntra",
+        "icon": "$(target)"
+      },
+      {
+        "command": "refyntra.solution.open",
+        "title": "Open",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.solution.revealInExplorer",
+        "title": "Reveal in Explorer View",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.solution.revealInOS",
+        "title": "Reveal in File Manager",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.solution.copyPath",
+        "title": "Copy Path",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.solution.run",
+        "title": "Run Project",
+        "category": "Refyntra",
+        "icon": "$(play)"
+      },
+      {
+        "command": "refyntra.solution.debug",
+        "title": "Debug Project",
+        "category": "Refyntra",
+        "icon": "$(debug-alt)"
+      },
+      {
+        "command": "refyntra.solution.runTests",
+        "title": "Run Tests of Project",
+        "category": "Refyntra",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "refyntra.solution.setStartup",
+        "title": "Set as Startup Project",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.solution.unloadProject",
+        "title": "Unload Project",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.solution.reloadProject",
+        "title": "Reload Project",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.solution.addProject",
+        "title": "Add Existing Project to Solution…",
+        "category": "Refyntra",
+        "icon": "$(add)"
+      },
+      {
+        "command": "refyntra.solution.removeProject",
+        "title": "Remove Project from Solution",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.solution.newProject",
+        "title": "New Project…",
+        "category": "Refyntra",
+        "icon": "$(new-file)"
+      },
+      {
+        "command": "refyntra.solution.addReference",
+        "title": "Add Project Reference…",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.solution.removeReference",
+        "title": "Remove Project Reference",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.solution.renameProject",
+        "title": "Rename Project…",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.solution.undo",
+        "title": "Undo Last Project Operation",
+        "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.manageNuGet",
+        "title": "Manage NuGet Packages…",
+        "category": "Refyntra",
+        "icon": "$(package)"
+      },
+      {
+        "command": "refyntra.editProjectFile",
+        "title": "Edit Project File",
+        "category": "Refyntra",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "refyntra.projectFile.loadVersions",
+        "title": "Load Package Versions from NuGet Sources",
+        "category": "Refyntra"
       }
     ],
     "taskDefinitions": [
@@ -710,6 +836,18 @@
           "name": {
             "type": "string",
             "description": "The build step Refyntra runs before a debug session (dotnet build, cargo build)."
+          }
+        }
+      },
+      {
+        "type": "refyntra-dotnet",
+        "required": [
+          "command"
+        ],
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "The dotnet command line Refyntra runs for a project operation (shown in the terminal)."
           }
         }
       }
@@ -947,6 +1085,26 @@
         {
           "command": "refyntra.openMetadata",
           "when": "false"
+        },
+        {
+          "command": "refyntra.solution.open",
+          "when": "false"
+        },
+        {
+          "command": "refyntra.solution.revealInExplorer",
+          "when": "false"
+        },
+        {
+          "command": "refyntra.solution.revealInOS",
+          "when": "false"
+        },
+        {
+          "command": "refyntra.solution.copyPath",
+          "when": "false"
+        },
+        {
+          "command": "refyntra.projectFile.loadVersions",
+          "when": "false"
         }
       ],
       "view/title": [
@@ -1174,6 +1332,31 @@
           "command": "refyntra.usages.clear",
           "when": "view == refyntra.usagesView",
           "group": "3_results@1"
+        },
+        {
+          "command": "refyntra.solution.revealActive",
+          "when": "view == refyntra.solutionView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "refyntra.solution.refresh",
+          "when": "view == refyntra.solutionView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "refyntra.solution.newProject",
+          "when": "view == refyntra.solutionView",
+          "group": "1_project@1"
+        },
+        {
+          "command": "refyntra.solution.addProject",
+          "when": "view == refyntra.solutionView",
+          "group": "1_project@2"
+        },
+        {
+          "command": "refyntra.manageNuGet",
+          "when": "view == refyntra.solutionView",
+          "group": "2_nuget@1"
         }
       ],
       "view/item/context": [
@@ -1276,6 +1459,106 @@
           "command": "refyntra.usages.closeSession",
           "when": "view == refyntra.usagesView && viewItem == refyntra.usagesSession",
           "group": "inline"
+        },
+        {
+          "command": "refyntra.solution.run",
+          "when": "view == refyntra.solutionView && viewItem =~ /^refyntra\\.sol\\.project.*\\.runnable/",
+          "group": "inline@1"
+        },
+        {
+          "command": "refyntra.solution.runTests",
+          "when": "view == refyntra.solutionView && viewItem =~ /^refyntra\\.sol\\.project.*\\.test/",
+          "group": "inline@1"
+        },
+        {
+          "command": "refyntra.solution.open",
+          "when": "view == refyntra.solutionView && viewItem =~ /^refyntra\\.sol\\.(file|solutionItem|project|solution)/",
+          "group": "1_open@1"
+        },
+        {
+          "command": "refyntra.editProjectFile",
+          "when": "view == refyntra.solutionView && viewItem =~ /^refyntra\\.sol\\.project/",
+          "group": "1_open@2"
+        },
+        {
+          "command": "refyntra.solution.revealInExplorer",
+          "when": "view == refyntra.solutionView && viewItem =~ /^refyntra\\.sol\\.(file|solutionItem|project|solution)/",
+          "group": "1_open@3"
+        },
+        {
+          "command": "refyntra.solution.revealInOS",
+          "when": "view == refyntra.solutionView && viewItem =~ /^refyntra\\.sol\\.(file|solutionItem|project|solution)/",
+          "group": "1_open@4"
+        },
+        {
+          "command": "refyntra.solution.copyPath",
+          "when": "view == refyntra.solutionView && viewItem =~ /^refyntra\\.sol\\.(file|solutionItem|project|solution|dir)/",
+          "group": "1_open@5"
+        },
+        {
+          "command": "refyntra.solution.run",
+          "when": "view == refyntra.solutionView && viewItem =~ /^refyntra\\.sol\\.project.*\\.runnable/",
+          "group": "2_run@1"
+        },
+        {
+          "command": "refyntra.solution.debug",
+          "when": "view == refyntra.solutionView && viewItem =~ /^refyntra\\.sol\\.project.*\\.runnable/",
+          "group": "2_run@2"
+        },
+        {
+          "command": "refyntra.solution.setStartup",
+          "when": "view == refyntra.solutionView && viewItem =~ /^refyntra\\.sol\\.project.*\\.runnable/",
+          "group": "2_run@3"
+        },
+        {
+          "command": "refyntra.solution.runTests",
+          "when": "view == refyntra.solutionView && viewItem =~ /^refyntra\\.sol\\.project.*\\.test/",
+          "group": "2_run@4"
+        },
+        {
+          "command": "refyntra.manageNuGet",
+          "when": "view == refyntra.solutionView && viewItem =~ /^refyntra\\.sol\\.(project|solution|depGroup\\.packages|package)/",
+          "group": "3_deps@1"
+        },
+        {
+          "command": "refyntra.solution.addReference",
+          "when": "view == refyntra.solutionView && viewItem =~ /^refyntra\\.sol\\.(project|depGroup\\.projects|dependencies)/",
+          "group": "3_deps@2"
+        },
+        {
+          "command": "refyntra.solution.removeReference",
+          "when": "view == refyntra.solutionView && viewItem == refyntra.sol.projectRef",
+          "group": "3_deps@3"
+        },
+        {
+          "command": "refyntra.solution.newProject",
+          "when": "view == refyntra.solutionView && viewItem =~ /^refyntra\\.sol\\.(solution|folder)$/",
+          "group": "4_solution@1"
+        },
+        {
+          "command": "refyntra.solution.addProject",
+          "when": "view == refyntra.solutionView && viewItem =~ /^refyntra\\.sol\\.(solution|folder)$/",
+          "group": "4_solution@2"
+        },
+        {
+          "command": "refyntra.solution.renameProject",
+          "when": "view == refyntra.solutionView && viewItem =~ /^refyntra\\.sol\\.project/",
+          "group": "4_solution@3"
+        },
+        {
+          "command": "refyntra.solution.removeProject",
+          "when": "view == refyntra.solutionView && viewItem =~ /^refyntra\\.sol\\.project/",
+          "group": "4_solution@4"
+        },
+        {
+          "command": "refyntra.solution.unloadProject",
+          "when": "view == refyntra.solutionView && viewItem =~ /^refyntra\\.sol\\.project/ && viewItem not =~ /\\.unloaded/",
+          "group": "5_load@1"
+        },
+        {
+          "command": "refyntra.solution.reloadProject",
+          "when": "view == refyntra.solutionView && viewItem =~ /^refyntra\\.sol\\.project\\.unloaded/",
+          "group": "5_load@2"
         }
       ],
       "terminal/context": [
@@ -1295,6 +1578,11 @@
           "command": "refyntra.taskContext.addFile",
           "when": "!explorerResourceIsFolder && resourceScheme == file",
           "group": "7_modification@91"
+        },
+        {
+          "command": "refyntra.manageNuGet",
+          "when": "resourceExtname == .csproj",
+          "group": "refyntra@1"
         }
       ],
       "editor/context": [
@@ -1428,6 +1716,13 @@
     "views": {
       "refyntra": [
         {
+          "id": "refyntra.solutionView",
+          "name": "Refyntra Solution",
+          "contextualTitle": "Refyntra",
+          "icon": "media/refyntra.svg",
+          "when": "config.refyntra.solutionExplorer.enabled"
+        },
+        {
           "id": "refyntra.runView",
           "name": "Refyntra Run",
           "contextualTitle": "Refyntra",
@@ -1504,6 +1799,11 @@
         "view": "refyntra.runView",
         "when": "!isWorkspaceTrusted",
         "contents": "Restricted Mode: building and running execute code from this workspace, so Refyntra does not run or debug anything until you trust it.\n[Manage Workspace Trust](command:workbench.trust.manage)"
+      },
+      {
+        "view": "refyntra.solutionView",
+        "contents": "Refyntra shows the loaded .sln, .slnx or .csproj here: solution folders, projects, dependencies and files as MSBuild sees them.\n[Select Solution](command:refyntra.selectSolution)\n[Show Health](command:refyntra.showHealth)",
+        "when": "config.refyntra.solutionExplorer.enabled"
       }
     ],
     "walkthroughs": [
@@ -1955,6 +2255,29 @@
           ],
           "default": "embeddedOnly",
           "markdownDescription": "Go to Metadata / Decompiled Source: which sources Refyntra shows for types without source in the solution. Source Link URLs are never followed and nothing is downloaded; see ADR-010."
+        },
+        "refyntra.solutionExplorer.excludedFiles": {
+          "type": "string",
+          "enum": [
+            "hide",
+            "grey"
+          ],
+          "default": "hide",
+          "enumDescriptions": [
+            "Do not show C# files the build does not compile.",
+            "Show them greyed with a \"not in the build\" note."
+          ],
+          "markdownDescription": "Refyntra Solution view: C# files in a project folder that MSBuild does not compile (for example `Compile Remove`)."
+        },
+        "refyntra.solutionExplorer.autoReveal": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Refyntra Solution view: select the active editor's file in the tree while the view is visible."
+        },
+        "refyntra.solutionExplorer.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show the Refyntra Solution view (solution folders, projects, dependencies and files as MSBuild sees them)."
         }
       }
     },

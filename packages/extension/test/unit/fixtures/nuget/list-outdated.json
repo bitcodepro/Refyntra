@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "parameters": "--outdated",
+  "problems": [{ "level": "warning", "text": "The source https://unreachable.example.test/v3/index.json could not be reached." }],
+  "sources": ["https://api.nuget.org/v3/index.json"],
+  "projects": [
+    {
+      "path": "/work/Explorer/src/Explorer.Core/Explorer.Core.csproj",
+      "frameworks": [
+        {
+          "framework": "net10.0",
+          "topLevelPackages": [
+            { "id": "MediatR", "requestedVersion": "12.4.0", "resolvedVersion": "12.4.0", "latestVersion": "12.5.0" }
+          ],
+          "transitivePackages": [
+            { "id": "MediatR.Contracts", "resolvedVersion": "2.0.1", "latestVersion": "2.0.1" }
+          ]
+        }
+      ]
+    },
+    { "path": "/work/Explorer/src/Explorer.App/Explorer.App.csproj" }
+  ]
+}
