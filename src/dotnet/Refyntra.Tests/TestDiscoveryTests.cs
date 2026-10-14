@@ -194,3 +194,29 @@ public sealed class UnrestoredTestDiscoveryTests
         }
     }
 }
+
+/// <summary>Tests inherited from abstract and generic base classes are listed under each concrete derived class.</summary>
+public sealed class InheritedTestDiscoveryTests
+{
+    [Fact]
+    public async Task AbstractAndGenericBaseTestsAppearUnderEachConcreteClass()
+    {
+        var sln = await Fixtures.CopyAsync("TestMatrix", "TestMatrix.slnx");
+        await using var client = TestClient.InProcess();
+        await client.InitializeAsync();
+        await client.OpenAsync(sln);
+        var snap = await client.BarrierAsync();
+        var r = await client.RequestAsync("code/tests", new { traceId = "t", workspaceId = client.WorkspaceId, snapshotId = snap, uris = (string[]?)null });
+        var tests = r.GetProperty("tests").EnumerateArray().ToDictionary(t => t.GetProperty("fullyQualifiedName").GetString()!);
+        foreach (var fqn in new[]
+        {
+            "XUnit3.SqlStoreTests.Opens", "XUnit3.SqlStoreTests.Counts", "XUnit3.SqlStoreTests.OwnTest",
+            "XUnit3.MemoryStoreTests.Opens", "XUnit3.MemoryStoreTests.Counts",
+            "XUnit3.IntRepositoryTests.Creates", "NUnit4.JsonParserTests.Parses",
+        })
+            Assert.True(tests.ContainsKey(fqn), fqn);
+        Assert.Equal(2, tests["XUnit3.MemoryStoreTests.Counts"].GetProperty("cases").GetArrayLength());
+        // The abstract and generic classes themselves are not listed.
+        Assert.DoesNotContain(tests.Keys, k => k.Contains("StoreTestsBase", StringComparison.Ordinal) || k.Contains("RepositoryTests`1", StringComparison.Ordinal) || k.Contains("ParserTestsBase", StringComparison.Ordinal));
+    }
+}

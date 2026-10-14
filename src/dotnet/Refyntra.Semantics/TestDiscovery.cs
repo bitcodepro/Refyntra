@@ -146,7 +146,9 @@ public static class TestDiscovery
         if (root == null) return result;
         var candidates = root.DescendantNodes(n => n is CompilationUnitSyntax or BaseNamespaceDeclarationSyntax or TypeDeclarationSyntax)
             .OfType<MethodDeclarationSyntax>().Where(m => m.AttributeLists.Count > 0).ToList();
-        if (candidates.Count == 0) return result;
+        var derived = root.DescendantNodes(n => n is CompilationUnitSyntax or BaseNamespaceDeclarationSyntax or TypeDeclarationSyntax)
+            .OfType<ClassDeclarationSyntax>().Any(c => c.BaseList != null);
+        if (candidates.Count == 0 && !derived) return result;
         var model = await doc.GetSemanticModelAsync(ct).ConfigureAwait(false);
         if (model == null) return result;
         string? declared = null;
@@ -218,7 +220,59 @@ public static class TestDiscovery
             result.Add(new DiscoveredTest(doc.FilePath, framework, ns, classes, method.Name, fqn,
                 decl.GetLocation().GetLineSpan().Span, decl.Identifier.GetLocation().GetLineSpan().Span, cases, dynamic, skip));
         }
+        if (derived) result.AddRange(InheritedTests(doc, root, model, result, ct));
         return result;
+    }
+
+    /// <summary>
+    /// Tests a concrete class inherits from abstract or generic base classes (all three frameworks run them in the
+    /// derived class): listed under the derived class with its full name; the range is the derived class declaration.
+    /// </summary>
+    private static IEnumerable<DiscoveredTest> InheritedTests(Document doc, SyntaxNode root, SemanticModel model, List<DiscoveredTest> own, CancellationToken ct)
+    {
+        var classes = root.DescendantNodes(n => n is CompilationUnitSyntax or BaseNamespaceDeclarationSyntax or TypeDeclarationSyntax)
+            .OfType<ClassDeclarationSyntax>().Where(c => c.BaseList != null && c.Parent is not TypeDeclarationSyntax).ToList();
+        foreach (var cls in classes)
+        {
+            if (model.GetDeclaredSymbol(cls, ct) is not INamedTypeSymbol t || t.IsAbstract || t.IsGenericType || t.IsStatic) continue;
+            var ns = t.ContainingNamespace is { IsGlobalNamespace: false } nsSym ? nsSym.ToDisplayString() : "";
+            var prefix = (ns.Length > 0 ? ns + "." : "") + t.MetadataName + ".";
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var m in t.GetMembers().OfType<IMethodSymbol>()) seen.Add(m.Name);
+            foreach (var o in own) if (o.FullyQualifiedName.StartsWith(prefix, StringComparison.Ordinal)) seen.Add(o.Method);
+            var classSpan = cls.GetLocation().GetLineSpan().Span;
+            var nameSpan = cls.Identifier.GetLocation().GetLineSpan().Span;
+            for (var b = t.BaseType; b != null && b.SpecialType != SpecialType.System_Object; b = b.BaseType)
+            {
+                if (!b.IsAbstract && !b.IsGenericType) continue; // a concrete non-generic base lists its own tests
+                foreach (var m in b.GetMembers().OfType<IMethodSymbol>())
+                {
+                    ct.ThrowIfCancellationRequested();
+                    if (m.MethodKind != MethodKind.Ordinary || m.IsStatic || m.IsAbstract || m.IsGenericMethod || m.DeclaredAccessibility != Accessibility.Public) continue;
+                    var framework = TestNavigation.TestFramework(m.OriginalDefinition);
+                    if (framework == null || !seen.Add(m.Name)) continue;
+                    var cases = new List<DiscoveredCase>();
+                    var dynamic = false;
+                    string? skip = null;
+                    foreach (var a in m.OriginalDefinition.GetAttributes())
+                    {
+                        var name = a.AttributeClass?.ToDisplayString() ?? "";
+                        if (StaticCaseAttributes.Contains(name) && a.ApplicationSyntaxReference?.GetSyntax(ct) is AttributeSyntax syn)
+                        {
+                            var args = (syn.ArgumentList?.Arguments ?? default).Where(x => x.NameEquals == null && x.NameColon == null).Select(x => x.Expression.ToString()).ToList();
+                            cases.Add(new DiscoveredCase("(" + string.Join(", ", args) + ")", args.Select(NormalizeArgument).ToList(), nameSpan));
+                        }
+                        else if (DynamicCaseAttributes.Contains(name)) dynamic = true;
+                        else if (name is "NUnit.Framework.IgnoreAttribute" or "Microsoft.VisualStudio.TestTools.UnitTesting.IgnoreAttribute")
+                            skip = a.ConstructorArguments.FirstOrDefault().Value as string ?? "Ignored";
+                        if (skip == null && a.NamedArguments.FirstOrDefault(n => n.Key == "Skip").Value.Value is string sk && sk.Length > 0) skip = sk;
+                    }
+                    if (m.Parameters.Length > 0 && cases.Count == 0) dynamic = true;
+                    yield return new DiscoveredTest(doc.FilePath!, framework, ns, new List<DiscoveredClass> { new(t.Name, classSpan, nameSpan) }, m.Name,
+                        prefix + m.Name, classSpan, nameSpan, cases, dynamic, skip);
+                }
+            }
+        }
     }
 
     private static bool InheritsFrom(INamedTypeSymbol? type, string fullName)
