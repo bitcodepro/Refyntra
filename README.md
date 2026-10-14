@@ -777,9 +777,13 @@ Continuous Run), with no other extension ([ADR-009](docs/adr/ADR-009-test-runner
 - **Coverage** (the Coverage profile, VS Code's coverage view and editor highlights): line coverage for .NET test
   projects that already reference **coverlet.collector**; otherwise the tests run without coverage and Refyntra says why
   (it never adds packages to your projects).
-- Limits: Microsoft Testing Platform-only projects (no VSTest adapter) and tests in abstract or generic classes are not
-  listed; xUnit v2 does not capture `Console` output per test; Rust tests have no source location; coverage is line
-  coverage of .NET only.
+- Frameworks verified: xUnit 2 and v3, NUnit 3, 4 and 5, MSTest 2, 3 and 4, MSTest.Sdk. Projects on Microsoft Testing
+  Platform (MSTest.Sdk, `UseMicrosoftTestingPlatformRunner`, `EnableMSTestRunner`, `EnableNUnitRunner`, or a global.json
+  test runner) are built and run as test applications; `xunit.v3.mtp-off` stays on VSTest. Test projects are found even
+  before the first `dotnet restore` (from the project file and the attribute names).
+- Limits: tests in abstract or generic classes are not listed; debugging an MSTest.Sdk test does not stop at breakpoints
+  yet (Run works); coverage needs coverlet.collector on a VSTest project; xUnit v2 does not capture `Console` output per
+  test; Rust tests have no source location; coverage is line coverage of .NET only.
 
 ### While debugging C# (inline values, hover, Immediate Window)
 

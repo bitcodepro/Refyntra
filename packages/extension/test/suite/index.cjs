@@ -1631,6 +1631,7 @@ scenarios.navigation.push(...require('./metadata.cjs').cases({ api, csharp, wait
 scenarios['run-debug'] = require('./runDebug.cjs').cases({ api, csharp, waitFor });
 // Test runner on the Testing API (test/suite/testing.cjs).
 scenarios.tests = require('./testing.cjs').cases({ api, csharp, waitFor });
+scenarios['test-matrix'] = require('./testMatrix.cjs').cases({ api, csharp, waitFor });
 // Target frameworks: net8.0 / net9.0 / net10.0 / netstandard2.x (Docker image with SDK 8 and the .NET 9 runtime).
 scenarios.compat = require('./compat.cjs').cases({ api, csharp, waitFor });
 scenarios['compat-sdk-missing'] = require('./compat.cjs').sdkMissing({ api, csharp, waitFor });

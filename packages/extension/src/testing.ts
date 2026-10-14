@@ -19,6 +19,8 @@ import {
   cargoTestArgs,
   dotnetFilter,
   dotnetTestArgs,
+  detectTestRunner,
+  mtpTestArgs,
   failureLocation,
   matchDotnetResults,
   mergeTests,
@@ -33,6 +35,8 @@ import {
   referencesCoverlet,
   stackLocations,
   testhostProcessId,
+  STATUS_ITEM_ID,
+  testingStatusText,
 } from './testingModel';
 
 // Test runner (ADR-009) on VS Code's native Testing API, with no other extension: C# tests from the host's discovery
@@ -122,6 +126,7 @@ export class TestingService implements vscode.Disposable {
   private debugTrace: string[] = [];
   private readonly sources = new Set<vscode.CancellationTokenSource>();
   private csharpReady = false;
+  private csharpState: string | undefined;
   private readonly lensChanged = new vscode.EventEmitter<void>();
   readonly onDidChangeCodeLenses = this.lensChanged.event;
 
@@ -140,13 +145,18 @@ export class TestingService implements vscode.Disposable {
     this.controller.resolveHandler = async (item) => {
       if (!item) await this.refresh(true);
     };
+    queueMicrotask(() => this.rebuild());
     this.subs.push(
       this.controller,
       this.lensChanged,
       engine.onDidChangeHealth((h) => {
         const ready = h.adapters.some((a) => a.adapterId === 'csharp' && a.state === 'Ready');
+        const state = h.adapters.find((a) => a.adapterId === 'csharp')?.state;
+        const changed = state !== this.csharpState;
+        this.csharpState = state;
         if (ready && !this.csharpReady) void this.refreshDotnet();
         this.csharpReady = ready;
+        if (changed) this.rebuild();
       }),
       engine.onDidInvalidate(() => {
         if (this.csharpReady) void this.refreshDotnet();
@@ -284,6 +294,18 @@ export class TestingService implements vscode.Disposable {
     };
     roots.forEach(index);
     const live = new Set<string>();
+    if (roots.length === 0) {
+      // No test yet: VS Code would show its "Install Additional Test Extensions" button, which misleads here (Refyntra
+      // is the test runner). One status row says what is happening instead; it is not a test and never runs.
+      const s = testingStatusText({ trusted: this.isTrusted(), csharpState: this.csharpState, discovered: this.dotnetProjects.length > 0 });
+      const item = this.controller.createTestItem(STATUS_ITEM_ID, s.label);
+      item.description = s.description;
+      item.canResolveChildren = false;
+      this.controller.items.replace([item]);
+      this.items.clear();
+      this.lensChanged.fire();
+      return;
+    }
     this.sync(this.controller.items, roots, live);
     for (const id of [...this.items.keys()]) if (!live.has(id) && !id.includes('|~')) this.items.delete(id);
     this.lensChanged.fire();
@@ -376,6 +398,7 @@ export class TestingService implements vscode.Disposable {
 
   /** One run at a time (runs from the explorer, CodeLens and continuous runs queue up). */
   private enqueue(request: vscode.TestRunRequest, token: vscode.CancellationToken, debug: boolean): Promise<void> {
+    if (request.include?.length && request.include.every((i) => i.id === STATUS_ITEM_ID)) return Promise.resolve();
     if (request.continuous) {
       this.watch(request, token);
       return Promise.resolve();
@@ -413,7 +436,9 @@ export class TestingService implements vscode.Disposable {
 
   private roots(): vscode.TestItem[] {
     const out: vscode.TestItem[] = [];
-    this.controller.items.forEach((i) => out.push(i));
+    this.controller.items.forEach((i) => {
+      if (i.id !== STATUS_ITEM_ID) out.push(i);
+    });
     return out;
   }
 
@@ -540,6 +565,85 @@ export class TestingService implements vscode.Disposable {
 
   // ---------------------------------------------------------------------------------------------- .NET
 
+  /** VSTest or Microsoft Testing Platform, from the project file and the nearest global.json. */
+  private runnerOf(project: string): ReturnType<typeof detectTestRunner> {
+    let xml = '';
+    try {
+      xml = fs.readFileSync(project, 'utf8');
+    } catch {
+      return { runner: 'vstest', report: '--report-trx' };
+    }
+    let globalJson: string | undefined;
+    for (let dir = path.dirname(project); ; dir = path.dirname(dir)) {
+      const g = path.join(dir, 'global.json');
+      if (fs.existsSync(g)) {
+        try {
+          globalJson = fs.readFileSync(g, 'utf8');
+        } catch {
+          // unreadable: the SDK reports it
+        }
+        break;
+      }
+      if (path.dirname(dir) === dir) break;
+    }
+    return detectTestRunner(xml, globalJson);
+  }
+
+  /** Runs or debugs a Microsoft Testing Platform test project; undefined when it could not start (items reported). */
+  private async runMtp(
+    run: vscode.TestRun,
+    project: string,
+    report: string,
+    filter: string | undefined,
+    resultsDirectory: string,
+    cwd: string,
+    folder: vscode.WorkspaceFolder | undefined,
+    leaves: vscode.TestItem[],
+    token: vscode.CancellationToken,
+    debug: boolean,
+    coverage: boolean,
+  ): Promise<{ code: number | null; output: string } | undefined> {
+    if (coverage) run.appendOutput(crlf(`${path.basename(project)} runs on Microsoft Testing Platform; Refyntra collects coverage for VSTest projects (coverlet.collector) only, so this run has no coverage.\n`));
+    if (debug && !this.debuggers.netcoredbg()) {
+      for (const l of leaves) run.errored(l, new vscode.TestMessage(`.NET debugging is unavailable on ${process.platform}-${process.arch}: this Refyntra package has no netcoredbg. Use Run.`));
+      return undefined;
+    }
+    if (!(await buildDotnet(project, undefined, 'Debug', folder))) {
+      for (const l of leaves) run.errored(l, new vscode.TestMessage('The build failed; see the terminal for the errors.'));
+      return undefined;
+    }
+    const prop = await this.spawnForRun(run, 'dotnet', ['msbuild', project, '-nologo', '-getProperty:TargetPath', '-p:Configuration=Debug'], cwd, {}, token);
+    const target = prop.output.trim().split(/\r?\n/).pop()?.trim() ?? '';
+    if (!target || !fs.existsSync(target)) {
+      for (const l of leaves) run.errored(l, new vscode.TestMessage(`The test application of ${path.basename(project)} was not found after the build (${target || 'no TargetPath'}).`));
+      return undefined;
+    }
+    const args = mtpTestArgs(target, { report, resultsDirectory, ...(filter ? { filter } : {}) });
+    if (!debug) return this.spawnForRun(run, 'dotnet', args, cwd, {}, token);
+    // Debug: netcoredbg launches the test application directly (attaching to an MTP application that waits for a
+    // debugger left its breakpoints pending in netcoredbg).
+    const id = ++this.runs;
+    const ended = new Promise<void>((resolve) => {
+      const sub = vscode.debug.onDidTerminateDebugSession((s) => {
+        if (s.configuration.refyntraTestRun === id) {
+          sub.dispose();
+          resolve();
+        }
+      });
+      token.onCancellationRequested(() => {
+        sub.dispose();
+        resolve();
+      });
+    });
+    const ok = await vscode.debug.startDebugging(folder, { type: DOTNET_DEBUG_TYPE, request: 'launch', name: 'Refyntra: Debug tests', program: target, args: args.slice(2), cwd, console: 'internalConsole', justMyCode: false, refyntraTestRun: id });
+    if (!ok) {
+      for (const l of leaves) run.errored(l, new vscode.TestMessage('The debug session did not start.'));
+      return undefined;
+    }
+    await ended;
+    return { code: 0, output: '' };
+  }
+
   private async runDotnet(run: vscode.TestRun, project: string, items: vscode.TestItem[], leaves: vscode.TestItem[], token: vscode.CancellationToken, debug: boolean, coverage = false): Promise<void> {
     if (coverage && !this.hasCoverlet(project)) {
       coverage = false;
@@ -556,7 +660,13 @@ export class TestingService implements vscode.Disposable {
     let session: vscode.DebugSession | undefined;
     try {
       let outcome: { code: number | null; output: string };
-      if (debug) {
+      const kind = this.runnerOf(project);
+      if (kind.runner === 'mtp') {
+        // Microsoft Testing Platform: build, then run (or debug) the test application itself.
+        const r = await this.runMtp(run, project, kind.report, filter, resultsDirectory, cwd, folder, leaves, token, debug, coverage);
+        if (!r) return;
+        outcome = r;
+      } else if (debug) {
         if (!this.debuggers.netcoredbg()) {
           for (const l of leaves) run.errored(l, new vscode.TestMessage(`.NET debugging is unavailable on ${process.platform}-${process.arch}: this Refyntra package has no netcoredbg. Use Run.`));
           return;

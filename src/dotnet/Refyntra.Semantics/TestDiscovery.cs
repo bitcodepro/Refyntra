@@ -52,11 +52,66 @@ public static class TestDiscovery
         "Microsoft.VisualStudio.TestTools.UnitTesting.DynamicDataAttribute",
     };
 
-    /// <summary>True when the project references a test framework assembly (a test project).</summary>
+    /// <summary>
+    /// True when the project references a test framework assembly (a test project) — or, when its packages are not
+    /// restored (no resolved references), when its project file declares a test framework package or IsTestProject.
+    /// </summary>
     public static bool IsTestProject(Project project) =>
         project.Language == LanguageNames.CSharp &&
-        project.MetadataReferences.OfType<PortableExecutableReference>().Any(r =>
-            r.FilePath != null && FrameworkAssemblies.Contains(Path.GetFileNameWithoutExtension(r.FilePath), StringComparer.OrdinalIgnoreCase));
+        (project.MetadataReferences.OfType<PortableExecutableReference>().Any(r =>
+            r.FilePath != null && FrameworkAssemblies.Contains(Path.GetFileNameWithoutExtension(r.FilePath), StringComparer.OrdinalIgnoreCase))
+         || DeclaredFramework(project) != null);
+
+    private static readonly System.Text.RegularExpressions.Regex PackageRef = new(
+        @"<PackageReference\s+Include\s*=\s*""(?<id>[^""]+)""", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// The test framework the project file declares (xunit*, NUnit, MSTest*), "unknown" for only Microsoft.NET.Test.Sdk
+    /// or &lt;IsTestProject&gt;true, null when none. Read from the file, so it works without a restore.
+    /// </summary>
+    public static string? DeclaredFramework(Project project)
+    {
+        if (project.FilePath == null || !File.Exists(project.FilePath)) return null;
+        string text;
+        try { text = File.ReadAllText(project.FilePath); } catch (IOException) { return null; } catch (UnauthorizedAccessException) { return null; }
+        string? found = null;
+        foreach (System.Text.RegularExpressions.Match m in PackageRef.Matches(text))
+        {
+            var id = m.Groups["id"].Value;
+            if (id.StartsWith("xunit", StringComparison.OrdinalIgnoreCase) && !id.Contains("analyzers", StringComparison.OrdinalIgnoreCase)) return "xUnit";
+            if (id.Equals("NUnit", StringComparison.OrdinalIgnoreCase)) return "NUnit";
+            if (id.StartsWith("MSTest", StringComparison.OrdinalIgnoreCase)) return "MSTest";
+            if (id.Equals("Microsoft.NET.Test.Sdk", StringComparison.OrdinalIgnoreCase)) found = "unknown";
+        }
+        if (found == null && System.Text.RegularExpressions.Regex.IsMatch(text, @"<IsTestProject>\s*true\s*</IsTestProject>", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) found = "unknown";
+        return found;
+    }
+
+    /// <summary>Test attributes by their written name, for code whose framework assembly is not resolved (no restore).</summary>
+    private static string? SyntacticFramework(MethodDeclarationSyntax decl, string? declared)
+    {
+        foreach (var attr in decl.AttributeLists.SelectMany(l => l.Attributes))
+        {
+            var name = attr.Name.ToString();
+            var last = name[(name.LastIndexOf('.') + 1)..];
+            if (last.EndsWith("Attribute", StringComparison.Ordinal)) last = last[..^"Attribute".Length];
+            switch (last)
+            {
+                case "Fact" or "Theory" when declared is "xUnit" or "unknown" or null: return "xUnit";
+                case "Theory" when declared == "NUnit": return "NUnit";
+                case "Test" or "TestCase" or "TestCaseSource" when declared is "NUnit" or "unknown" or null: return "NUnit";
+                case "TestMethod" or "DataTestMethod" when declared is "MSTest" or "unknown" or null: return "MSTest";
+            }
+        }
+        return null;
+    }
+
+    private static string? SyntacticName(AttributeSyntax attr)
+    {
+        var name = attr.Name.ToString();
+        var last = name[(name.LastIndexOf('.') + 1)..];
+        return last.EndsWith("Attribute", StringComparison.Ordinal) ? last[..^"Attribute".Length] : last;
+    }
 
     /// <summary>The test projects of the solution, one per project file (the first instance of a multi-targeted project).</summary>
     public static List<Project> TestProjects(Solution solution)
@@ -94,10 +149,19 @@ public static class TestDiscovery
         if (candidates.Count == 0) return result;
         var model = await doc.GetSemanticModelAsync(ct).ConfigureAwait(false);
         if (model == null) return result;
+        string? declared = null;
+        var declaredRead = false;
         foreach (var decl in candidates)
         {
             if (model.GetDeclaredSymbol(decl, ct) is not IMethodSymbol method) continue;
             var framework = TestNavigation.TestFramework(method);
+            // Unresolved attributes (packages not restored): the written names, checked against the project's packages.
+            var syntactic = false;
+            if (framework == null && method.GetAttributes().Any(a => a.AttributeClass is null or IErrorTypeSymbol))
+            {
+                if (!declaredRead) { declared = DeclaredFramework(doc.Project); declaredRead = true; }
+                if (declared != null) { framework = SyntacticFramework(decl, declared); syntactic = framework != null; }
+            }
             if (framework == null) continue;
             if (method.IsAbstract || method.IsGenericMethod) continue;
             var types = new List<(INamedTypeSymbol symbol, TypeDeclarationSyntax syntax)>();
@@ -134,6 +198,20 @@ public static class TestDiscovery
                 if (skip == null && a.NamedArguments.FirstOrDefault(n => n.Key == "Skip").Value.Value is string s && s.Length > 0
                     && a.AttributeClass != null && InheritsFrom(a.AttributeClass, "Xunit.FactAttribute"))
                     skip = s;
+            }
+            if (syntactic)
+            {
+                foreach (var syn in decl.AttributeLists.SelectMany(l => l.Attributes))
+                {
+                    var n = SyntacticName(syn);
+                    if (n is "InlineData" or "TestCase" or "DataRow")
+                    {
+                        var args = (syn.ArgumentList?.Arguments ?? default).Where(x => x.NameEquals == null && x.NameColon == null).Select(x => x.Expression.ToString()).ToList();
+                        cases.Add(new DiscoveredCase("(" + string.Join(", ", args) + ")", args.Select(NormalizeArgument).ToList(), syn.GetLocation().GetLineSpan().Span));
+                    }
+                    else if (n is "MemberData" or "ClassData" or "TestCaseSource" or "DynamicData") dynamic = true;
+                    else if (n is "Ignore" && skip == null) skip = "Ignored";
+                }
             }
             if (parameterized && cases.Count == 0) dynamic = true;
             var classes = types.Select(t => new DiscoveredClass(t.symbol.Name, t.syntax.GetLocation().GetLineSpan().Span, t.syntax.Identifier.GetLocation().GetLineSpan().Span)).ToList();

@@ -1,0 +1,9 @@
+<Solution>
+  <Project Path="XUnit3/XUnit3.csproj" />
+  <Project Path="XUnit3Mtp/XUnit3Mtp.csproj" />
+  <Project Path="NUnit4/NUnit4.csproj" />
+  <Project Path="NUnit5/NUnit5.csproj" />
+  <Project Path="MSTest2/MSTest2.csproj" />
+  <Project Path="MSTest4/MSTest4.csproj" />
+  <Project Path="MSTestSdk/MSTestSdk.csproj" />
+</Solution>

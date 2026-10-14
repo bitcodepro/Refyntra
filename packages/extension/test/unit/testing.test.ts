@@ -339,3 +339,31 @@ describe('coverage (coverlet.collector)', () => {
     expect(dotnetTestArgs('/w/T.csproj', { resultsDirectory: '/r', coverage: true }).slice(-2)).toEqual(['--collect', 'XPlat Code Coverage']);
   });
 });
+
+describe('Testing status row (instead of VS Code\'s "Install Additional Test Extensions")', () => {
+  it('explains the state: trust, no solution, loading, failed, nothing found', async () => {
+    const { testingStatusText } = await import('../../src/testingModel');
+    expect(testingStatusText({ trusted: false, csharpState: 'Ready', discovered: true }).label).toMatch(/trusted workspace/);
+    expect(testingStatusText({ trusted: true, csharpState: undefined, discovered: false }).label).toMatch(/no \.NET solution/);
+    expect(testingStatusText({ trusted: true, csharpState: 'Loading', discovered: false }).label).toMatch(/loading/);
+    expect(testingStatusText({ trusted: true, csharpState: 'Failed', discovered: false }).description).toMatch(/Show Health/);
+    expect(testingStatusText({ trusted: true, csharpState: 'Ready', discovered: true }).label).toMatch(/no tests found/);
+    expect(testingStatusText({ trusted: true, csharpState: 'Ready', discovered: false }).label).toMatch(/no test projects/);
+  });
+});
+
+describe('VSTest or Microsoft Testing Platform', () => {
+  it('detects MTP projects and the TRX switch of their framework', async () => {
+    const { detectTestRunner, mtpTestArgs } = await import('../../src/testingModel');
+    const pkg = (id: string) => `<PackageReference Include="${id}" Version="1.0.0" />`;
+    expect(detectTestRunner(`<Project Sdk="Microsoft.NET.Sdk">${pkg('xunit')}${pkg('xunit.runner.visualstudio')}</Project>`)).toEqual({ runner: 'vstest', report: '--report-trx' });
+    expect(detectTestRunner(`<Project Sdk="MSTest.Sdk/4.5.1"></Project>`)).toEqual({ runner: 'mtp', report: '--report-trx' });
+    expect(detectTestRunner(`<Project><PropertyGroup><UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner></PropertyGroup>${pkg('xunit.v3')}</Project>`)).toEqual({ runner: 'mtp', report: '--report-xunit-trx' });
+    expect(detectTestRunner(`<Project><PropertyGroup><EnableNUnitRunner>true</EnableNUnitRunner></PropertyGroup>${pkg('NUnit')}</Project>`).runner).toBe('mtp');
+    // xunit.v3.mtp-off: VSTest even when global.json selects MTP.
+    expect(detectTestRunner(`<Project>${pkg('xunit.v3.mtp-off')}</Project>`, '{"test":{"runner":"Microsoft.Testing.Platform"}}').runner).toBe('vstest');
+    expect(detectTestRunner(`<Project>${pkg('MSTest.TestFramework')}</Project>`, '{"test":{"runner":"Microsoft.Testing.Platform"}}').runner).toBe('mtp');
+    expect(detectTestRunner(`<Project>${pkg('NUnit')}</Project>`, '{ broken').runner).toBe('vstest');
+    expect(mtpTestArgs('/b/T.dll', { report: '--report-trx', resultsDirectory: '/r', filter: 'FullyQualifiedName=A.B' })).toEqual(['exec', '/b/T.dll', '--report-trx', '--results-directory', '/r', '--filter', 'FullyQualifiedName=A.B']);
+  });
+});

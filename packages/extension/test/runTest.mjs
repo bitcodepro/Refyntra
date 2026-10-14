@@ -414,6 +414,8 @@ const scenarios = visual
       // Test runner on a temp copy of the TestRunner fixture (xUnit, NUnit, MSTest), every other extension disabled:
       // discovery, run all, one theory case, debug with a breakpoint in the code under test, Rerun Failed, CodeLens.
       { name: 'tests', fixtureCopy: ['TestRunner', 'TestRunner.sln'], trusted: true, env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' } },
+      // Test framework versions: xUnit v3 (VSTest, MTP), NUnit 4/5, MSTest 2/4, MSTest.Sdk (MTP).
+      { name: 'test-matrix', fixtureCopy: ['TestMatrix', 'TestMatrix.slnx'], trusted: true, env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' } },
       // Target frameworks on a temp copy of the Compat fixture (net8.0 web API + console, net9.0 console,
       // netstandard2.0/2.1, net8.0;net10.0, net8.0 xUnit): Related across them, Run (needs the .NET 8 and 9 runtimes:
       // the Docker e2e image), Debug of the net8.0 console, the test runner. Every other extension disabled.

@@ -572,3 +572,53 @@ export function parseCobertura(xml: string): { sources: string[]; files: Cobertu
 export function referencesCoverlet(projectText: string, assetsText?: string): boolean {
   return /coverlet\.collector/i.test(projectText) || (!!assetsText && /"coverlet\.collector\//i.test(assetsText));
 }
+
+/** Id of the status row shown while there is no test (never a test, never run). */
+export const STATUS_ITEM_ID = 'refyntra:status';
+
+/** The status row's text: why there is no test yet and what to do. */
+export function testingStatusText(s: { trusted: boolean; csharpState: string | undefined; discovered: boolean }): { label: string; description: string } {
+  if (!s.trusted) return { label: 'Refyntra: tests need a trusted workspace', description: 'Trust the folder to load projects and find tests' };
+  switch (s.csharpState) {
+    case undefined:
+    case 'NotStarted':
+      return { label: 'Refyntra: no .NET solution loaded', description: 'Python (pytest) and Rust (cargo) tests appear after Refresh' };
+    case 'Starting':
+    case 'Loading':
+    case 'Restarting':
+      return { label: 'Refyntra: loading the solution…', description: 'tests appear when it is loaded' };
+    case 'Failed':
+      return { label: 'Refyntra: the solution could not be loaded', description: 'see Refyntra: Show Health' };
+    default:
+      return s.discovered
+        ? { label: 'Refyntra: no tests found', description: 'xUnit, NUnit and MSTest test projects of the solution are listed here' }
+        : { label: 'Refyntra: no test projects in the solution', description: 'xUnit, NUnit and MSTest projects are found automatically' };
+  }
+}
+
+/**
+ * How a .NET test project runs. `mtp`: Microsoft Testing Platform (MSTest.Sdk, xUnit v3 / MSTest / NUnit runners, or a
+ * global.json that selects it) — on .NET 10 `dotnet test` refuses these in VSTest mode, so Refyntra builds the project
+ * and runs the test application itself. `report`: the TRX switch of that platform (xUnit v3 has its own).
+ */
+export function detectTestRunner(projectXml: string, globalJson?: string): { runner: 'vstest' | 'mtp'; report: '--report-trx' | '--report-xunit-trx' } {
+  const on = (prop: string) => new RegExp(`<${prop}>\s*true\s*</${prop}>`, 'i').test(projectXml);
+  const xunit3 = /<PackageReference\s+Include\s*=\s*"xunit\.v3(\.core)?"/i.test(projectXml);
+  const report = xunit3 ? '--report-xunit-trx' : '--report-trx';
+  const mtpOff = /<PackageReference\s+Include\s*=\s*"xunit\.v3[^"]*mtp-off"/i.test(projectXml);
+  let mtp = /Sdk\s*=\s*"MSTest\.Sdk/i.test(projectXml) || on('UseMicrosoftTestingPlatformRunner') || on('EnableMSTestRunner') || on('EnableNUnitRunner');
+  if (!mtp && globalJson) {
+    try {
+      const g = JSON.parse(globalJson.replace(/^﻿/, '')) as { test?: { runner?: unknown } };
+      if (typeof g.test?.runner === 'string' && /testing\.platform/i.test(g.test.runner)) mtp = true;
+    } catch {
+      // A broken global.json: the SDK reports it; VSTest stays the guess.
+    }
+  }
+  return { runner: mtp && !mtpOff ? 'mtp' : 'vstest', report };
+}
+
+/** Arguments for running a built Microsoft Testing Platform test application (`dotnet exec <dll> …`). */
+export function mtpTestArgs(target: string, opts: { report: string; resultsDirectory: string; filter?: string }): string[] {
+  return ['exec', target, opts.report, '--results-directory', opts.resultsDirectory, ...(opts.filter ? ['--filter', opts.filter] : [])];
+}

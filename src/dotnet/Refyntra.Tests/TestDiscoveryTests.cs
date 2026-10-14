@@ -145,3 +145,52 @@ public sealed class TestDiscoveryTests : IClassFixture<TestRunnerFixture>
     public void NormalizesArgumentsLikeTheClient(string source, string expected) =>
         Assert.Equal(expected, TestDiscovery.NormalizeArgument(source));
 }
+
+/// <summary>
+/// Packages not restored (no obj/project.assets.json): the test project is recognised from its project file and the
+/// tests from the written attribute names, so the Test Explorer is not empty before the first restore.
+/// </summary>
+public sealed class UnrestoredTestDiscoveryTests
+{
+    [Fact]
+    public async Task XunitV3AndNunitTestsAreFoundWithoutARestore()
+    {
+        var dir = Directory.CreateTempSubdirectory("refyntra-unrestored-").FullName;
+        try
+        {
+            void Project(string name, string package, string code)
+            {
+                Directory.CreateDirectory(Path.Combine(dir, name));
+                File.WriteAllText(Path.Combine(dir, name, name + ".csproj"),
+                    $"<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType></PropertyGroup>\n" +
+                    $"  <ItemGroup><PackageReference Include=\"{package}\" Version=\"1.0.0\" /></ItemGroup>\n</Project>\n");
+                File.WriteAllText(Path.Combine(dir, name, "Tests.cs"), code);
+            }
+            Project("V3Tests", "xunit.v3.mtp-off",
+                "using Xunit;\nnamespace V3;\npublic class CalcTests\n{\n    [Fact]\n    public void Adds() { }\n\n    [Theory]\n    [InlineData(1, 2)]\n    [InlineData(3, 4)]\n    public void Pairs(int a, int b) { }\n\n    public void NotATest() { }\n}\n");
+            Project("NTests", "NUnit",
+                "using NUnit.Framework;\nnamespace N;\npublic class MathTests\n{\n    [Test]\n    public void Works() { }\n\n    [TestCase(5)]\n    public void Cases(int x) { }\n}\n");
+            Project("Plain", "Newtonsoft.Json", "namespace P;\npublic class C { [System.Obsolete] public void M() { } }\n");
+            var sln = Path.Combine(dir, "Unrestored.slnx");
+            File.WriteAllText(sln, "<Solution>\n  <Project Path=\"V3Tests/V3Tests.csproj\" />\n  <Project Path=\"NTests/NTests.csproj\" />\n  <Project Path=\"Plain/Plain.csproj\" />\n</Solution>\n");
+
+            await using var client = TestClient.InProcess();
+            await client.InitializeAsync();
+            await client.OpenAsync(sln);
+            var snap = await client.BarrierAsync();
+            var r = await client.RequestAsync("code/tests", new { traceId = "t", workspaceId = client.WorkspaceId, snapshotId = snap, uris = (string[]?)null });
+            var projects = r.GetProperty("projects").EnumerateArray().Select(p => p.GetProperty("name").GetString()!).OrderBy(x => x, StringComparer.Ordinal).ToList();
+            Assert.Equal(new[] { "NTests", "V3Tests" }, projects);
+            var tests = r.GetProperty("tests").EnumerateArray().ToDictionary(t => t.GetProperty("fullyQualifiedName").GetString()!);
+            Assert.Equal(new[] { "N.MathTests.Cases", "N.MathTests.Works", "V3.CalcTests.Adds", "V3.CalcTests.Pairs" }, tests.Keys.OrderBy(k => k, StringComparer.Ordinal));
+            Assert.Equal("xUnit", tests["V3.CalcTests.Adds"].GetProperty("framework").GetString());
+            Assert.Equal("NUnit", tests["N.MathTests.Works"].GetProperty("framework").GetString());
+            Assert.Equal(2, tests["V3.CalcTests.Pairs"].GetProperty("cases").GetArrayLength());
+            Assert.Equal(1, tests["N.MathTests.Cases"].GetProperty("cases").GetArrayLength());
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch (IOException) { }
+        }
+    }
+}

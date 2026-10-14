@@ -89,3 +89,19 @@ Constraints:
 - Microsoft Testing Platform-only projects (no VSTest adapter) are not supported: they do not write TRX through
   `--logger trx`.
 - New protocol method (1.15): older hosts make the client show no C# tests (`ProtocolTooOld`).
+
+## Amendment 1 (2026-10-14): framework versions and Microsoft Testing Platform
+
+- Verified in Docker on `tests/fixtures/TestMatrix` (scenario `test-matrix`) next to `TestRunner` (xUnit 2, NUnit 3,
+  MSTest 3): xUnit v3 on VSTest and on Microsoft Testing Platform (MTP), NUnit 4 and 5, MSTest 2 and 4, MSTest.Sdk (MTP).
+  Each: discovery with data rows, run all (pass / fail / skip), one test.
+- Test projects are also recognised without a restore: from the project file (xunit*, NUnit, MSTest*,
+  Microsoft.NET.Test.Sdk, IsTestProject) and the written attribute names, so the Test Explorer is not empty before the
+  first `dotnet restore`.
+- MTP projects (`MSTest.Sdk`, `UseMicrosoftTestingPlatformRunner`, `EnableMSTestRunner`, `EnableNUnitRunner`, or a
+  global.json test runner): on .NET 10 `dotnet test` refuses them in VSTest mode, so Refyntra builds the project and runs
+  the test application (`dotnet exec <dll> --report-trx`, xUnit v3: `--report-xunit-trx`, `--results-directory`,
+  `--filter` in VSTest syntax). `xunit.v3.mtp-off` stays on VSTest.
+- Debugging MTP tests: netcoredbg launches the test application. Works for xUnit v3. **Known limitation:** for
+  MSTest.Sdk netcoredbg verifies the breakpoint and the test runs, but it does not stop (cause not found yet); Run works.
+- Coverage is collected for VSTest projects with coverlet.collector only; an MTP run says so in its output.
