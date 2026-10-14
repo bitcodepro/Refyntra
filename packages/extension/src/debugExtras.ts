@@ -16,8 +16,9 @@ import {
   isRefyntraExceptionRequest,
   samePath,
   stepIntoItems,
-  unsupportedBreakpointNote,
 } from './debugExtrasModel';
+import { EMULATED_CAPABILITIES, type DapProxyStats } from './dapProxyModel';
+import { dotnetProxyHooks } from './dotnetDebugProxy';
 
 const DOTNET_DEBUG_TYPE = 'refyntra-dotnet';
 const TYPES_SETTING = 'debug.dotnet.breakOnExceptionTypes';
@@ -58,21 +59,24 @@ interface SessionState {
  *   and at the next statement (if the call is not made), continues, and removes them at the next stop.
  * - Break on Exception Types: netcoredbg's `all` filter with a condition of full type names (exceptionFilterOptions),
  *   sent after VS Code's own setExceptionBreakpoints.
- * - A note when a C# breakpoint has a hit count or log message (netcoredbg ignores both and stops).
+ * Logpoints and hit counts are emulated by the DAP proxy in front of netcoredbg (dotnetDebugProxy.ts).
  */
 export class DebugExtras implements vscode.Disposable {
   readonly hooks: DebugExtrasHooks = { messages: [] };
-  /** The capability table of ADR-008 (the e2e compares it with the live initialize response). */
-  readonly expectedCapabilities: Readonly<Record<string, boolean>> = NETCOREDBG_CAPABILITIES;
+  /** The capability table of ADR-008 as VS Code sees it: netcoredbg's plus the ones Refyntra's proxy emulates. */
+  readonly expectedCapabilities: Readonly<Record<string, boolean>> = { ...NETCOREDBG_CAPABILITIES, ...EMULATED_CAPABILITIES };
+  /** netcoredbg's own capabilities (ADR-008 table) and the proxy's stats of the last session (e2e). */
+  readonly adapterCapabilities: Readonly<Record<string, boolean>> = NETCOREDBG_CAPABILITIES;
+  proxyStats(): DapProxyStats | undefined {
+    return dotnetProxyHooks.last;
+  }
   private readonly sessions = new Map<string, SessionState>();
   private readonly subs: vscode.Disposable[] = [];
-  private readonly noted = new Set<string>();
 
   constructor(private readonly engine: EngineClient) {
     this.subs.push(
       vscode.debug.registerDebugAdapterTrackerFactory(DOTNET_DEBUG_TYPE, { createDebugAdapterTracker: (s) => this.tracker(s) }),
       vscode.debug.onDidTerminateDebugSession((s) => this.ended(s)),
-      vscode.debug.onDidChangeBreakpoints((e) => this.noteUnsupported([...e.added, ...e.changed])),
       vscode.workspace.onDidChangeConfiguration((e) => {
         if (e.affectsConfiguration(`refyntra.${TYPES_SETTING}`)) void this.resendExceptionTypes();
       }),
@@ -156,18 +160,6 @@ export class DebugExtras implements vscode.Disposable {
     this.hooks.messages.push(text);
     if (kind === 'info') void vscode.window.showInformationMessage(text);
     else void vscode.window.showWarningMessage(text);
-  }
-
-  private noteUnsupported(bps: readonly vscode.Breakpoint[]): void {
-    for (const bp of bps) {
-      if (!(bp instanceof vscode.SourceBreakpoint) || !bp.location.uri.path.toLowerCase().endsWith('.cs')) continue;
-      const note = unsupportedBreakpointNote(bp);
-      if (!note) continue;
-      const key = `${bp.id}:${note}`;
-      if (this.noted.has(key)) continue;
-      this.noted.add(key);
-      this.message('warning', note);
-    }
   }
 
   /** Refyntra: Break on Exception Types… — the types are stored in `refyntra.debug.dotnet.breakOnExceptionTypes`. */

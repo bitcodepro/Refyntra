@@ -26,8 +26,8 @@ Constraints:
    Health and the support matrix say that debugging .NET is unavailable there; running still works. netcoredbg ships
    Roslyn (`Microsoft.CodeAnalysis*.dll`, MIT) for expression evaluation and dbgshim (MIT); it links nlohmann/json and
    libelfin (MIT) and linenoise-ng (BSD-style). All texts ship in `legal/` and next to the binary.
-   - Debug type `refyntra-dotnet`: a `DebugAdapterDescriptorFactory` returns a `DebugAdapterExecutable` running
-     `netcoredbg --interpreter=vscode`. Launch (program, args, cwd, env, stopAtEntry, justMyCode; `project` +
+   - Debug type `refyntra-dotnet`: a `DebugAdapterDescriptorFactory` runs `netcoredbg --interpreter=vscode` behind
+     Refyntra's in-process DAP proxy (`DebugAdapterInlineImplementation`, see "Debugger capabilities"). Launch (program, args, cwd, env, stopAtEntry, justMyCode; `project` +
      `framework` + `configuration` build first with `dotnet build` as a VS Code task), attach (process picker command
      `refyntra.pickDotnetProcess`), exception breakpoints (netcoredbg's `all` and `user-unhandled` filters),
      `contributes.breakpoints` for C#.
@@ -83,8 +83,8 @@ Constraints:
    |---|---|---|---|
    | supportsConfigurationDoneRequest | yes | — | used |
    | supportsConditionalBreakpoints | yes | `i == 3` in a loop stops once, with i = 3 | VS Code's condition editor; e2e |
-   | supportsHitConditionalBreakpoints | no | `hitCondition: "3"` ignored: stops every time | not offered; a warning when a C# breakpoint has one |
-   | supportsLogPoints | no | `logMessage` ignored: stops like a breakpoint, logs nothing | not offered; a warning when a C# logpoint is added |
+   | supportsHitConditionalBreakpoints | no | `hitCondition: "3"` ignored: stops every time | **supported via Refyntra emulation** (proxy, below); e2e |
+   | supportsLogPoints | no | `logMessage` ignored: stops like a breakpoint, logs nothing | **supported via Refyntra emulation** (proxy, below); e2e |
    | supportsFunctionBreakpoints | yes | accepted (bound when the method is loaded) | VS Code's function breakpoints |
    | supportsDataBreakpoints | no (absent) | — | not offered |
    | supportsExceptionFilterOptions | yes | `all` + `condition` = comma-separated full type names: breaks only on those types; exact type only (base types, short names, `System.*` do not match); `!Type` excludes a type | **Break on Exception Types** (below) |
@@ -94,11 +94,37 @@ Constraints:
    | supportsSetVariable / supportsSetExpression | yes / yes | `total = 5` | Immediate Window assignments |
    | supportsTerminateRequest, supportsCancelRequest | yes | — | — |
    | supportsStepInTargetsRequest | no (absent) | `stepInTargets` fails: `0x80004001` (E_NOTIMPL) | **Smart Step Into** through the C# host (below) |
-   | supportsGotoTargetsRequest | no (absent) | `gotoTargets` fails: E_NOTIMPL | **Set Next Statement / Jump to Cursor not available** (VS Code hides Jump to Cursor; Health and README say so) |
+   | supportsGotoTargetsRequest | no (absent) | `gotoTargets` fails: E_NOTIMPL; no `goto`/`gotoTargets` handler in netcoredbg's current source either (checked 2026-10-14) | **Set Next Statement / Jump to Cursor not available** (VS Code hides Jump to Cursor; Health and README say so). Not emulated: moving the instruction pointer can only be done inside the debugger |
    | supportsRestartFrame | no (absent) | `restartFrame` fails: E_NOTIMPL | not offered |
    | supportsCompletionsRequest | no (absent) | — | Immediate Window shows no C# completions |
    | supportsStepBack, supportsInstructionBreakpoints, supportsReadMemoryRequest | no (absent) | — | — |
 
+   - **Logpoints and hit counts: Refyntra's DAP proxy.** The `refyntra-dotnet` descriptor factory returns a
+     `DebugAdapterInlineImplementation` that runs netcoredbg as a child process (DAP over stdio) behind an in-process
+     proxy (`dapProxyModel.ts`, unit-tested with a fake adapter). It adds `supportsLogPoints` and
+     `supportsHitConditionalBreakpoints` to netcoredbg's `initialize` response; `setBreakpoints` reaches netcoredbg
+     without `logMessage`/`hitCondition` (the condition stays), and the proxy remembers them per breakpoint id. When
+     netcoredbg stops with reason `breakpoint` at one of them (matched by `hitBreakpointIds`, else by the top frame's file
+     and line), the proxy counts the hit (only hits where the condition held: netcoredbg evaluates it first). Hit
+     conditions: `N`/`== N` (Visual Studio's "equal to"), `>= N`, `> N`, `< N`, `<= N`, `% N`. A logpoint whose hit
+     condition holds evaluates each `{expression}` with `evaluate` (context `watch`) in the top frame and emits an
+     `output` event (category `console`, with source and line); then the proxy sends `continue` and VS Code never sees
+     the stop. Events are handled one at a time in order (netcoredbg stops all threads, `allThreadsStopped`), so hits on
+     several threads are handled one after the other. Stops for other reasons, plain breakpoints (also one reported
+     together with an emulated one), exceptions, Smart Step Into's temporary breakpoints and pauses pass through
+     untouched; a Pause asked for while a hidden stop is handled shows that stop as a pause. A hidden hit during Step
+     Over / Step Out (netcoredbg ends a step at any breakpoint) is finished the way the step would have gone: step out
+     of the deeper frames, then (Step Over) finish the line; during Step Into the step ends there. **Timing cost**: each
+     hit is a real stop, a `stackTrace`, one `evaluate` per expression and a `continue` (milliseconds per hit), so
+     logpoints in hot loops slow the program down.
+   - **Hot Reload / Edit and Continue: not possible with netcoredbg.** netcoredbg 3.2.0 (and its current source) has no
+     request to apply code changes, so changing code while paused is not possible and there is no "Debug with Hot
+     Reload". *Run with Hot Reload* (`dotnet watch run`, no debugger) is first-class instead: a status bar item reads
+     watch's output (building, watching, applied, restart needed, failed, waiting). Rude edits: Refyntra's terminal is a
+     pipe, and `dotnet watch` reads its `y/n` prompt and Ctrl+R only from a real console (measured with SDK 10 in
+     Docker: the key is never read, the old code keeps running), so forwarding input cannot answer it.
+     `refyntra.run.hotReload.rudeEdit`: `restart` (default, `dotnet watch --non-interactive`, which restarts the app by
+     itself, measured) or `ask` (Refyntra asks and restarts the run).
    - **Run to Cursor** is VS Code's own command: a temporary breakpoint and Continue, so it works with any adapter
      that binds breakpoints (e2e). Ctrl+F10 in the `visualStudio` preset (C# editors, while stopped).
    - **Smart Step Into** (Refyntra: Smart Step Into; Alt+Shift+F11 in the `visualStudio` preset, Shift+F7 in the
@@ -129,5 +155,6 @@ Constraints:
   Upgrading = new version + SHA-256 in `debuggers.json`, then `pnpm notices`, the Docker e2e (it debugs the Runnable
   fixture with netcoredbg and a Python file with debugpy) and the audit.
 - Limitations stated in the support matrix: no .NET debugging on win32-arm64, darwin-x64 and Alpine; no stdin while
-  debugging .NET; no hit counts, logpoints, Set Next Statement or Restart Frame with netcoredbg; no Python attach by process id; Rust debugging only with an installed LLVM; MAUI and Blazor
+  debugging .NET; no Set Next Statement, Edit and Continue or Restart Frame with netcoredbg (hit counts and logpoints are
+  emulated by Refyntra, at the cost of a real stop per hit); no Python attach by process id; Rust debugging only with an installed LLVM; MAUI and Blazor
   WebAssembly not run or debugged; WinForms/WPF only on Windows.

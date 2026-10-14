@@ -12,7 +12,6 @@ import {
   isRefyntraExceptionRequest,
   samePath,
   stepIntoItems,
-  unsupportedBreakpointNote,
 } from '../../src/debugExtrasModel';
 import { debugSection } from '../../src/healthPageModel';
 
@@ -76,20 +75,18 @@ describe('Break on Exception Types', () => {
 });
 
 describe('netcoredbg capabilities', () => {
-  it('records what netcoredbg 3.2.0 cannot do, and the notes for breakpoint options it ignores', () => {
+  it('records what netcoredbg 3.2.0 cannot do itself', () => {
     expect(NETCOREDBG_CAPABILITIES.supportsConditionalBreakpoints).toBe(true);
     for (const k of ['supportsStepInTargetsRequest', 'supportsGotoTargetsRequest', 'supportsLogPoints', 'supportsHitConditionalBreakpoints', 'supportsRestartFrame', 'supportsDataBreakpoints'] as const) expect(NETCOREDBG_CAPABILITIES[k]).toBe(false);
     expect(NETCOREDBG_CAPABILITY_NAMES).toContain('supportsExceptionFilterOptions');
-    expect(unsupportedBreakpointNote({ logMessage: 'x={x}' })).toMatch(/does not support logpoints/);
-    expect(unsupportedBreakpointNote({ hitCondition: '3' })).toMatch(/does not support hit counts/);
-    expect(unsupportedBreakpointNote({})).toBeUndefined();
   });
 
   it('Health names the .NET debugger features and what netcoredbg cannot do', () => {
     expect(dotnetDebugFeaturesText()).toMatch(/Set Next Statement \(Jump to Cursor\)/);
     const s = debugSection({ netcoredbg: { path: '/x/netcoredbg', version: 'netcoredbg 3.2.0-1092' }, debugpy: { path: '/x' } }, true);
     expect(s.meaning).toContain('Smart Step Into');
-    expect(s.meaning).toContain('hit counts and logpoints');
+    expect(s.meaning).toContain('hit counts and logpoints (Refyntra emulates');
+    expect(s.meaning).toContain('Edit and Continue');
     expect(debugSection({ netcoredbg: { reason: 'no build' }, debugpy: { path: '/x' } }, true).meaning).not.toContain('Smart Step Into');
   });
 });

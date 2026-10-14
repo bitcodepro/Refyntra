@@ -1,6 +1,6 @@
 // Pure parts of the Rider-style debugger extras for .NET (debugExtras.ts): the netcoredbg capability table, the Smart
-// Step Into picker items, the exception-type breakpoints merged into VS Code's setExceptionBreakpoints and the notes
-// for breakpoint options netcoredbg ignores. No vscode import: unit-tested directly.
+// Step Into picker items and the exception-type breakpoints merged into VS Code's setExceptionBreakpoints. No vscode
+// import: unit-tested directly.
 import type { StepIntoReason, StepIntoTarget, StepIntoTargetsResult } from '@refyntra/contracts';
 
 /**
@@ -34,9 +34,9 @@ export const NETCOREDBG_CAPABILITY_NAMES = Object.keys(NETCOREDBG_CAPABILITIES) 
 export function dotnetDebugFeaturesText(): string {
   return (
     '.NET debugger features: conditional breakpoints, function breakpoints, Run to Cursor, Break on Exception Types ' +
-    '(exact type names) and Smart Step Into (Refyntra, through the C# host). Not supported by netcoredbg, so not offered: ' +
-    'hit counts and logpoints (netcoredbg stops at them like at a breakpoint), Set Next Statement (Jump to Cursor), ' +
-    'Restart Frame and data breakpoints.'
+    '(exact type names), Smart Step Into (Refyntra, through the C# host), hit counts and logpoints (Refyntra emulates ' +
+    'them: each hit is a real stop and resume, so they slow hot loops). Not supported by netcoredbg, so not offered: ' +
+    'Set Next Statement (Jump to Cursor), Edit and Continue (Hot Reload while paused), Restart Frame and data breakpoints.'
   );
 }
 
@@ -147,11 +147,4 @@ export function exceptionBreakpointsWithTypes(vs: ExceptionBreakpointsArgs | und
 /** Whether a setExceptionBreakpoints was sent by Refyntra (its `all` filter carries a condition). */
 export function isRefyntraExceptionRequest(args: ExceptionBreakpointsArgs | undefined): boolean {
   return !!args?.filterOptions?.some((f) => f.filterId === 'all' && !!f.condition);
-}
-
-/** Breakpoint options netcoredbg ignores (it stops anyway), so the user is told instead of being surprised. */
-export function unsupportedBreakpointNote(bp: { hitCondition?: string; logMessage?: string }): string | undefined {
-  if (bp.logMessage) return 'netcoredbg does not support logpoints: this C# logpoint stops like a breakpoint and logs nothing. Use a conditional breakpoint, or Console.WriteLine in the code.';
-  if (bp.hitCondition) return 'netcoredbg does not support hit counts: this C# breakpoint stops every time. Use a condition (for example on a loop counter) instead.';
-  return undefined;
 }

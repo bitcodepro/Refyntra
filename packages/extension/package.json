@@ -392,6 +392,12 @@
         "enablement": "isWorkspaceTrusted"
       },
       {
+        "command": "refyntra.showWatchTerminal",
+        "title": "Show Hot Reload Terminal",
+        "category": "Refyntra",
+        "icon": "$(flame)"
+      },
+      {
         "command": "refyntra.stop",
         "title": "Stop",
         "category": "Refyntra",
@@ -799,6 +805,14 @@
           "target": {
             "type": "string",
             "description": "Refyntra run target id (started from the Run view, the status bar or CodeLens)."
+          },
+          "instance": {
+            "type": "number",
+            "description": "Start number of this run (each start is its own task)."
+          },
+          "watch": {
+            "type": "boolean",
+            "description": "Run with Hot Reload (dotnet watch)."
           }
         }
       },
@@ -2179,6 +2193,13 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Show the run target picker (project · profile · framework) in the status bar."
+        },
+        "refyntra.run.hotReload.rudeEdit": {
+          "type": "string",
+          "enum": ["restart", "ask"],
+          "enumDescriptions": ["`dotnet watch --non-interactive`: the app restarts by itself when a change cannot be hot reloaded.", "Refyntra asks in a notification and restarts the watch run when you agree."],
+          "default": "restart",
+          "markdownDescription": "**Run with Hot Reload** (`dotnet watch`): what happens on a rude edit (a change Hot Reload cannot apply). Refyntra's terminal is not a console, so `dotnet watch` cannot read the y/n answer of its own prompt."
         },
         "refyntra.run.editorButtons": {
           "type": "boolean",
