@@ -304,6 +304,8 @@ export interface EngineClient {
   fileStructure?(uri: string, includeInherited: boolean, token?: CancellationToken): Promise<FileStructureOutcome>;
   /** Smart Step Into (owned route, protocol 1.14): the calls of the statement a debugger stopped at. */
   stepIntoTargets?(uri: string, position: Position, token?: CancellationToken): Promise<StepIntoTargetsOutcome>;
+  /** Immediate window completions (protocol 1.21) at a stopped position of a C# file; [] when not available. */
+  expressionCompletions?(uri: string, position: Position, text: string, caret: number, token?: CancellationToken): Promise<string[]>;
   /**
    * Go to metadata (owned route, protocol 1.17): the decompiled / embedded-source document of a metadata symbol, or the
    * symbol at a position inside such a document.
@@ -831,6 +833,18 @@ export class RefyntraEngine implements EngineClient {
     } catch (e) {
       if (e instanceof CancelledError) throw e;
       return this.toUnavailable(adapter, e);
+    }
+  }
+
+  async expressionCompletions(uri: string, position: Position, text: string, caret: number, token?: CancellationToken): Promise<string[]> {
+    const adapter = this.o.registry.routeFor(uri);
+    if (!adapter || adapter.descriptor.ownership !== 'owned-semantic' || typeof adapter.expressionCompletions !== 'function') return [];
+    try {
+      const r = await this.withStaleRetry(() => adapter.expressionCompletions!(uri, position, text, caret, token), token);
+      return r.value?.items ?? [];
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      return [];
     }
   }
 

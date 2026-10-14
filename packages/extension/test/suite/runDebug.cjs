@@ -205,6 +205,11 @@ exports.cases = ({ api, csharp, waitFor }) => {
           const byName = Object.fromEntries(members.map((m) => [m.label, m.value]));
           assert.equal(byName.Major, '1', JSON.stringify(members));
           assert.equal(byName.Minor, '2');
+          // Completions come from Roslyn at the stopped position (netcoredbg has no DAP completions).
+          const names = await a.immediate.completions('cou', 3);
+          assert.ok(names.includes('count'), JSON.stringify(names));
+          const vmembers = await a.immediate.completions('version.Ma', 10);
+          assert.ok(vmembers.includes('Major'), JSON.stringify(vmembers));
           const bad = await a.immediate.evaluate('noSuchName');
           assert.ok(bad.error, 'an unknown name is an error entry');
           await vscode.commands.executeCommand('workbench.action.closePanel');

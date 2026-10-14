@@ -4,7 +4,10 @@ import { IMMEDIATE_DEBUG_TYPES, type ImmediateEntry, type ImmediateNode, complet
 
 export const IMMEDIATE_VIEW = 'refyntra.immediateView';
 
-interface Frame { session: vscode.DebugSession; frameId: number | undefined }
+interface Frame { session: vscode.DebugSession; frameId: number | undefined; threadId?: number }
+
+/** Roslyn completions of the C# host at a stopped position (protocol 1.21): file URI, 0-based position, text, caret. */
+export type SourceCompletions = (uri: string, position: { line: number; character: number }, text: string, caret: number) => Promise<string[]>;
 
 /**
  * Visual Studio-like Immediate Window in the panel. Bound to the selected stack frame of the active refyntra-dotnet /
@@ -17,7 +20,7 @@ export class ImmediateViewProvider implements vscode.WebviewViewProvider, vscode
   private nextId = 1;
   private readonly subs: vscode.Disposable[] = [];
 
-  constructor() {
+  constructor(private readonly sourceCompletions?: SourceCompletions) {
     this.subs.push(
       vscode.debug.onDidChangeActiveStackItem(() => this.postStatus()),
       vscode.debug.onDidChangeActiveDebugSession(() => this.postStatus()),
@@ -37,7 +40,8 @@ export class ImmediateViewProvider implements vscode.WebviewViewProvider, vscode
     const item = vscode.debug.activeStackItem;
     const session = item?.session ?? vscode.debug.activeDebugSession;
     if (!session || !(IMMEDIATE_DEBUG_TYPES as readonly string[]).includes(session.type)) return undefined;
-    return { session, frameId: item instanceof vscode.DebugStackFrame ? item.frameId : undefined };
+    if (item instanceof vscode.DebugStackFrame) return { session, frameId: item.frameId, threadId: item.threadId };
+    return { session, frameId: undefined, ...(item instanceof vscode.DebugThread ? { threadId: item.threadId } : {}) };
   }
 
   async show(): Promise<void> {
@@ -153,13 +157,37 @@ export class ImmediateViewProvider implements vscode.WebviewViewProvider, vscode
     }
   }
 
-  /** DAP completions (when the adapter supports them). */
+  /**
+   * C#: Roslyn completions at the stopped source position (netcoredbg has no DAP completions); otherwise, or when Roslyn
+   * has none, DAP completions (when the adapter supports them).
+   */
   async completions(text: string, caret: number): Promise<string[]> {
     const f = this.frame();
     if (!f) return [];
     const { prefix } = completionPrefix(text, caret);
+    if (this.sourceCompletions && f.session.type === 'refyntra-dotnet') {
+      const at = await this.stoppedSource(f).catch(() => undefined);
+      if (at && at.path.toLowerCase().endsWith('.cs')) {
+        const items = await this.sourceCompletions(vscode.Uri.file(at.path).toString(), { line: at.line - 1, character: Math.max(0, at.column - 1) }, text, caret).catch(() => []);
+        if (items.length > 0) return items.slice(0, 50);
+      }
+    }
     const r = (await f.session.customRequest('completions', { text, column: caret + 1, ...(f.frameId !== undefined ? { frameId: f.frameId } : {}) })) as { targets?: { label: string; text?: string }[] };
     return (r.targets ?? []).map((t) => t.text ?? t.label).filter((t) => t.toLowerCase().startsWith(prefix.toLowerCase())).slice(0, 50);
+  }
+
+  /** The source position of the frame (DAP stackTrace of its thread; the top frame when none is selected). */
+  private async stoppedSource(f: Frame): Promise<{ path: string; line: number; column: number } | undefined> {
+    let threadId = f.threadId;
+    if (threadId === undefined) {
+      const t = (await f.session.customRequest('threads')) as { threads?: { id: number }[] };
+      threadId = t.threads?.[0]?.id;
+    }
+    if (threadId === undefined) return undefined;
+    const st = (await f.session.customRequest('stackTrace', { threadId, startFrame: 0, levels: 50 })) as { stackFrames?: { id: number; line: number; column: number; source?: { path?: string } }[] };
+    const frames = st.stackFrames ?? [];
+    const frame = (f.frameId !== undefined ? frames.find((x) => x.id === f.frameId) : undefined) ?? frames.find((x) => x.source?.path);
+    return frame?.source?.path ? { path: frame.source.path, line: frame.line, column: frame.column } : undefined;
   }
 
   dispose(): void {
@@ -180,8 +208,8 @@ async function addWatch(expression: string): Promise<void> {
   }
 }
 
-export function registerImmediate(): { provider: ImmediateViewProvider; disposable: vscode.Disposable } {
-  const provider = new ImmediateViewProvider();
+export function registerImmediate(sourceCompletions?: SourceCompletions): { provider: ImmediateViewProvider; disposable: vscode.Disposable } {
+  const provider = new ImmediateViewProvider(sourceCompletions);
   return {
     provider,
     disposable: vscode.Disposable.from(

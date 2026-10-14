@@ -8,6 +8,8 @@ import {
   EDIT_ACTION_COMMAND,
   FIX_ALL_COMMAND,
   FIX_ALL_SCOPE_ITEMS,
+  CROSS_FILE_PLAN_COMMAND,
+  CROSS_FILE_PLANS,
   INTRODUCE_PARAMETER_COMMAND,
   INTRODUCE_PARAMETER_EDIT_ACTION,
   KEYBOARD_ACTIONS,
@@ -107,6 +109,11 @@ export async function runEditAction(engine: EngineClient, applier: VsCodeEditApp
     engine.editActions!({ uri: t.uri, range: t.range }, t.actionId, token),
   );
   if (r.kind !== 'edits') {
+    if (r.kind === 'unavailable' && r.reasonCode === 'CrossFile' && CROSS_FILE_PLANS[t.actionId]) {
+      // The method or a call site is in another file: the same rewrite as a previewed plan over every file.
+      await vscode.commands.executeCommand(CROSS_FILE_PLAN_COMMAND, { uri: t.uri, range: t.range, actionId: CROSS_FILE_PLANS[t.actionId] });
+      return true;
+    }
     if (r.kind === 'unavailable') void vscode.window.showInformationMessage(`Refyntra: ${r.message}`);
     return false;
   }
@@ -139,6 +146,15 @@ export async function runFixAll(engine: EngineClient, previews: PreviewContentPr
   await runCodePlan(engine, previews, applier, title, (token) => engine.prepareAction({ uri: t.uri, position: { line: 0, character: 0 } }, CSHARP_FIX_ALL_ACTION, token, { range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }, fixAll: { actionId: t.actionId, scope: s } }), () =>
     runFixAll(engine, previews, applier, { ...t, scope: s }),
   );
+}
+
+/** An edit action prepared as a plan across files (preview, revalidation, EditApplier and Undo). */
+export async function runCrossFilePlan(engine: EngineClient, previews: PreviewContentProvider, applier: VsCodeEditApplier, arg: unknown): Promise<void> {
+  const t = arg as { uri?: unknown; range?: { start: { line: number; character: number }; end: { line: number; character: number } }; actionId?: unknown } | undefined;
+  if (!t || typeof t.uri !== 'string' || typeof t.actionId !== 'string' || !t.range || !Object.values(CROSS_FILE_PLANS).includes(t.actionId)) return;
+  const { uri, range, actionId } = { uri: t.uri, range: t.range, actionId: t.actionId };
+  const title = actionId === 'csharp.inlineMethodAll' ? 'Inline Method (all call sites)' : 'Inline Method';
+  await runCodePlan(engine, previews, applier, title, (token) => engine.prepareAction({ uri, position: range.start }, actionId, token, { range }), () => runCrossFilePlan(engine, previews, applier, arg));
 }
 
 /** Keyboard commands (Introduce / Inline Variable) at the active editor's selection. */

@@ -326,6 +326,35 @@ exports.cases = ({ api, csharp, waitFor }) => {
       },
     ],
     [
+      'Inline Method across files: the edit action is refused with CrossFile, the plan inlines every call (other file, other project) and removes the method; Undo restores all',
+      async () => {
+        const a = await api();
+        const uri = lib('EditActions/InlineAcross.cs');
+        const callers = lib('EditActions/InlineAcrossCallers.cs');
+        const doc = await vscode.workspace.openTextDocument(uri);
+        const cdoc = await vscode.workspace.openTextDocument(callers);
+        const original = doc.getText();
+        const cOriginal = cdoc.getText();
+        const p = doc.positionAt(doc.getText().indexOf('WithTax(decimal net)'));
+        const range = { start: { line: p.line, character: p.character }, end: { line: p.line, character: p.character } };
+        const edit = await a.engine.editActions({ uri: doc.uri.toString(), range }, 'csharp.edit.inlineMethodAll');
+        assert.equal(edit.kind, 'unavailable', JSON.stringify(edit));
+        assert.equal(edit.reasonCode, 'CrossFile');
+        const r = await a.engine.prepareAction({ uri: doc.uri.toString(), position: range.start }, 'csharp.inlineMethodAll', undefined, { range });
+        assert.equal(r.kind, 'preview', JSON.stringify(r));
+        assert.equal(r.plan.writeSet.length, 3);
+        const out = await a.engine.applyRename(r.planId);
+        assert.equal(out.status, 'applied', out.message);
+        assert.ok(!doc.getText().includes('WithTax'), doc.getText());
+        assert.ok(cdoc.getText().includes('a * (1 + Pricing.Rate) + b * (1 + Pricing.Rate)'), cdoc.getText());
+        const undone = await a.undoCode(r.plan.writeSet, new Map());
+        assert.equal(undone.filter((m) => m.endsWith('edit undone.')).length, 3, undone.join(' '));
+        assert.equal(doc.getText(), original);
+        assert.equal(cdoc.getText(), cOriginal);
+        await revertAll();
+      },
+    ],
+    [
       'Postfix templates (protocol 1.10): .foreach on a list and .ifn on a nullable, inserted as snippets',
       async () => {
         const uri = lib('Postfix/Samples.cs');

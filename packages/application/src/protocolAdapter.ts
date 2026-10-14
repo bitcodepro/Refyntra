@@ -840,6 +840,15 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
     });
   }
 
+  /** Immediate window completions (protocol 1.21); null for an older host. */
+  expressionCompletions(uri: string, position: Position, text: string, caret: number, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').ExpressionCompletionsResult | null>> {
+    return this.semantic('code/expressionCompletions', token, async (s, snapshotId, traceId) => {
+      if (s.protocolMinor < 21) return null;
+      const r = await s.transport.request('code/expressionCompletions', { traceId, workspaceId: this.opts.workspaceId, snapshotId, uri, position, text, caret }, token);
+      return { items: Array.isArray(r?.items) ? r.items.filter((x): x is string => typeof x === 'string') : [], reasonCode: r?.reasonCode ?? null, snapshotId: r?.snapshotId ?? snapshotId };
+    });
+  }
+
   /** Smart Step Into (protocol 1.14): the calls of the stopped statement; null for an older host. */
   stepIntoTargets(uri: string, position: Position, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').StepIntoTargetsResult | null>> {
     return this.semantic('code/stepIntoTargets', token, async (s, snapshotId, traceId) => {

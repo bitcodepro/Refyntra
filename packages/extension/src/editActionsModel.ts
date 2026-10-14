@@ -43,6 +43,14 @@ export const INTRODUCE_PARAMETER_EDIT_ACTION = 'csharp.edit.introduceParameter';
 /** Command of the Introduce Parameter plan (preview, revalidation, Undo). */
 export const INTRODUCE_PARAMETER_COMMAND = 'refyntra.introduceParameter';
 
+/** Edit actions that become a previewed plan when the host refuses them with CrossFile (the method or a call is in another file). */
+export const CROSS_FILE_PLANS: Readonly<Record<string, string>> = {
+  'csharp.edit.inlineMethod': 'csharp.inlineMethod',
+  'csharp.edit.inlineMethodAll': 'csharp.inlineMethodAll',
+};
+/** Command of an edit action prepared as a plan across files. */
+export const CROSS_FILE_PLAN_COMMAND = 'refyntra.editActionAcrossFiles';
+
 /** One choice of a grouped action (shown in a QuickPick). */
 export interface EditActionChoice {
   actionId: string;

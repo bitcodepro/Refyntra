@@ -40,8 +40,10 @@ public sealed partial class Engine : IRpcHandler, IDisposable
     /// 1.19: code/structuralSearch and code/structuralReplace (structural search and replace, ADR-012), analysis/run
     /// <c>structuralPatterns</c> (pattern inspections ORS-name) and their quick fixes csharp.edit.fix.structural.*.
     /// 1.20: solution/structure (Solution Explorer: solution folders, projects, dependencies and items as MSBuild sees them).
+    /// 1.21: code/expressionCompletions (Immediate window completions at a stopped position) and the plan actions
+    /// csharp.inlineMethod / csharp.inlineMethodAll (Inline Method across files).
     /// </summary>
-    public const int ProtocolMinor = 20;
+    public const int ProtocolMinor = 21;
     /// <summary>How long workspace/snapshotBarrier waits for a missing document sequence (tests shorten it).</summary>
     public TimeSpan BarrierTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
@@ -143,6 +145,8 @@ public sealed partial class Engine : IRpcHandler, IDisposable
                 return await GenerateAsync(Params<GenerateParams>(p), ct).ConfigureAwait(false);
             case "code/constructorActions":
                 return await ConstructorActionsAsync(Params<ConstructorActionsParams>(p), ct).ConfigureAwait(false);
+            case "code/expressionCompletions":
+                return await ExpressionCompletionsAsync(Params<ExpressionCompletionsParams>(p), ct).ConfigureAwait(false);
             case "code/stepIntoTargets":
                 return await StepIntoTargetsAsync(Params<StepIntoTargetsParams>(p), ct).ConfigureAwait(false);
             case "workspace/runnableProjects":
@@ -744,6 +748,22 @@ public sealed partial class Engine : IRpcHandler, IDisposable
         return result;
     }
 
+    private async Task<ExpressionCompletionsResultDto> ExpressionCompletionsAsync(ExpressionCompletionsParams p, CancellationToken ct)
+    {
+        var snap = RequireSnapshot(p.WorkspaceId, p.SnapshotId);
+        var result = new ExpressionCompletionsResultDto { SnapshotId = snap.Id };
+        var doc = snap.Session.DocumentIdsForPath(PathOf(p.Uri)).Select(snap.Solution.GetDocument).FirstOrDefault(d => d != null);
+        if (doc == null)
+        {
+            result.ReasonCode = "DocumentNotFound";
+            return result;
+        }
+        var items = await ExpressionCompletions.ComputeAsync(doc, new Microsoft.CodeAnalysis.Text.LinePosition(p.Position.Line, p.Position.Character), p.Text ?? "", p.Caret, ct).ConfigureAwait(false);
+        if (items == null) result.ReasonCode = "NoPosition";
+        else result.Items = items;
+        return result;
+    }
+
     private async Task<StepIntoTargetsResultDto> StepIntoTargetsAsync(StepIntoTargetsParams p, CancellationToken ct)
     {
         var snap = RequireSnapshot(p.WorkspaceId, p.SnapshotId);
@@ -1016,6 +1036,7 @@ public sealed partial class Engine : IRpcHandler, IDisposable
         var snap = RequireSnapshot(p.WorkspaceId, p.SnapshotId);
         if (p.ActionId is not ("csharp.rename" or MoveTypePlanner.ActionId or GenerateHandlerPlanner.ActionId or Refactorings.Cleanup.CleanupPlanner.ActionId
             or SafeDeletePlanner.ActionId or ExtractMethodPlanner.ActionId or ChangeSignaturePlanner.ActionId or EditActionsPlanner.IntroduceParameterAction
+            or EditActionsPlanner.InlineMethodPlanAction or EditActionsPlanner.InlineMethodAllPlanAction
             or DiRegistrationPlanner.ActionId or EditActionsPlanner.FixAllAction or Refactorings.Structural.StructuralReplace.ActionId))
             return new PrepareResultDto { Kind = "unavailable", ReasonCode = "UnsupportedAction", Message = $"Action {p.ActionId} is not supported." };
         RenameOutcome outcome;
@@ -1038,6 +1059,15 @@ public sealed partial class Engine : IRpcHandler, IDisposable
                 return new PrepareResultDto { Kind = "unavailable", ReasonCode = "InvalidParams", Message = "Introduce Parameter needs documentUri and range." };
             outcome = await EditActionsPlanner.PrepareIntroduceParameterAsync(snap, PathOf(p.DocumentUri),
                 new Microsoft.CodeAnalysis.Text.LinePositionSpan(new(p.Range.Start.Line, p.Range.Start.Character), new(p.Range.End.Line, p.Range.End.Character)), ct).ConfigureAwait(false);
+        }
+        else if (p.ActionId is EditActionsPlanner.InlineMethodPlanAction or EditActionsPlanner.InlineMethodAllPlanAction)
+        {
+            // Inline Method across files (1.21, additive action ids): the method name or call at documentUri + range.
+            if (p.DocumentUri == null || p.Range == null)
+                return new PrepareResultDto { Kind = "unavailable", ReasonCode = "InvalidParams", Message = "Inline Method needs documentUri and range." };
+            outcome = await EditActionsPlanner.PrepareInlineMethodAsync(snap, PathOf(p.DocumentUri),
+                new Microsoft.CodeAnalysis.Text.LinePositionSpan(new(p.Range.Start.Line, p.Range.Start.Character), new(p.Range.End.Line, p.Range.End.Character)),
+                p.ActionId == EditActionsPlanner.InlineMethodAllPlanAction, ct).ConfigureAwait(false);
         }
         else if (p.ActionId == DiRegistrationPlanner.ActionId)
         {

@@ -29,8 +29,10 @@ export const PROTOCOL_MAJOR = 1;
  * 1.19: Structural search and replace (`code/structuralSearch`, `code/structuralReplace`, `analysis/run`
  *   `structuralPatterns`: pattern inspections ORS-<name> with quick fixes `csharp.edit.fix.structural.*`).
  * 1.20: Solution Explorer (`solution/structure`: solution folders, projects, dependencies and items as MSBuild sees them).
+ * 1.21: Immediate window completions (`code/expressionCompletions`) and Inline Method across files (plan actions
+ *   `csharp.inlineMethod` / `csharp.inlineMethodAll`).
  */
-export const PROTOCOL_MINOR = 20;
+export const PROTOCOL_MINOR = 21;
 
 /** Zero-based line, UTF-16 code unit character. */
 export interface Position {
@@ -453,6 +455,9 @@ export const CSHARP_EXTRACT_METHOD_ACTION = 'csharp.extractMethod';
 export const CSHARP_CHANGE_SIGNATURE_ACTION = 'csharp.changeSignature';
 /** Introduce Parameter (protocol 1.10, additive action id): refactor/prepare with documentUri + range of the expression. */
 export const CSHARP_INTRODUCE_PARAMETER_ACTION = 'csharp.introduceParameter';
+/** Inline Method across files (additive action ids): refactor/prepare with documentUri + range of the method name or call. */
+export const CSHARP_INLINE_METHOD_ACTION = 'csharp.inlineMethod';
+export const CSHARP_INLINE_METHOD_ALL_ACTION = 'csharp.inlineMethodAll';
 
 /** One parameter of a new signature (Change Signature, protocol 1.6). */
 export interface ParameterSpec {
@@ -580,6 +585,24 @@ export interface FileStructureResult {
   /** "DocumentNotFound" when the document is not part of the loaded solution. */
   reasonCode?: string | null;
   completeness: 'complete' | 'partial' | 'unknown';
+  snapshotId: string;
+}
+
+/** code/expressionCompletions (protocol 1.21): names for the debugger's Immediate window at a stopped position (Roslyn, nothing evaluated). */
+export interface ExpressionCompletionsParams extends WorkspaceParams {
+  snapshotId: string;
+  uri: string;
+  /** The stopped position (0-based). */
+  position: Position;
+  /** The expression typed so far and the caret in it. */
+  text: string;
+  caret: number;
+}
+
+export interface ExpressionCompletionsResult {
+  items: string[];
+  /** "DocumentNotFound" | "NoPosition". */
+  reasonCode?: string | null;
   snapshotId: string;
 }
 
@@ -1348,6 +1371,8 @@ export interface MethodMap {
   'code/structuralReplace': [import('./structural').StructuralReplaceParams, PrepareResult];
   /** Protocol 1.20. */
   'solution/structure': [WorkspaceParams, SolutionStructureResult];
+  /** Protocol 1.21. */
+  'code/expressionCompletions': [ExpressionCompletionsParams, ExpressionCompletionsResult];
   'code/references': [SymbolQueryParams, LocationsResult];
   'code/implementations': [SymbolQueryParams, LocationsResult];
   'refactor/prepare': [PrepareParams, PrepareResult];

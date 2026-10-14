@@ -59,7 +59,7 @@ public static partial class EditActionsPlanner
     // ------------------------------------------------------------------ shared checks
 
     /// <summary>A method whose body can be inlined or whose signature can change: no virtual dispatch, no partial / extern / generic forms.</summary>
-    private static MethodDeclarationSyntax CheckPlainMethod(Ctx c, IMethodSymbol m, string what)
+    private static MethodDeclarationSyntax CheckPlainMethod(Ctx c, IMethodSymbol m, string what, bool anyFile = false)
     {
         if (m.MethodKind != MethodKind.Ordinary) throw new Refusal("NotSupported", $"Only ordinary methods can {what}.");
         if (m.ContainingType.TypeKind == TypeKind.Interface || m.IsVirtual || m.IsAbstract || m.IsOverride)
@@ -68,7 +68,7 @@ public static partial class EditActionsPlanner
             throw new Refusal("InterfaceMember", $"'{m.Name}' implements an interface member; it can be called through the interface.");
         if (m.IsExtern || m.PartialDefinitionPart != null || m.PartialImplementationPart != null) throw new Refusal("NotSupported", $"Partial and extern methods cannot {what}.");
         if (m.IsExtensionMethod) throw new Refusal("ExtensionMethod", "Extension methods are not inlined.");
-        if (m.DeclaringSyntaxReferences.Length != 1 || m.DeclaringSyntaxReferences[0].SyntaxTree != c.Root.SyntaxTree
+        if (m.DeclaringSyntaxReferences.Length != 1 || !anyFile && m.DeclaringSyntaxReferences[0].SyntaxTree != c.Root.SyntaxTree
             || m.DeclaringSyntaxReferences[0].GetSyntax(c.Ct) is not MethodDeclarationSyntax decl)
             throw new Refusal("CrossFile", $"'{m.Name}' is declared in another file; this action changes one document only.");
         return decl;
@@ -91,28 +91,33 @@ public static partial class EditActionsPlanner
     }
 
     /// <summary>Names used inside <paramref name="expr"/> (outside its own lambdas) that mean the same at <paramref name="position"/>.</summary>
-    private static void CheckResolvesSame(Ctx c, ExpressionSyntax expr, int position, Func<ISymbol, bool> skip)
+    private static void CheckResolvesSame(Ctx c, ExpressionSyntax expr, int position, Func<ISymbol, bool> skip, SemanticModel? exprModel = null)
     {
+        var em = exprModel ?? c.Model;
         foreach (var id in expr.DescendantNodesAndSelf().OfType<SimpleNameSyntax>())
         {
             if (id.Parent is MemberAccessExpressionSyntax ma && ma.Name == id || id.Parent is MemberBindingExpressionSyntax || id.Parent is QualifiedNameSyntax q && q.Right == id
                 || id.Parent is NameColonSyntax || id.Parent is NameEqualsSyntax || id.Identifier.ValueText == "nameof" || id.IsVar) continue;
-            var sym = c.Model.GetSymbolInfo(id, c.Ct).Symbol ?? c.Model.GetSymbolInfo(id, c.Ct).CandidateSymbols.FirstOrDefault();
+            var sym = em.GetSymbolInfo(id, c.Ct).Symbol ?? em.GetSymbolInfo(id, c.Ct).CandidateSymbols.FirstOrDefault();
             if (sym == null || skip(sym)) continue;
             if (sym.DeclaringSyntaxReferences.Any(r => r.SyntaxTree == expr.SyntaxTree && expr.Span.Contains(r.Span))) continue;
             var visible = c.Model.LookupSymbols(position, name: id.Identifier.ValueText);
-            if (!visible.Any(v => SymbolEqualityComparer.Default.Equals(v.OriginalDefinition, sym.OriginalDefinition))
+            if (!visible.Any(v => SameSymbol(v.OriginalDefinition, sym.OriginalDefinition))
                 || visible.Any(v => v is ILocalSymbol or IParameterSymbol or IRangeVariableSymbol && !SymbolEqualityComparer.Default.Equals(v, sym)))
                 throw new Refusal("NameConflict", $"'{id.Identifier.ValueText}' would mean something else at the target position.");
         }
     }
 
+    /// <summary>The same symbol, also when seen from two compilations (the body's project and a call site's project).</summary>
+    private static bool SameSymbol(ISymbol? a, ISymbol? b) =>
+        SymbolEqualityComparer.Default.Equals(a, b) || a != null && b != null && a.GetDocumentationCommentId() is { } id && id == b.GetDocumentationCommentId();
+
     private static ExpressionSyntax Parens(ExpressionSyntax e) =>
         IsPrimary(e) ? e : SyntaxFactory.ParenthesizedExpression(e).WithAdditionalAnnotations(Simplifier.Annotation);
 
-    private static ExpressionSyntax WithConversion(Ctx c, ExpressionSyntax value, ExpressionSyntax original, ITypeSymbol target, int position)
+    private static ExpressionSyntax WithConversion(Ctx c, ExpressionSyntax value, ExpressionSyntax original, ITypeSymbol target, int position, SemanticModel? originalModel = null)
     {
-        var natural = c.Model.GetTypeInfo(original, c.Ct).Type;
+        var natural = (originalModel ?? c.Model).GetTypeInfo(original, c.Ct).Type;
         if (natural != null && SymbolEqualityComparer.Default.Equals(natural, target)) return value;
         if (natural == null && original is LiteralExpressionSyntax { RawKind: (int)SyntaxKind.NullLiteralExpression or (int)SyntaxKind.DefaultLiteralExpression } && !target.IsValueType) { }
         var shown = DisplayLocalType(c, target, position) ?? throw new Refusal("AnonymousType", "The type cannot be written.");
@@ -127,11 +132,13 @@ public static partial class EditActionsPlanner
 
     // ------------------------------------------------------------------ inline method
 
-    private sealed record InlineBody(MethodDeclarationSyntax Decl, ExpressionSyntax Expr, bool IsStatement);
+    /// <summary>The inlineable body; <paramref name="Model"/> is the semantic model of its document (another file than the call sites possibly).</summary>
+    private sealed record InlineBody(MethodDeclarationSyntax Decl, ExpressionSyntax Expr, bool IsStatement, SemanticModel Model);
 
-    private static InlineBody InlineableBody(Ctx c, IMethodSymbol m)
+    private static InlineBody InlineableBody(Ctx c, IMethodSymbol m, SemanticModel? declModel = null)
     {
-        var decl = CheckPlainMethod(c, m, "be inlined");
+        var decl = CheckPlainMethod(c, m, "be inlined", declModel != null);
+        var bm = declModel ?? c.Model;
         if (m.IsGenericMethod) throw new Refusal("Generic", "Generic methods are not inlined.");
         if (m.IsAsync) throw new Refusal("Async", "Async methods are not inlined.");
         if (m.ReturnsByRef || m.ReturnsByRefReadonly) throw new Refusal("RefReturn", "Methods that return by reference are not inlined.");
@@ -158,9 +165,9 @@ public static partial class EditActionsPlanner
             throw new Refusal("Comments", "The method body has comments that would be lost.");
         if (expr.DescendantNodesAndSelf().Any(n => n is BaseExpressionSyntax || n is StackAllocArrayCreationExpressionSyntax))
             throw new Refusal("NotSupported", "Bodies using 'base' or stackalloc are not inlined.");
-        if (expr.DescendantNodesAndSelf().OfType<SimpleNameSyntax>().Any(n => c.Model.GetSymbolInfo(n, c.Ct).Symbol is IMethodSymbol s && SymbolEqualityComparer.Default.Equals(s.OriginalDefinition, m.OriginalDefinition)))
+        if (expr.DescendantNodesAndSelf().OfType<SimpleNameSyntax>().Any(n => bm.GetSymbolInfo(n, c.Ct).Symbol is IMethodSymbol s && SymbolEqualityComparer.Default.Equals(s.OriginalDefinition, m.OriginalDefinition)))
             throw new Refusal("Recursive", $"'{m.Name}' calls itself.");
-        return new InlineBody(decl, expr, isStatement);
+        return new InlineBody(decl, expr, isStatement, bm);
     }
 
     private static async Task<Document> InlineMethodAsync(Ctx c, IMethodSymbol m, InvocationExpressionSyntax? site)
@@ -187,14 +194,14 @@ public static partial class EditActionsPlanner
             && c.Model.GetSymbolInfo(ma.Expression, c.Ct).Symbol is not INamedTypeSymbol)
             throw new Refusal("Receiver", $"The call is made on another object ('{ma.Expression}'); only calls on 'this' or the type are inlined.");
         var callerType = c.Model.GetEnclosingSymbol(call.SpanStart, c.Ct)?.ContainingType;
-        if (!m.IsStatic && !SymbolEqualityComparer.Default.Equals(callerType?.OriginalDefinition, m.ContainingType.OriginalDefinition))
+        if (!m.IsStatic && !SameSymbol(callerType?.OriginalDefinition, m.ContainingType.OriginalDefinition))
             throw new Refusal("Receiver", "The call is made from another type.");
         if (op.Arguments.Any(a => a.ArgumentKind != ArgumentKind.Explicit)) throw new Refusal("OptionalArguments", "The call relies on default parameter values.");
         if (body.IsStatement && call.Parent is not (ExpressionStatementSyntax or ArrowExpressionClauseSyntax)) throw new Refusal("NotSupported", "A call of a void method can only be inlined where it is a statement.");
 
         var args = op.Arguments.ToDictionary(a => a.Parameter!.Ordinal, a => ((ArgumentSyntax)a.Syntax).Expression);
         var uses = m.Parameters.ToDictionary(p => p.Ordinal, p => body.Expr.DescendantNodesAndSelf().OfType<IdentifierNameSyntax>()
-            .Where(id => id.Identifier.ValueText == p.Name && SymbolEqualityComparer.Default.Equals(c.Model.GetSymbolInfo(id, c.Ct).Symbol, p)).ToList());
+            .Where(id => id.Identifier.ValueText == p.Name && SymbolEqualityComparer.Default.Equals(body.Model.GetSymbolInfo(id, c.Ct).Symbol, p)).ToList());
         if (uses.Values.SelectMany(x => x).Any(InNameOf)) throw new Refusal("NameOf", "A parameter is used in nameof.");
 
         bool Trivial(ExpressionSyntax a) => c.Model.GetConstantValue(a, c.Ct).HasValue
@@ -203,7 +210,7 @@ public static partial class EditActionsPlanner
         bool DirectSingle(int ordinal) =>
             uses[ordinal].Count == 1 && !IsWritten(uses[ordinal][0]) && !ConditionallyEvaluated(uses[ordinal][0], body.Expr)
             && !body.Expr.DescendantNodesAndSelf().Any(n => n.SpanStart < uses[ordinal][0].SpanStart && !n.Span.Contains(uses[ordinal][0].Span) && IsImpure(n)
-                && !(n is MemberAccessExpressionSyntax mn && (mn.Parent is InvocationExpressionSyntax pi && pi.Expression == mn || c.Model.GetSymbolInfo(mn, c.Ct).Symbol is IMethodSymbol or INamedTypeSymbol or INamespaceSymbol)));
+                && !(n is MemberAccessExpressionSyntax mn && (mn.Parent is InvocationExpressionSyntax pi && pi.Expression == mn || body.Model.GetSymbolInfo(mn, c.Ct).Symbol is IMethodSymbol or INamedTypeSymbol or INamespaceSymbol)));
 
         var temp = new HashSet<int>();
         foreach (var p in m.Parameters)
@@ -222,7 +229,19 @@ public static partial class EditActionsPlanner
         if (temp.Count > 0)
             foreach (var p in m.Parameters.Where(p => !Trivial(args[p.Ordinal]))) temp.Add(p.Ordinal);
 
-        CheckResolvesSame(c, body.Expr, call.SpanStart, s => s is IParameterSymbol ps && SymbolEqualityComparer.Default.Equals(ps.ContainingSymbol, m));
+        // Called from another type: static members the body names without a qualifier get the declaring type (Rate → Pricing.Rate).
+        var qualify = new HashSet<SimpleNameSyntax>();
+        if (!SameSymbol(callerType?.OriginalDefinition, m.ContainingType.OriginalDefinition))
+            foreach (var id in body.Expr.DescendantNodesAndSelf().OfType<SimpleNameSyntax>())
+            {
+                if (id.Parent is MemberAccessExpressionSyntax qa && qa.Name == id || id.Parent is MemberBindingExpressionSyntax || id.Parent is QualifiedNameSyntax qn && qn.Right == id
+                    || id.Parent is NameColonSyntax || id.Parent is NameEqualsSyntax) continue;
+                if (body.Model.GetSymbolInfo(id, c.Ct).Symbol is { IsStatic: true, ContainingType: not null } st and (IFieldSymbol or IPropertySymbol or IMethodSymbol { MethodKind: MethodKind.Ordinary } or IEventSymbol))
+                    qualify.Add(id);
+            }
+        var qualifiedSymbols = qualify.Select(q => body.Model.GetSymbolInfo(q, c.Ct).Symbol).ToList();
+        CheckResolvesSame(c, body.Expr, call.SpanStart, s => s is IParameterSymbol ps && SymbolEqualityComparer.Default.Equals(ps.ContainingSymbol, m)
+            || qualifiedSymbols.Any(q => SymbolEqualityComparer.Default.Equals(q, s)), body.Model);
 
         var replacement = new Dictionary<SyntaxNode, SyntaxNode>();
         StatementSyntax? stmt = null;
@@ -250,7 +269,7 @@ public static partial class EditActionsPlanner
                 memberLocals[member] = taken;
             }
             foreach (var id in body.Expr.DescendantNodesAndSelf().OfType<SimpleNameSyntax>())
-                if (c.Model.GetSymbolInfo(id, c.Ct).Symbol is not IParameterSymbol { ContainingSymbol: var owner } || !SymbolEqualityComparer.Default.Equals(owner, m))
+                if (body.Model.GetSymbolInfo(id, c.Ct).Symbol is not IParameterSymbol { ContainingSymbol: var owner } || !SymbolEqualityComparer.Default.Equals(owner, m))
                     taken.Add(id.Identifier.ValueText);
             foreach (var p in m.Parameters.Where(p => temp.Contains(p.Ordinal)))
             {
@@ -267,9 +286,16 @@ public static partial class EditActionsPlanner
         foreach (var p in m.Parameters.Where(p => !temp.Contains(p.Ordinal)))
             foreach (var u in uses[p.Ordinal]) replacement[u] = Parens(args[p.Ordinal].WithoutTrivia()).WithTriviaFrom(u);
 
+        if (qualify.Count > 0)
+        {
+            var owner = m.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+            foreach (var q in qualify)
+                replacement[q] = SyntaxFactory.MemberAccessExpression(SyntaxKind.SimpleMemberAccessExpression, SyntaxFactory.ParseTypeName(owner), q.WithoutTrivia())
+                    .WithTriviaFrom(q).WithAdditionalAnnotations(Simplifier.Annotation);
+        }
         var expr = body.Expr.ReplaceNodes(replacement.Keys, (o, _) => replacement[o]).WithoutTrivia();
         // A call through 'this.' or the type keeps the same instance; implicit member references stay valid.
-        if (!body.IsStatement) expr = WithConversion(c, expr, body.Expr, m.ReturnType, call.SpanStart);
+        if (!body.IsStatement) expr = WithConversion(c, expr, body.Expr, m.ReturnType, call.SpanStart, body.Model);
         var result = (body.IsStatement ? expr : Parens(expr)).WithTriviaFrom(call).WithAdditionalAnnotations(Formatter.Annotation);
         if (stmt != null) editor.InsertBefore(stmt, temps);
         editor.ReplaceNode(call, result);

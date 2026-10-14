@@ -1021,6 +1021,26 @@ public sealed class ConstructorActionsResultDto
     public string SnapshotId { get; set; } = "";
 }
 
+/// <summary>code/expressionCompletions (protocol 1.21): completions of the debugger's Immediate window at a stopped position.</summary>
+public sealed class ExpressionCompletionsParams : WorkspaceParams
+{
+    public string SnapshotId { get; set; } = "";
+    public string Uri { get; set; } = "";
+    /// <summary>The stopped position (0-based).</summary>
+    public PositionDto Position { get; set; } = new();
+    /// <summary>The expression typed so far and the caret in it (UTF-16 offset).</summary>
+    public string Text { get; set; } = "";
+    public int Caret { get; set; }
+}
+
+public sealed class ExpressionCompletionsResultDto
+{
+    public List<string> Items { get; set; } = new();
+    /// <summary>"DocumentNotFound" | "NoPosition".</summary>
+    public string? ReasonCode { get; set; }
+    public string SnapshotId { get; set; } = "";
+}
+
 /// <summary>code/stepIntoTargets (protocol 1.14): the calls of the statement a debugger stopped at.</summary>
 public sealed class StepIntoTargetsParams : WorkspaceParams
 {

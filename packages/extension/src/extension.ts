@@ -41,7 +41,8 @@ import { CSHARP_GENERATE_HANDLER_ACTION, CSHARP_MOVE_TYPE_ACTION } from '@refynt
 import { runRestore } from './restore';
 import { registerCodeActions } from './codeActions';
 import { registerConstructorActions } from './constructorActions';
-import { registerEditActions } from './editActions';
+import { registerEditActions, runCrossFilePlan } from './editActions';
+import { CROSS_FILE_PLAN_COMMAND } from './editActionsModel';
 import { registerGenerate } from './generate';
 import { registerPostfix } from './postfix';
 import { type ImmediateViewProvider, registerImmediate } from './immediate';
@@ -318,7 +319,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
   // Run and Debug (ADR-008): bundled netcoredbg / debugpy, the host's runnable-project model, js-debug configurations.
   const run = registerRun(context, engine, isTrusted);
   const inlineValues = registerInlineValues();
-  const immediate = registerImmediate();
+  const immediate = registerImmediate((uri, position, text, caret) => engine.expressionCompletions?.(uri, position, text, caret) ?? Promise.resolve([]));
   const debugExtras = registerDebugExtras(engine);
   context.subscriptions.push(run.disposable);
   const testing = registerTesting(engine, run.service.debuggers, isTrusted);
@@ -434,6 +435,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
       const t = parseCodeActionTarget(arg);
       return runIntroduceParameter(engine, previews, editApplier, t?.range ? { uri: t.uri, range: t.range } : undefined);
     }),
+    vscode.commands.registerCommand(CROSS_FILE_PLAN_COMMAND, (arg?: unknown) => runCrossFilePlan(engine, previews, editApplier, arg)),
     vscode.commands.registerCommand('refyntra.changeSignature', (arg?: unknown) => runChangeSignature(engine, previews, editApplier, atTarget(arg))),
     registerCodeActions(engine),
     registerConstructorActions(engine, previews, editApplier), // constructor / DI helpers computed by Roslyn (protocol 1.11)

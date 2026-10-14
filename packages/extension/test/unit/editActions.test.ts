@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EDIT_ACTION_COMMAND, KEYBOARD_ACTIONS, canApply, choicePickItems, editActionTitle, editKindMatches, groupEditActions, offerEditActions, parseEditActionTarget } from '../../src/editActionsModel';
+import { CROSS_FILE_PLANS, EDIT_ACTION_COMMAND, KEYBOARD_ACTIONS, canApply, choicePickItems, editActionTitle, editKindMatches, groupEditActions, offerEditActions, parseEditActionTarget } from '../../src/editActionsModel';
 
 const items = [
   { actionId: 'csharp.edit.invertIf', title: "Invert 'if'", kind: 'refactor.rewrite.refyntra.invertIf' },
@@ -69,6 +69,12 @@ describe('edit actions (code/editActions glue)', () => {
     expect(offerEditActions(inline, 'refactor.inline').map((i) => i.actionId)).toEqual(inline.map((i) => i.actionId));
     expect(offerEditActions(inline, 'refactor.extract')).toEqual([]);
     expect(parseEditActionTarget({ uri: 'file:///a.cs', range: { start: { line: 1, character: 2 }, end: { line: 1, character: 2 } }, actionId: 'csharp.edit.inlineMethodAll', version: 3 })?.actionId).toBe('csharp.edit.inlineMethodAll');
+  });
+
+  it('Inline Method refused with CrossFile becomes the plan of the same action', () => {
+    expect(CROSS_FILE_PLANS['csharp.edit.inlineMethod']).toBe('csharp.inlineMethod');
+    expect(CROSS_FILE_PLANS['csharp.edit.inlineMethodAll']).toBe('csharp.inlineMethodAll');
+    expect(CROSS_FILE_PLANS['csharp.edit.inlineField']).toBeUndefined();
   });
 
   it('groups Introduce Field / Constant choices into one action asked with a QuickPick', () => {
