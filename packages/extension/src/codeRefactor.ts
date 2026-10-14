@@ -13,6 +13,7 @@ import {
   type SignatureInfo,
 } from '@refyntra/contracts';
 import { runRecovery } from './actions';
+import { errorsAfter, errorsBefore } from './lspDiagnostics';
 import {
   type SignatureRow,
   addRow,
@@ -244,7 +245,26 @@ async function buildPreview(preview: RenamePreview): Promise<StoredPreview> {
 /** Shared flow of the code refactorings: prepare, preview, confirm, apply, report. */
 /** A refactoring of the language server of a Python/Rust route, through the delegated plan pipeline. */
 export async function runDelegatedAction(engine: EngineClient, previews: PreviewContentProvider, applier: VsCodeEditApplier, req: { uri: string; range: Range; kind: string; title: string }): Promise<void> {
-  await runCodePlan(engine, previews, applier, req.title, (token) => engine.prepareDelegatedAction(req, token), () => runDelegatedAction(engine, previews, applier, req));
+  // The server's errors for the changed files before the change; compared with its next report after the apply.
+  let route: string | undefined;
+  let before: ReturnType<typeof errorsBefore>;
+  const prepare = async (token: vscode.CancellationToken) => {
+    const o = await engine.prepareDelegatedAction(req, token);
+    if (o.kind === 'preview') {
+      route = o.plan.providerRouteId;
+      before = errorsBefore(route, (o.plan.writeSet as readonly PlannedChange[]).flatMap((c) => ('uri' in c ? [c.uri] : [])));
+    }
+    return o;
+  };
+  const check = async (): Promise<string | undefined> => {
+    if (!route || !before) return undefined;
+    const added = await errorsAfter(route, before);
+    if (added === undefined) return undefined;
+    if (added.length === 0) return undefined;
+    const first = added[0]!;
+    return `${added.length} new error(s) reported after the change, e.g. ${shortPath(first.uri)}:${first.diagnostic.range.start.line + 1}: ${first.diagnostic.message}`;
+  };
+  await runCodePlan(engine, previews, applier, req.title, prepare, () => runDelegatedAction(engine, previews, applier, req), check);
 }
 
 export async function runCodePlan(
@@ -254,6 +274,8 @@ export async function runCodePlan(
   title: string,
   prepare: (token: vscode.CancellationToken) => Promise<RenameOutcome>,
   again: () => Promise<void>,
+  /** After a successful apply: a problem found by the route's own checks (e.g. new server errors), shown with Undo. */
+  check?: () => Promise<string | undefined>,
 ): Promise<void> {
   let outcome: RenameOutcome;
   try {
@@ -296,7 +318,7 @@ export async function runCodePlan(
         void vscode.window.showInformationMessage(`Refyntra ${title}: ${native.result.message}`);
         return;
       }
-      await reportCodeApply(engine, applier, plan.writeSet as readonly PlannedChange[], new Map(), native.result, again);
+      await reportCodeApply(engine, applier, plan.writeSet as readonly PlannedChange[], new Map(), native.result, again, check);
       if (native.note) void vscode.window.showWarningMessage(`Refyntra ${title}: ${native.note}`);
     } catch (e) {
       if (e instanceof CancelledError) return;
@@ -345,7 +367,7 @@ export async function runCodePlan(
       const result = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Refyntra: revalidating and applying ${title}`, cancellable: true }, (_p, token) =>
         engine.applyRename(planId, token, { acceptLimited }),
       );
-      await reportCodeApply(engine, applier, plan.writeSet as readonly PlannedChange[], originals, result, again);
+      await reportCodeApply(engine, applier, plan.writeSet as readonly PlannedChange[], originals, result, again, check);
     } catch (e) {
       if (e instanceof CancelledError) return;
       void vscode.window.showErrorMessage(`Refyntra ${title} failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -358,8 +380,15 @@ export async function runCodePlan(
   qp.show();
 }
 
-async function reportCodeApply(engine: EngineClient, applier: VsCodeEditApplier, writeSet: readonly PlannedChange[], originals: ReadonlyMap<string, string>, result: ApplyOutcome, again: () => Promise<void>): Promise<void> {
+async function reportCodeApply(engine: EngineClient, applier: VsCodeEditApplier, writeSet: readonly PlannedChange[], originals: ReadonlyMap<string, string>, result: ApplyOutcome, again: () => Promise<void>, check?: () => Promise<string | undefined>): Promise<void> {
   if (result.status === 'applied') {
+    const problem = check ? await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: 'Refyntra: checking the result' }, () => check()) : undefined;
+    if (problem) {
+      const pick = await vscode.window.showWarningMessage(`Refyntra: ${result.message}, but ${problem}`, 'Undo', 'Show Problems');
+      if (pick === 'Undo') void vscode.window.showInformationMessage(`Refyntra Undo: ${(await undoCode(engine, applier, writeSet, originals)).join(' ')}`);
+      if (pick === 'Show Problems') await vscode.commands.executeCommand('workbench.actions.view.problems');
+      return;
+    }
     const pick = await vscode.window.showInformationMessage(`Refyntra: ${result.message}. Edited files are not saved.`, 'Undo');
     if (pick === 'Undo') void vscode.window.showInformationMessage(`Refyntra Undo: ${(await undoCode(engine, applier, writeSet, originals)).join(' ')}`);
     return;

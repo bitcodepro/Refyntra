@@ -106,6 +106,32 @@ interface Session {
   closedByUs: boolean;
 }
 
+export interface LspDiagnostic {
+  range: { start: Position; end: Position };
+  /** 1 error, 2 warning, 3 information, 4 hint (LSP). */
+  severity: 1 | 2 | 3 | 4;
+  message: string;
+  code?: string;
+  source?: string;
+}
+
+export type LspDiagnosticsEvent = { kind: 'publish'; uri: string; diagnostics: LspDiagnostic[] } | { kind: 'clear' };
+
+function readDiagnostic(d: unknown): LspDiagnostic | undefined {
+  if (!d || typeof d !== 'object') return undefined;
+  const x = d as { range?: { start?: Position; end?: Position }; severity?: unknown; message?: unknown; code?: unknown; source?: unknown };
+  const ok = (q: unknown): q is Position => !!q && typeof (q as Position).line === 'number' && typeof (q as Position).character === 'number';
+  if (!x.range || !ok(x.range.start) || !ok(x.range.end) || typeof x.message !== 'string') return undefined;
+  const severity = x.severity === 1 || x.severity === 2 || x.severity === 3 || x.severity === 4 ? x.severity : 1;
+  return {
+    range: { start: { line: x.range.start.line, character: x.range.start.character }, end: { line: x.range.end.line, character: x.range.end.character } },
+    severity,
+    message: x.message,
+    ...(typeof x.code === 'string' || typeof x.code === 'number' ? { code: String(x.code) } : {}),
+    ...(typeof x.source === 'string' ? { source: x.source } : {}),
+  };
+}
+
 interface LspCodeAction {
   title: string;
   kind?: string;
@@ -160,6 +186,21 @@ export class LspLanguageAdapter implements LanguageAdapter {
   private readonly epochEmitter = new Emitter<string | undefined>();
   readonly onDidChangeHealth = this.healthEmitter.event;
   readonly onDidChangeEpoch = this.epochEmitter.event;
+  private readonly diagnosticsEmitter = new Emitter<LspDiagnosticsEvent>();
+  /** textDocument/publishDiagnostics of the current session (uri, diagnostics); `clear` when the session ends. */
+  readonly onDidPublishDiagnostics = this.diagnosticsEmitter.event;
+  /** The latest diagnostics per document of the current session. */
+  private readonly diagnostics = new Map<string, LspDiagnostic[]>();
+  /** The latest diagnostics the server published for a document (empty when none). */
+  diagnosticsFor(uri: string): readonly LspDiagnostic[] {
+    return this.diagnostics.get(uri) ?? [];
+  }
+
+  private clearDiagnostics(): void {
+    if (this.diagnostics.size === 0) return;
+    this.diagnostics.clear();
+    this.diagnosticsEmitter.fire({ kind: 'clear' });
+  }
   readonly delegatedRename: DelegatedRenamePort = {
     prepare: (req, token) => this.prepareDelegated(req, token),
     revalidate: (plan, token) => this.revalidateDelegated(plan, token),
@@ -265,6 +306,7 @@ export class LspLanguageAdapter implements LanguageAdapter {
       s.closedByUs = true;
       for (const d of s.subs) d.dispose();
       this.epochEmitter.fire(undefined);
+    this.clearDiagnostics();
       await s.conn.shutdown().catch(() => undefined);
     }
   }
@@ -312,6 +354,17 @@ export class LspLanguageAdapter implements LanguageAdapter {
     this.epochCounter += 1;
     const session: Session = { conn, epoch: `${this.o.workspaceId}-${this.language.capabilityPrefix}-lsp-${this.epochCounter}`, open: new Map(), subs: [], closedByUs: false };
     session.subs.push(conn.onClose((err) => this.onSessionClosed(session, err)));
+    session.subs.push(
+      conn.onNotification((method, params) => {
+        if (method !== 'textDocument/publishDiagnostics' || this.session !== session) return;
+        const p = params as { uri?: unknown; diagnostics?: unknown } | undefined;
+        if (typeof p?.uri !== 'string' || !Array.isArray(p.diagnostics)) return;
+        const uri = this.uri(p.uri);
+        const list = (p.diagnostics as unknown[]).map(readDiagnostic).filter((d): d is LspDiagnostic => d !== undefined);
+        this.diagnostics.set(uri, list);
+        this.diagnosticsEmitter.fire({ kind: 'publish', uri, diagnostics: list });
+      }),
+    );
     // Replay: the server sees exactly the open documents of this language, with versions Refyntra assigns.
     for (const d of this.o.tracker.openDocuments()) if (this.handles(d.uri, d.languageId)) this.sendOpen(session, d.uri, d.text);
     let quiet: Promise<void> = Promise.resolve();
@@ -345,6 +398,7 @@ export class LspLanguageAdapter implements LanguageAdapter {
     this.session = undefined;
     for (const d of session.subs) d.dispose();
     this.epochEmitter.fire(undefined);
+    this.clearDiagnostics();
     const now = this.o.clock.now();
     const windowMs = this.o.crashWindowMs ?? 180000;
     this.crashTimes = [...this.crashTimes.filter((t) => now - t < windowMs), now];

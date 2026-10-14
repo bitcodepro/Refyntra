@@ -1201,6 +1201,25 @@ scenarios['pyrust-lsp'] = [
     },
   ],
   [
+    'Python: Pyright errors reach the editor and the Problems panel (they used to be dropped)',
+    async () => {
+      const root = vscode.workspace.workspaceFolders[0].uri;
+      const file = vscode.Uri.joinPath(root, 'app', 'broken.py');
+      await vscode.workspace.fs.writeFile(file, Buffer.from('value = 1 + undefined_name\n'));
+      const opened = await vscode.workspace.openTextDocument(file);
+      await vscode.window.showTextDocument(opened);
+      const diags = await waitFor(() => {
+        const list = vscode.languages.getDiagnostics(file).filter((x) => /undefined_name/.test(x.message));
+        return list.length > 0 ? list : undefined;
+      }, 'Pyright reports undefined_name', 120000);
+      // Error or warning depends on Pyright's rule set; what matters is that it is shown, with its source.
+      assert.ok([vscode.DiagnosticSeverity.Error, vscode.DiagnosticSeverity.Warning].includes(diags[0].severity));
+      assert.match(String(diags[0].source), /Pyright/i);
+      await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+      await vscode.workspace.fs.delete(file);
+    },
+  ],
+  [
     'Python Rename: preview records the server versions; an edit after the preview -> stale; apply + Undo',
     async () => {
       const a = await api();
