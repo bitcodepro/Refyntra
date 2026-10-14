@@ -35,13 +35,16 @@ public sealed class Engine : IRpcHandler, IDisposable
     /// 1.14: code/stepIntoTargets (Smart Step Into: the calls of the statement a debugger stopped at).
     /// 1.15: code/tests (test discovery for the Test Explorer: test projects, classes, methods and data cases).
     /// 1.16: analysis/run `documents` (per-document inspections OR1002–OR1010) and RuleDiagnostic `fixes` (quick fixes as edit actions).
+    /// 1.17: code/metadataSource (go to metadata: decompiled or PDB-embedded sources of referenced assemblies).
     /// </summary>
-    public const int ProtocolMinor = 16;
+    public const int ProtocolMinor = 17;
     /// <summary>How long workspace/snapshotBarrier waits for a missing document sequence (tests shorten it).</summary>
     public TimeSpan BarrierTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
     private readonly ConcurrentDictionary<string, WorkspaceSession> _sessions = new(StringComparer.Ordinal);
     private readonly PlanStore _plans = new();
+    /// <summary>code/metadataSource (1.17); caches decompiled documents per assembly MVID for the process.</summary>
+    public MetadataSourceHandler Metadata { get; } = new();
     private volatile bool _initialized;
     private volatile bool _shutdown;
 
@@ -120,6 +123,8 @@ public sealed class Engine : IRpcHandler, IDisposable
                 return await HierarchyAsync(Params<HierarchyParams>(p), ct).ConfigureAwait(false);
             case "code/usages":
                 return await UsagesAsync(Params<UsagesParams>(p), ct).ConfigureAwait(false);
+            case "code/metadataSource":
+                return await MetadataSourceAsync(Params<MetadataSourceParams>(p), ct).ConfigureAwait(false);
             case "code/fileStructure":
                 return await FileStructureAsync(Params<FileStructureParams>(p), ct).ConfigureAwait(false);
             case "code/editActions":
@@ -693,6 +698,9 @@ public sealed class Engine : IRpcHandler, IDisposable
         return result;
     }
 
+    private Task<MetadataSourceResultDto> MetadataSourceAsync(MetadataSourceParams p, CancellationToken ct) =>
+        Metadata.HandleAsync(RequireSnapshot(p.WorkspaceId, p.SnapshotId), p, ct);
+
     private async Task<FileStructureResultDto> FileStructureAsync(FileStructureParams p, CancellationToken ct)
     {
         var snap = RequireSnapshot(p.WorkspaceId, p.SnapshotId);
@@ -709,6 +717,7 @@ public sealed class Engine : IRpcHandler, IDisposable
             Name = m.Name, Kind = m.Kind, Accessibility = m.Accessibility, IsStatic = m.IsStatic, Signature = m.Signature,
             Range = ToRange(m.Range), SelectionRange = ToRange(m.SelectionRange), Region = m.Region, DeclaringType = m.DeclaringType,
             Uri = m.DeclaringType == null ? null : m.FilePath is { } f ? UriPaths.ToUri(f) : null, Navigable = m.Navigable,
+            DocumentationId = m.DocumentationId, AssemblyName = m.AssemblyName,
         };
         result.Types = model.Types.Select(t => new StructureTypeDto
         {
@@ -740,7 +749,7 @@ public sealed class Engine : IRpcHandler, IDisposable
         result.NextStatement = model.NextStatement is { } n ? new PositionDto { Line = n.Line, Character = n.Character } : null;
         result.Targets = model.Targets.Select(t => new StepIntoTargetDto
         {
-            Label = t.Label, Detail = t.Detail, Kind = t.Kind, CallRange = ToRange(t.CallSpan), Reason = t.Reason, IsVirtual = t.IsVirtual,
+            Label = t.Label, Detail = t.Detail, Kind = t.Kind, CallRange = ToRange(t.CallSpan), Reason = t.Reason, IsVirtual = t.IsVirtual, DocumentationId = t.DocumentationId, AssemblyName = t.AssemblyName,
             BreakAt = t.BreakAt is { } b && t.FilePath != null
                 ? new LocationDto { Uri = UriPaths.ToUri(t.FilePath), Range = new RangeDto { Start = new PositionDto { Line = b.Line, Character = b.Character }, End = new PositionDto { Line = b.Line, Character = b.Character } } }
                 : null,

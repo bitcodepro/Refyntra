@@ -421,6 +421,9 @@ public sealed class StructureMemberDto
     /// <summary>Inherited members declared in the solution: their file. Null for metadata (not navigable).</summary>
     public string? Uri { get; set; }
     public bool Navigable { get; set; } = true;
+    /// <summary>Inherited metadata members (1.17): for code/metadataSource.</summary>
+    public string? DocumentationId { get; set; }
+    public string? AssemblyName { get; set; }
 }
 
 public sealed class StructureTypeDto
@@ -1038,6 +1041,9 @@ public sealed class StepIntoTargetDto
     public string? Reason { get; set; }
     /// <summary>A virtual call: an override may run instead.</summary>
     public bool IsVirtual { get; set; }
+    /// <summary>Reason "metadata" (1.17): the callee for code/metadataSource.</summary>
+    public string? DocumentationId { get; set; }
+    public string? AssemblyName { get; set; }
 }
 
 public sealed class StepIntoTargetsResultDto

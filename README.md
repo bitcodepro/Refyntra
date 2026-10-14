@@ -519,8 +519,8 @@ opens; type to filter by name with camel humps (`gOL` finds `GetOrderLines`), En
 buttons hide or show methods, properties, fields (with constants and enum members), events, nested types and
 **inherited members** (C#: the members of the base classes, nearest first, or of the base interfaces of an interface;
 without `object`'s, constructors and members the type overrides or redeclares; grouped "inherited from Entity<int>").
-Inherited members with source in the solution open on Enter; members of referenced assemblies are listed with "no
-source (metadata)" and do not open (metadata-as-source is not part of File Structure). The filters are kept per
+Inherited members with source in the solution open on Enter; members of referenced assemblies ("library: opens
+decompiled") open their decompiled source (see *Go to metadata* below). The filters are kept per
 workspace and the title says which are hidden. **Show in the Outline view** (the last button) opens VS Code's Outline.
 `refyntra.fileStructure.preview` (off by default) shows the member in the editor while you move through the list; Esc
 then returns to where the cursor was. For C# the list comes from the host (protocol 1.13 `code/fileStructure`; members
@@ -548,6 +548,30 @@ MSTest, or a test method / class) form the group **In tests** when grouping by k
   Close a tab with its `×`, or clear all.
 - Large results: a cancellable progress notification; the host returns at most 1000 usages first, then **Show more**
   asks again for four times as many (up to 50000).
+
+**Go to metadata / decompiled sources (C#).** A symbol without source in the solution (`string`, `IMediator`,
+`Exception.StackTrace`) opens as a **read-only C# document** `refyntra-metadata:/<assembly>/<Namespace.Type>.cs`, like
+Rider's and Visual Studio's metadata-as-source: the whole type with its members and XML documentation comments, the
+caret on the symbol, C# highlighting, and a header naming the assembly, version, MVID and where the text comes from
+(the status bar says *Decompiled* or *Embedded source*). The text is the **source file embedded in the assembly's
+PDB** when the library ships one (the PDB inside the DLL or a matching `.pdb` next to it), otherwise it is
+**decompiled** with ICSharpCode.Decompiler (ILSpy's engine, MIT, bundled in the C# host). Reference assemblies are
+mapped to their implementation on this machine (`System.String` comes from `System.Private.CoreLib` of the installed
+runtime; NuGet `ref/` from `lib/`). **Nothing is downloaded**: Source Link URLs and symbol servers are never used
+(`refyntra.metadata.sourceLink`: `embeddedOnly`, the default, or `off` to always decompile; ADR-010).
+
+- Where: **Refyntra: Go to Metadata / Decompiled Source** at the cursor (Command Palette, status bar menu), Navigate
+  To (*Decompiled declaration* for a library symbol), Related and Find (library symbols), File Structure (inherited
+  library members), the stack trace view (frames in framework or library code without source in the solution open
+  the decompiled method) and Smart Step Into (a library call it cannot step into offers **Open Decompiled Source**).
+  On a symbol with source in the solution the command opens that file.
+- Inside a metadata document: **F12** (in both presets) goes on to the type or member at the cursor (another metadata
+  document, or the solution file when it has source), **Shift+F12** runs Find Usages (the Usages view lists the
+  usages **in the solution**), hover shows the symbol and its summary. The context menu has both commands. Refyntra
+  still registers no Definition provider: VS Code's own F12 is unchanged everywhere else.
+- Decompiled code is ILSpy's rendering (names of locals and some constructs differ from the original); internal
+  helpers of the runtime that are not in the reference assemblies have no further navigation. The host caches one
+  decompiler per assembly (by MVID) and the documents; a rebuilt library is decompiled again.
 
 ## Stack traces
 
@@ -969,6 +993,8 @@ constructor that needs them (the compile check refuses it).
 | `refyntra.recentFiles` | Recent Files (Ctrl+E): recently opened files, the previous one first |
 | `refyntra.recentLocations` | Recent Locations (Ctrl+Shift+E): edited and visited places with member and code line |
 | `refyntra.fileStructure` | File Structure (Ctrl+F12): members of the current file by type and region, filters, inherited members (C#) |
+| `refyntra.goToMetadata` | Go to Metadata / Decompiled Source (C#): the read-only embedded or decompiled source of the library symbol at the cursor (F12 inside such a document) |
+| `refyntra.openMetadata` | (not in the palette) Open the decompiled source of a documentation id (File Structure, stack traces, Smart Step Into) |
 | `refyntra.usages.next` / `.previous` | Next / previous usage of the Usages view (F4 / Shift+F4 in a C# editor while it has results) |
 | `refyntra.usages.groupBy` / `.filterKinds` / `.filterTests` / `.clearFilters` | Groupings and filters of the Usages view |
 | `refyntra.usages.export` / `.pin` / `.unpin` / `.refresh` / `.clear` | Export to Markdown, pin, refresh, clear the Usages view |
@@ -1020,6 +1046,7 @@ constructor that needs them (the compile check refuses it).
 | `refyntra.cleanup.profile` | list of fix ids, default `removeUnnecessaryUsings`, `sortUsings`, `whitespace` | Fixes pre-selected by Code Cleanup (`fileScopedNamespace` is opt-in) |
 | `refyntra.related.followCursor` | boolean, default on | The Related view follows the cursor unless it is pinned |
 | `refyntra.fileStructure.preview` | boolean, default off | File Structure shows the selected member in the editor while you move through the list |
+| `refyntra.metadata.sourceLink` | `embeddedOnly` (default), `off` | Go to Metadata: show the source embedded in a library's PDB, else decompile (`off`: always decompile). Nothing is downloaded |
 | `refyntra.http.basePaths` | list of path prefixes, default empty | Frontend ↔ backend links: prefixes that client URLs add but the routes do not have (tried only when the exact match finds nothing) |
 | `refyntra.http.origins` | list of origins, default empty | Frontend ↔ backend links: absolute origins (`https://localhost:5001`) that are this backend; other absolute URLs are never linked |
 | `refyntra.rules.OR1001` | `off`, `information`, `warning` (default) | Severity of the experimental OR1001 rule in the Problems view |

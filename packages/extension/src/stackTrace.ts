@@ -1,5 +1,7 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { metadataService } from './metadata';
+import { frameTypeDocumentationId } from './metadataModel';
 import type { ResolveFrameOutcome } from '@refyntra/application';
 import type { FrameCandidate, ResolveFrameRequest } from '@refyntra/contracts';
 import { fromLocation, shortPath } from './convert';
@@ -252,6 +254,12 @@ export class StackTraceViewProvider implements vscode.TreeDataProvider<Node>, vs
       const message = `Refyntra could not look up ${f.function} by symbol: ${out.message || describeReason(out.reasonCode)}`;
       void vscode.window.showWarningMessage(message);
       return { kind: 'none', message };
+    }
+    if (out.candidates.length === 0 && f.external) {
+      // A framework or library frame: its decompiled source, Rider-style (go to metadata, protocol 1.17).
+      const frame = frameTypeDocumentationId(f.typeName!);
+      const opened = frame && metadataService() ? await metadataService()!.open({ documentationId: frame.documentationId, memberName: f.methodName! }, f.function, { quiet: true }) : undefined;
+      if (opened?.kind === 'document') return { kind: 'opened', uri: opened.uri, line: opened.line + 1, notice: `${f.function} has no source in the solution: showing the ${opened.origin === 'embeddedSource' ? 'source embedded in its PDB' : 'decompiled source'} (read-only).` };
     }
     if (out.candidates.length === 0) {
       const message = `No source for ${f.function} was found in the loaded solution. It may have been removed or renamed, or come from a package; Refyntra does not recover missing symbols.`;

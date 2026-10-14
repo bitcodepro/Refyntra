@@ -23,6 +23,8 @@ const EXPECTED_COMMANDS = [
   'refyntra.showMenu',
   'refyntra.getStarted',
   'refyntra.keyboardShortcuts',
+  'refyntra.goToMetadata',
+  'refyntra.openMetadata',
 ];
 
 // protocol-v1.md "Capability ids": the catalogue the host, initialize.capabilities and the UI share.
@@ -1390,7 +1392,7 @@ scenarios['ts-delegated'] = [
 
 // ---- accessibility -----------------------------------------------------------------------------------
 // Internal commands: invoked by buttons and tree items, hidden from the Command Palette on purpose.
-const INTERNAL_COMMANDS = ['refyntra.openLocation', 'refyntra.runRestore', 'refyntra.related.open', 'refyntra.nativeRename', 'refyntra.stackTrace.openFrame', 'refyntra.stackTrace.related', 'refyntra.taskContext.addFindItem', 'refyntra.taskContext.addFromRelated', 'refyntra.codeLens.related', 'refyntra.selectRunTargetById', 'refyntra.pickDotnetProcess', 'refyntra.immediate.clear', 'refyntra.editAction', 'refyntra.usages.open', 'refyntra.usages.activate', 'refyntra.usages.closeSession', 'refyntra.usages.showMore', 'refyntra.tests.run', 'refyntra.tests.debug', ...['kind', 'project', 'folder', 'file', 'type', 'member'].flatMap((g) => [`refyntra.usages.group.${g}`, `refyntra.usages.ungroup.${g}`])];
+const INTERNAL_COMMANDS = ['refyntra.openLocation', 'refyntra.openMetadata', 'refyntra.runRestore', 'refyntra.related.open', 'refyntra.nativeRename', 'refyntra.stackTrace.openFrame', 'refyntra.stackTrace.related', 'refyntra.taskContext.addFindItem', 'refyntra.taskContext.addFromRelated', 'refyntra.codeLens.related', 'refyntra.selectRunTargetById', 'refyntra.pickDotnetProcess', 'refyntra.immediate.clear', 'refyntra.editAction', 'refyntra.usages.open', 'refyntra.usages.activate', 'refyntra.usages.closeSession', 'refyntra.usages.showMore', 'refyntra.tests.run', 'refyntra.tests.debug', ...['kind', 'project', 'folder', 'file', 'type', 'member'].flatMap((g) => [`refyntra.usages.group.${g}`, `refyntra.usages.ungroup.${g}`])];
 
 common.push([
   'keyboard: every user command is in the Command Palette and the status bar menu leads to the main ones',
@@ -1580,6 +1582,8 @@ scenarios.inspections = require('./inspections.cjs').cases({ api, csharp, waitFo
 scenarios['native-ui'] = require('./nativeUi.cjs').cases({ api, csharp, waitFor });
 // Navigate To and Find Usages grouped (test/suite/navigation.cjs).
 scenarios.navigation = require('./navigation.cjs').cases({ api, csharp, waitFor });
+// Go to metadata / decompiled sources (test/suite/metadata.cjs), on the same Shop copy.
+scenarios.navigation.push(...require('./metadata.cjs').cases({ api, csharp, waitFor }));
 // Visual (screenshot) scenarios, Docker/Xvfb only (test/suite/visual.cjs, scripts/test/linux-visual.sh).
 // Run and Debug on a temp copy of the Runnable fixture (bundled netcoredbg and debugpy; test/suite/runDebug.cjs).
 scenarios['run-debug'] = require('./runDebug.cjs').cases({ api, csharp, waitFor });

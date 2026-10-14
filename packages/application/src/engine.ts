@@ -158,6 +158,32 @@ export interface ActionPrepareOptions {
 /** Change Signature: the parameters of the method at the cursor, or why there are none. */
 export type SignatureOutcome = { kind: 'signature'; info: import('@refyntra/contracts').SignatureInfo } | Unavailable;
 
+/** Go to metadata (protocol 1.17): the host's answer, or why there is none. */
+export type MetadataSourceOutcome =
+  | { kind: 'metadata'; result: import('@refyntra/contracts').MetadataSourceResult }
+  | { kind: 'unavailable'; reasonCode: string; message: string; recoveryActions: RecoveryAction[] };
+
+/** The scheme of Refyntra's read-only metadata documents ("refyntra-metadata:/<assembly>/<Namespace.Type>.cs"). */
+export const METADATA_SCHEME = 'refyntra-metadata';
+
+/**
+ * The type and assembly of a metadata document URI: "refyntra-metadata:/MediatR/MediatR.IMediator.cs" ->
+ * { documentationId: "T:MediatR.IMediator", assemblyName: "MediatR" }. Undefined for other URIs.
+ */
+export function metadataDocumentRef(uri: string): { documentationId: string; assemblyName: string } | undefined {
+  const prefix = `${METADATA_SCHEME}:`;
+  if (!uri.startsWith(prefix)) return undefined;
+  let path = uri.slice(prefix.length).replace(/[?#].*$/, '');
+  try {
+    path = decodeURIComponent(path);
+  } catch {
+    return undefined;
+  }
+  const m = /^\/+([^/]+)\/([^/]+)\.cs$/.exec(path);
+  if (!m) return undefined;
+  return { documentationId: `T:${m[2]}`, assemblyName: m[1]! };
+}
+
 /** File Structure (protocol 1.13) of a document of an owned route. */
 /** Smart Step Into (protocol 1.14) at a stopped position of an owned route. */
 export type StepIntoTargetsOutcome =
@@ -260,6 +286,11 @@ export interface EngineClient {
   fileStructure?(uri: string, includeInherited: boolean, token?: CancellationToken): Promise<FileStructureOutcome>;
   /** Smart Step Into (owned route, protocol 1.14): the calls of the statement a debugger stopped at. */
   stepIntoTargets?(uri: string, position: Position, token?: CancellationToken): Promise<StepIntoTargetsOutcome>;
+  /**
+   * Go to metadata (owned route, protocol 1.17): the decompiled / embedded-source document of a metadata symbol, or the
+   * symbol at a position inside such a document.
+   */
+  metadataSource?(params: import('./adapters').MetadataSourceRequest, token?: CancellationToken): Promise<MetadataSourceOutcome>;
   /** Test discovery (owned route, protocol 1.15): every test project, or only the given documents. */
   tests?(uris?: string[], token?: CancellationToken): Promise<TestsOutcome>;
   /** Find Usages grouped (owned route, protocol 1.12): classified usages of the symbol at the position, at most `limit`. */
@@ -806,7 +837,41 @@ export class RefyntraEngine implements EngineClient {
     }
   }
 
+  async metadataSource(params: import('./adapters').MetadataSourceRequest, token?: CancellationToken): Promise<MetadataSourceOutcome> {
+    const adapter = this.o.registry.languageAdapters().find((a) => a.descriptor.ownership === 'owned-semantic' && typeof a.metadataSource === 'function');
+    if (!adapter) return { kind: 'unavailable', reasonCode: 'NoLanguageRoute', message: 'No Refyntra route provides decompiled sources.', recoveryActions: [RECOVERY_SHOW_HEALTH] };
+    try {
+      const r = await this.withStaleRetry(() => adapter.metadataSource!(params, token), token);
+      if (!r.value) return { kind: 'unavailable', reasonCode: 'ProtocolTooOld', message: 'The C# host is too old for decompiled sources; update the extension.', recoveryActions: [] };
+      return { kind: 'metadata', result: r.value };
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      return this.toUnavailable(adapter, e);
+    }
+  }
+
+  /** Find Usages from a metadata document (protocol 1.17): the symbol at the position, then its usages in the solution. */
+  private async metadataUsages(target: DocumentTarget, limit: number, token?: CancellationToken): Promise<UsagesOutcome> {
+    const document = metadataDocumentRef(target.uri)!;
+    const adapter = this.o.registry.languageAdapters().find((a) => a.descriptor.ownership === 'owned-semantic' && typeof a.metadataSource === 'function' && typeof a.usagesOfSymbol === 'function');
+    if (!adapter) return { kind: 'unavailable', reasonCode: 'NoLanguageRoute', message: 'No Refyntra route finds usages of library symbols.', recoveryActions: [RECOVERY_SHOW_HEALTH] };
+    try {
+      const at = await this.withStaleRetry(() => adapter.metadataSource!({ document, position: target.position, symbolOnly: true }, token), token);
+      if (!at.value) return { kind: 'unavailable', reasonCode: 'ProtocolTooOld', message: 'The C# host is too old for decompiled sources; update the extension.', recoveryActions: [] };
+      const subject = at.value.symbol;
+      if (!subject?.symbolId) return { kind: 'unavailable', reasonCode: 'NoSymbol', message: at.value.message ?? 'There is no symbol at the cursor.', recoveryActions: [] };
+      const r = await this.withStaleRetry(() => adapter.usagesOfSymbol!(subject.symbolId!, limit, token), token);
+      const { result } = r.value;
+      if (!result) return { kind: 'unavailable', reasonCode: 'ProtocolTooOld', message: 'The C# host is too old for Find Usages; update the extension.', recoveryActions: [] };
+      return { kind: 'usages', subject: r.value.subject ?? subject, items: result.items, total: result.total, truncated: result.truncated, completeness: result.completeness };
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      return this.toUnavailable(adapter, e);
+    }
+  }
+
   async usages(target: DocumentTarget, limit: number, token?: CancellationToken): Promise<UsagesOutcome> {
+    if (metadataDocumentRef(target.uri)) return this.metadataUsages(target, limit, token);
     const adapter = this.o.registry.routeFor(target.uri);
     if (!adapter || adapter.descriptor.ownership !== 'owned-semantic' || typeof adapter.usages !== 'function') {
       return { kind: 'unavailable', reasonCode: 'ActionNotSupported', message: 'Find Usages is provided by Refyntra for C# files only.', recoveryActions: [] };

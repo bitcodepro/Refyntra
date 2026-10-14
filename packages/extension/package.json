@@ -503,6 +503,17 @@
         "enablement": "editorLangId == csharp"
       },
       {
+        "command": "refyntra.goToMetadata",
+        "title": "Go to Metadata / Decompiled Source",
+        "category": "Refyntra",
+        "enablement": "editorLangId == csharp"
+      },
+      {
+        "command": "refyntra.openMetadata",
+        "title": "Open Decompiled Source",
+        "category": "Refyntra"
+      },
+      {
         "command": "refyntra.recentFiles",
         "title": "Recent Files",
         "category": "Refyntra"
@@ -928,6 +939,14 @@
         {
           "command": "refyntra.findUsages",
           "when": "editorLangId == csharp"
+        },
+        {
+          "command": "refyntra.goToMetadata",
+          "when": "editorLangId == csharp"
+        },
+        {
+          "command": "refyntra.openMetadata",
+          "when": "false"
         }
       ],
       "view/title": [
@@ -1283,6 +1302,16 @@
           "submenu": "refyntra.editorContext",
           "when": "editorLangId =~ /^(csharp|typescript|typescriptreact|javascript|javascriptreact|python|rust)$/ && resourceScheme == file",
           "group": "navigation@90"
+        },
+        {
+          "command": "refyntra.goToMetadata",
+          "when": "resourceScheme == refyntra-metadata",
+          "group": "navigation@1"
+        },
+        {
+          "command": "refyntra.findUsages",
+          "when": "resourceScheme == refyntra-metadata",
+          "group": "navigation@2"
         }
       ],
       "refyntra.editorContext": [
@@ -1913,6 +1942,19 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "File Structure (Ctrl+F12): moving the selection in the list shows the member in the editor (Esc returns to where the cursor was)."
+        },
+        "refyntra.metadata.sourceLink": {
+          "type": "string",
+          "enum": [
+            "embeddedOnly",
+            "off"
+          ],
+          "enumDescriptions": [
+            "Show the source files embedded in an assembly's portable PDB (the PDB inside the DLL, or a matching .pdb next to it); decompile everything else. Nothing is downloaded.",
+            "Always decompile."
+          ],
+          "default": "embeddedOnly",
+          "markdownDescription": "Go to Metadata / Decompiled Source: which sources Refyntra shows for types without source in the solution. Source Link URLs are never followed and nothing is downloaded; see ADR-010."
         }
       }
     },
@@ -2078,6 +2120,26 @@
         "key": "ctrl+f10",
         "mac": "cmd+f10",
         "when": "config.refyntra.keybindings.preset == 'visualStudio' && inDebugMode && debugState == 'stopped' && editorTextFocus && editorLangId == csharp"
+      },
+      {
+        "command": "refyntra.goToMetadata",
+        "key": "f12",
+        "when": "config.refyntra.keybindings.preset == 'visualStudio' && editorTextFocus && resourceScheme == refyntra-metadata"
+      },
+      {
+        "command": "refyntra.findUsages",
+        "key": "shift+f12",
+        "when": "config.refyntra.keybindings.preset == 'visualStudio' && editorTextFocus && resourceScheme == refyntra-metadata"
+      },
+      {
+        "command": "refyntra.goToMetadata",
+        "key": "f12",
+        "when": "config.refyntra.keybindings.preset == 'resharper' && editorTextFocus && resourceScheme == refyntra-metadata"
+      },
+      {
+        "command": "refyntra.findUsages",
+        "key": "shift+f12",
+        "when": "config.refyntra.keybindings.preset == 'resharper' && editorTextFocus && resourceScheme == refyntra-metadata"
       }
     ],
     "breakpoints": [

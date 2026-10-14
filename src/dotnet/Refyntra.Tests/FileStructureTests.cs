@@ -225,6 +225,10 @@ public sealed class FileStructureTests
         Assert.Equal("Exception", source.DeclaringType);
         Assert.False(source.Navigable);
         Assert.Null(source.FilePath);
+        // Go to metadata (1.17) opens them by documentation id.
+        Assert.Equal("P:System.Exception.StackTrace", source.DocumentationId);
+        Assert.Equal("System.Private.CoreLib", source.AssemblyName);
+        Assert.All(Type(m, "Order").Inherited, x => Assert.Null(x.DocumentationId));
     }
 
     [Fact]

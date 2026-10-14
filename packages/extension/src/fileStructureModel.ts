@@ -136,6 +136,8 @@ export interface StructureRow {
   uri?: string;
   range: Range;
   selectionRange: Range;
+  /** Inherited library members (protocol 1.17): opened as decompiled source. */
+  metadata?: { documentationId: string; assemblyName?: string };
 }
 
 export interface StructureSection {
@@ -223,12 +225,13 @@ export function structureSections(input: StructureInput, filters: StructureFilte
             id: `inherited:${t.fullName}:${declaring}.${m.name}:${m.signature}`,
             icon: MEMBER_ICONS[m.kind] ?? 'symbol-misc',
             label: m.signature || m.name,
-            description: [describe(m.kind, m.accessibility, m.isStatic, input.accessibility), m.navigable ? '' : 'no source (metadata)'].filter(Boolean).join(' · '),
+            description: [describe(m.kind, m.accessibility, m.isStatic, input.accessibility), m.navigable ? '' : m.documentationId ? 'library: opens decompiled' : 'no source (metadata)'].filter(Boolean).join(' · '),
             kind: m.kind,
             isType: false,
             inherited: true,
             navigable: m.navigable && !!m.uri,
             ...(m.uri ? { uri: m.uri } : {}),
+            ...(!m.uri && m.documentationId ? { metadata: { documentationId: m.documentationId, ...(m.assemblyName ? { assemblyName: m.assemblyName } : {}) } } : {}),
             range: m.range,
             selectionRange: m.selectionRange,
           })),

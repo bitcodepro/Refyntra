@@ -339,7 +339,7 @@ const scenarios = visual
       {
         name: 'navigation',
         copy: 'navigation',
-        copyOpts: { extra: (dest) => { for (const [rel, text] of Object.entries(createRequire(import.meta.url)('./suite/navigation.cjs').extraFiles)) fs.writeFileSync(path.join(dest, ...rel.split('/')), text); } },
+        copyOpts: { extra: (dest) => { for (const suite of ['./suite/navigation.cjs', './suite/metadata.cjs']) for (const [rel, text] of Object.entries(createRequire(import.meta.url)(suite).extraFiles)) fs.writeFileSync(path.join(dest, ...rel.split('/')), text); } },
         trusted: true,
         env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' },
       },

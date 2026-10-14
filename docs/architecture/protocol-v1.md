@@ -344,6 +344,27 @@ a test class. It is not part of `initialize.capabilities`.
     `[ClassData]`, `[TestCaseSource]`, `[DynamicData]` or a parameterised test without rows. `skipReason`: xUnit
     `Skip =`, NUnit / MSTest `[Ignore]`. With `uris` only those documents are scanned (incremental update);
     `documents` echoes them and the client replaces their earlier tests. Sent only to hosts with minor ≥ 15.
+- 1.17 (additive): Go to metadata.
+  - `code/metadataSource` `MetadataSourceParams` `{traceId, workspaceId, snapshotId, symbolId? | documentationId? +
+    assemblyName? + memberName? | uri? + position? | document? {documentationId, assemblyName} + position?,
+    sourcePolicy?: "embeddedOnly" | "off", symbolOnly?}` → `MetadataSourceResult` `{document?, symbolRange?, symbol?,
+    location?, summary?, reasonCode?, message?, decompilerVersion, snapshotId}`. `document` (`MetadataDocument`):
+    `path` ("<assembly>/<Namespace.Type>.cs", the path of the client's `refyntra-metadata:` URI; generic types keep
+    the arity, "List`1"), `assemblyName`, `assemblyVersion`, `assemblyPath` (the referenced file),
+    `implementationPath` (the file that was read; a reference assembly maps to its local implementation),
+    `mvid`, `origin` ("decompiled" | "embeddedSource"), `sourceDocument` (the PDB document path of an embedded
+    source), `typeDocumentationId`, `text`, `symbols` (`{documentationId, nameRange, range}` per declaration) and
+    `note`. `symbolRange` is the requested symbol's name in the document. With `document` + `position` the host maps
+    the symbol at that position of the document back into the solution: `symbol` is a normal `SymbolRef` (its id
+    works with `code/usages`), `document` the metadata document of that symbol (locals and parameters: the same
+    document, `symbolRange` = their declaration); `symbolOnly` omits the text (hover). `reasonCode`: `InSource` (the
+    symbol has source; `location` is its declaration), `NoSymbol`, `SymbolNotFound`, `AssemblyNotFound`,
+    `DecompilerFailed`, `NotMetadata`. Nothing is downloaded: only sources embedded in the assembly's portable PDB
+    (embedded, or a matching `.pdb` next to the assembly) are used, everything else is decompiled
+    (ICSharpCode.Decompiler; ADR-010). Documents are cached per (assembly MVID, type, policy). Sent only to hosts with
+    minor ≥ 17.
+  - `StructureMember.documentationId?` / `assemblyName?` (inherited metadata members) and
+    `StepIntoTarget.documentationId?` / `assemblyName?` (reason `metadata`): for `code/metadataSource`.
 - Additive (EF Core): relation kinds `efcore.*` and group `data` (above); `SearchFilters.entity?: boolean` ("entity:")
   and `SearchFilters.table?: string` ("table:NAME") return EF Core entities as symbol items. Older hosts ignore the
   filters (they return a normal symbol search); older clients render the kinds and the group generically. The
@@ -407,6 +428,7 @@ issuing semantic requests.
 | `code/generate` | req | `GenerateParams` `{…, uri, position, kind?, members?, equatable?, operators?}` | `GenerateResult` (since 1.10; Generate) |
 | `code/usages` | req | `UsagesParams` `{…, symbolId, limit?}` | `UsagesResult` (since 1.12; Find Usages grouped) |
 | `code/fileStructure` | req | `FileStructureParams` `{…, uri, includeInherited?}` | `FileStructureResult` (since 1.13; File Structure) |
+| `code/metadataSource` | req | `MetadataSourceParams` `{…, symbolId? \| documentationId? \| uri?+position? \| document?+position?, sourcePolicy?, symbolOnly?}` | `MetadataSourceResult` (since 1.17; go to metadata) |
 | `code/stepIntoTargets` | req | `StepIntoTargetsParams` `{…, uri, position}` | `StepIntoTargetsResult` (since 1.14; Smart Step Into) |
 | `code/tests` | req | `TestsParams` `{…, uris?}` | `TestsResult` (since 1.15; Test Explorer discovery) |
 | `code/constructorActions` | req | `ConstructorActionsParams` `{…, uri, position, actionId?, member?, members?, type?, constructorId?, typeId?}` | `ConstructorActionsResult` (since 1.11; constructor / DI helpers) |

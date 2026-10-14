@@ -46,11 +46,17 @@ checked, and what has **not** been checked by a person with assistive technology
   - File Structure (Ctrl+F12): separator rows name the type ("OrderService : IOrderService") or the region
     ("Order · #region Queries", "Order · inherited from Entity<int>") and are announced; a row reads its signature and
     then its kind and accessibility in words ("Find(int) : OrderDto?, method · public"), so the codicon is never the only
-    cue. Members of referenced assemblies say "no source (metadata)"; Enter on them shows a message and keeps the list.
+    cue. Members of referenced assemblies say "library: opens decompiled" and Enter opens their decompiled source;
+    those without a documentation id say "no source (metadata)" and Enter shows a message and keeps the list.
     The filter buttons have tooltips that say what a click does ("Hide methods" / "Show methods"); a hidden kind shows
     a "circle-slash" icon and the title says it in words ("hidden: methods, nested types"). The row at the cursor has
     focus when the list opens; Enter moves focus to the editor at the member's name; Esc returns to where you were
     (with `refyntra.fileStructure.preview` the cursor goes back too).
+  - Decompiled sources (Go to Metadata): a metadata document is an ordinary read-only editor; its tab title is the
+    type's file name and the first comment lines say in words where the text comes from (assembly, "Decompiled from
+    … with ICSharpCode.Decompiler" or "Source embedded in the PDB of …"). The status bar item ("Decompiled" /
+    "Embedded source") repeats it in its tooltip. F12 and Shift+F12 work from the keyboard inside the document; the
+    hover is plain text (name, kind, where it lives, summary) with no links.
   - Refyntra Usages view: groups read "Usage Kind Invocation, 3 usages"; a usage reads its kind, "in tests" when it is,
     the containing type and member, file and line, then the source line ("Write · Uses.Run · Uses.cs:12: order.Count
     = 1;"). The highlight of the name in the line is visual only; the label says the same in words. F4 / Shift+F4

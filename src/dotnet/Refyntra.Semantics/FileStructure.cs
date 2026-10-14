@@ -17,7 +17,10 @@ public sealed record StructureMember(
     string? Region,
     string? DeclaringType = null,
     string? FilePath = null,
-    bool Navigable = true);
+    bool Navigable = true,
+    /// <summary>Inherited metadata members: documentation id and assembly for go to metadata (protocol 1.17).</summary>
+    string? DocumentationId = null,
+    string? AssemblyName = null);
 
 /// <summary>A type declared in the file, with its members in source order and (optionally) the inherited ones.</summary>
 public sealed record StructureType(
@@ -279,7 +282,8 @@ public static class FileStructure
                 if (!seen.Add(Key(m))) continue;
                 var loc = m.Locations.FirstOrDefault(l => l.IsInSource && l.SourceTree?.FilePath is { Length: > 0 });
                 var span = loc?.GetLineSpan().Span ?? default;
-                result.Add(new StructureMember(m.Name, kind, Access(m), m.IsStatic || m is IFieldSymbol { IsConst: true }, Signature(m, kind), span, span, null, declaring, loc?.SourceTree?.FilePath, loc != null));
+                result.Add(new StructureMember(m.Name, kind, Access(m), m.IsStatic || m is IFieldSymbol { IsConst: true }, Signature(m, kind), span, span, null, declaring, loc?.SourceTree?.FilePath, loc != null,
+                    loc == null ? DocumentationCommentId.CreateDeclarationId(m.OriginalDefinition) : null, loc == null ? m.ContainingAssembly?.Identity.Name : null));
             }
         }
         return result;

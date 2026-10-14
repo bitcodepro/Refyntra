@@ -608,6 +608,22 @@ exports.cases = ({ api, csharp, waitFor }) => {
         await reset();
       },
     ],
+    [
+      'visual: metadata-document — Go to Metadata on a NuGet type: the read-only decompiled MediatR.ISender with its XML docs',
+      async () => {
+        const a = await ready();
+        await reset();
+        await open('Shop.Api/Program.cs', 'ISender sender', 2);
+        // Deterministic: MediatR is pinned (12.5.0, fixed MVID) and so is the decompiler; the command resolves once
+        // the document is shown with the caret on the type name.
+        const r = await vscode.commands.executeCommand('refyntra.goToMetadata');
+        if (!r || r.kind !== 'document') throw new Error(`no metadata document: ${JSON.stringify(r)}`);
+        await waitFor(() => vscode.window.activeTextEditor?.document.uri.toString() === 'refyntra-metadata:/MediatR/MediatR.ISender.cs', 'decompiled ISender shown', 60000);
+        await waitFor(() => !a.related.state.loading, 'Related idle', 60000);
+        await shot('metadata-document', 1500);
+        await reset();
+      },
+    ],
     // The Navigate To and Usages cases run last: the Usages view appears in the side bar from the first search on,
     // and no earlier screenshot shows it.
     [

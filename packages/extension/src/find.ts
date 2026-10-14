@@ -3,6 +3,7 @@ import { CancelledError, type EngineClient, FIND_FILTER_HINT } from '@refyntra/a
 import type { SymbolKind } from '@refyntra/contracts';
 import type { FindItem } from '@refyntra/domain';
 import { openLocation, shortPath } from './convert';
+import { metadataService } from './metadata';
 import { FindResultsGate, findItemDescription } from './findGate';
 import { MatchRank, type RankedCandidate, type SearchCandidate, SECTION_TITLES, commandTitles, groupSections, parseQuery, pushRecent, rankCandidates, recentKey } from './searchEverywhereModel';
 
@@ -234,6 +235,12 @@ export async function runFind(engine: EngineClient, initialValue = ''): Promise<
       return;
     }
     const picked = gate.accept(qp.selectedItems[0]?.item);
+    if (picked && !picked.location && picked.symbol?.origin === 'metadata' && picked.symbol.symbolId) {
+      // A library symbol: its decompiled source (go to metadata, protocol 1.17).
+      qp.hide();
+      void metadataService()?.openSymbol(picked.symbol, 'Find');
+      return;
+    }
     if (!picked?.location) return;
     qp.hide();
     remember(`${isTypeItem(picked) ? 'types' : 'symbols'}:${picked.label}`);
