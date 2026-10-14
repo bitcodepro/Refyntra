@@ -39,8 +39,9 @@ public sealed partial class Engine : IRpcHandler, IDisposable
     /// 1.18: efcore/migrations (the DbContexts with their migrations, snapshot and configurations, from source) and OR1011.
     /// 1.19: code/structuralSearch and code/structuralReplace (structural search and replace, ADR-012), analysis/run
     /// <c>structuralPatterns</c> (pattern inspections ORS-name) and their quick fixes csharp.edit.fix.structural.*.
+    /// 1.20: solution/structure (Solution Explorer: solution folders, projects, dependencies and items as MSBuild sees them).
     /// </summary>
-    public const int ProtocolMinor = 19;
+    public const int ProtocolMinor = 20;
     /// <summary>How long workspace/snapshotBarrier waits for a missing document sequence (tests shorten it).</summary>
     public TimeSpan BarrierTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
@@ -146,6 +147,8 @@ public sealed partial class Engine : IRpcHandler, IDisposable
                 return await StepIntoTargetsAsync(Params<StepIntoTargetsParams>(p), ct).ConfigureAwait(false);
             case "workspace/runnableProjects":
                 return RunnableProjects(Params<WorkspaceParams>(p));
+            case "solution/structure":
+                return SolutionStructureHandler.Handle(RequireSession(Params<WorkspaceParams>(p).WorkspaceId));
             case "code/tests":
                 return await TestsAsync(Params<TestsParams>(p), ct).ConfigureAwait(false);
             case "code/resolveFrame":

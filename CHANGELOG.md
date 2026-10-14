@@ -27,6 +27,29 @@ All notable changes are listed here. The project is alpha; nothing has been rele
   Linux test image at build time; update / status / add / script / remove on a temp SQLite file, OR1011 quick fix,
   Show SQL in netcoredbg), visual baseline `ef-core-view` (both themes). ADR-011.
 
+### Added (Solution Explorer, project files and NuGet)
+
+- Protocol 1.20 `solution/structure`: solution folders and items (.sln and .slnx), projects with kind, target
+  frameworks and load state, project / package / framework / analyzer dependencies, Central Package Management, and the
+  items as MSBuild sees them (Compile items with Link folders, other files of SDK projects, excluded C# files).
+- The **Refyntra Solution** view: tree with icons per project kind, linked files with a badge, excluded files hidden or
+  greyed (`refyntra.solutionExplorer.excludedFiles`), Reveal Active File and editor sync
+  (`refyntra.solutionExplorer.autoReveal`); context menus for Open, Reveal, Copy Path, Run / Debug / Set as Startup
+  Project, Run Tests, New / Add Existing / Remove / Rename Project, Add / Remove Project Reference, Unload / Reload
+  (Refyntra-side). Changes run as visible `dotnet` tasks (no shell), reload the solution and offer Undo.
+- **Manage NuGet Packages** panel (strict CSP, theme colours): Installed, Browse (NuGet V3 search of the configured
+  sources, local folder feeds, `dotnet package search` for feeds that need credentials), Updates, Consolidate,
+  vulnerable / deprecated checks on demand; install / update / uninstall with `dotnet add|remove package`, versions in
+  `Directory.Packages.props` with Central Package Management. Network only on a user action (ADR-013).
+- Project file editing: completion and hover for MSBuild properties, items and values in .csproj / .props / .targets,
+  package ids from the solution and the local NuGet cache, versions on demand; **Edit Project File**; saving a project
+  or solution file reloads it in the host (`workspace/reload`).
+- Tests: .NET `SolutionStructureTests` (fixture `Explorer`: .sln + .slnx, nested solution folders, a linked file,
+  Compile Remove, CPM), unit tests with recorded NuGet and dotnet CLI output, e2e scenario `solution` (a local folder
+  feed made in the test, no internet) and a Shop tree check, visual baselines `solution-explorer` and `nuget-installed`
+  (both themes). The Docker scripts take `REFYNTRA_E2E_IMAGE`, `REFYNTRA_SMOKE_IMAGE` and
+  `REFYNTRA_DOCKER_VOLUME_PREFIX` (defaults unchanged).
+
 ### Added (target framework compatibility)
 
 - Verified target frameworks (docs/support/matrix.md, "Target frameworks and SDKs"): net8.0, net9.0, net10.0,

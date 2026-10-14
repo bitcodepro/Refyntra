@@ -65,6 +65,7 @@ import type { StructureFilter } from './fileStructureModel';
 import { type UsagesViewProvider, registerUsages } from './usages';
 import { type MetadataService, registerMetadata } from './metadata';
 import { type StructuralSearchService, registerStructuralSearch } from './structuralSearch';
+import { type SolutionExplorerApi, registerSolutionExplorer } from './solutionExplorer';
 
 export const CSHARP_DESCRIPTOR: AdapterDescriptor = {
   adapterId: 'csharp',
@@ -155,6 +156,8 @@ export interface RefyntraTestApi {
   structuralSearch: StructuralSearchService;
   /** Recent Files / Recent Locations (e2e: the stored lists, the open list, accept / remove / toggle by id). */
   recent: RecentService;
+  /** Solution Explorer, project operations, NuGet panels and project file completion (protocol 1.20, ADR-013). */
+  solution: SolutionExplorerApi;
   /** File Structure (Ctrl+F12): the open list, choosing a row, filters and the query (e2e / visual wait on it). */
   fileStructure: { state(): FileStructureState; accept(id: string): Promise<boolean>; setFilter(filter: StructureFilter, on: boolean): Promise<void>; setQuery(text: string): void };
 }
@@ -322,6 +325,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
   // EF Core tools (ADR-011): migrations view, dotnet-ef tasks, Show SQL for LINQ.
   const efCore = registerEfCore(context, engine, isTrusted);
   context.subscriptions.push(efCore.disposable);
+  // Solution Explorer, project operations and NuGet (protocol 1.20, ADR-013).
+  const solution = registerSolutionExplorer(context, engine, isTrusted, run.service, testing.service, editApplier);
+  context.subscriptions.push(solution.disposable);
   const debugStatus = () => ({ ...run.service.debuggers.status(), tests: testing.service.healthText(), decompiler: metadata.service.healthText(), efTools: efCore.service.healthText() });
   const health = new HealthDocument(engine, () => solutions.selected(), debugStatus);
   const healthPage = new HealthPage(engine, () => solutions.selected(), isTrusted, debugStatus);
@@ -506,6 +512,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     metadata: metadata.service,
     structuralSearch: structural.service,
     recent: recent.service,
+    solution: solution.api,
     fileStructure: { state: () => fileStructureState(), accept: (id) => acceptStructureRow(id), setFilter: (f, on) => setStructureFilter(f, on), setQuery: (t) => setStructureQuery(t) },
   };
 }

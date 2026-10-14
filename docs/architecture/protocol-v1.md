@@ -406,6 +406,21 @@ a test class. It is not part of `initialize.capabilities`.
     `csharp.fixAll`). The host keeps the patterns of the latest run for these actions. An invalid pattern or rule id
     is an abstention (`InvalidPattern`, `InvalidPlaceholder`, `InvalidReplacement`, `InvalidRuleId`), never an error.
     `RuleDiagnostic.severity` may now be any of the four severities. Sent only to hosts with minor ≥ 19.
+- 1.20 (additive): Solution Explorer.
+  - `solution/structure` `WorkspaceParams` → `SolutionStructureResult` `{state, snapshotId?, solutionUri?, format
+    ("sln" | "slnx" | "project"), folders, projects}`. No barrier: the loaded snapshot. `folders`: `SolutionFolder`
+    `{id (the .sln GUID or the .slnx path "/a/b/"), name, parentId?, fileUris (solution items)}`. `projects`:
+    `ProjectStructure` `{name, projectUri, folderId?, kind (web | console | worker | desktop | test | library | maui |
+    blazor-wasm), targetFrameworks, state (loaded | partial | failed | notLoaded), sdk?, centralPackageManagement,
+    packagesPropsUri?, projectReferences [{name, projectUri}], packages [{id, version?, resolvedVersion?, central,
+    versionOverride}], frameworks, analyzers [{name, uri?}], items [{uri, itemType, virtualPath, linked}], excludedUris,
+    itemsTruncated}`. Items: the Compile and AdditionalFiles documents of the evaluation (generated files under `obj/`
+    left out), `virtualPath` from `Link` metadata for linked files; explicit `None`/`Content`/… items with a `Link`;
+    other files of SDK-style projects (default globs: `None`, `Content` for web content, `EmbeddedResource` for .resx).
+    `excludedUris`: C# files in the project folder that are not compiled. Packages from the project file and
+    `Directory.Packages.props`; `resolvedVersion` and framework references from `obj/project.assets.json` when restored.
+    At most 5000 items per project (`itemsTruncated`). Sent only to hosts with minor ≥ 20. After project files change
+    the client sends `workspace/reload`.
 - Additive (EF Core): relation kinds `efcore.*` and group `data` (above); `SearchFilters.entity?: boolean` ("entity:")
   and `SearchFilters.table?: string` ("table:NAME") return EF Core entities as symbol items. Older hosts ignore the
   filters (they return a normal symbol search); older clients render the kinds and the group generically. The
@@ -472,6 +487,7 @@ issuing semantic requests.
 | `code/metadataSource` | req | `MetadataSourceParams` `{…, symbolId? \| documentationId? \| uri?+position? \| document?+position?, sourcePolicy?, symbolOnly?}` | `MetadataSourceResult` (since 1.17; go to metadata) |
 | `code/structuralSearch` | req | `StructuralSearchParams` `{…, pattern, scope, uri?, limit?}` | `StructuralSearchResult` (since 1.19; structural search) |
 | `code/structuralReplace` | req | `StructuralReplaceParams` `{…, pattern, scope, uri?, matches?}` | `PrepareResult` (since 1.19; plan `csharp.structuralReplace`) |
+| `solution/structure` | req | `WorkspaceParams` | `SolutionStructureResult` (since 1.20; Solution Explorer, no barrier) |
 | `code/stepIntoTargets` | req | `StepIntoTargetsParams` `{…, uri, position}` | `StepIntoTargetsResult` (since 1.14; Smart Step Into) |
 | `code/tests` | req | `TestsParams` `{…, uris?}` | `TestsResult` (since 1.15; Test Explorer discovery) |
 | `efcore/migrations` | req | `EfMigrationsParams` `{traceId, workspaceId, snapshotId}` | `EfMigrationsResult` (since 1.18; EF Core view) |

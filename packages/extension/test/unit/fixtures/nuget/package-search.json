@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "problems": [],
+  "searchResult": [
+    {
+      "sourceName": "https://pkgs.example.test/feed/v3/index.json",
+      "packages": [
+        { "id": "Contoso.Logging", "latestVersion": "3.2.1", "totalDownloads": 1234, "owners": "contoso" },
+        { "id": "Contoso.Http", "latestVersion": "1.0.0-preview.2", "owners": "contoso" }
+      ]
+    },
+    { "sourceName": "private", "problems": [{ "text": "Response status code does not indicate success: 401 (Unauthorized)." }], "packages": [] }
+  ]
+}

@@ -1066,6 +1066,52 @@ no equality members (they have value equality) and positional records / primary 
 static abstract interface members and ref returns are not generated; a constructor does not pass arguments to a base
 constructor that needs them (the compile check refuses it).
 
+## Solution Explorer, project files and NuGet
+
+The **Refyntra Solution** view (Refyntra activity bar) shows the loaded `.sln`, `.slnx` or `.csproj` as MSBuild sees it
+(protocol 1.20, ADR-013): solution folders and solution items, projects with an icon per kind (web, console, worker,
+desktop, test, library) and their target frameworks, **Dependencies** (Projects, Packages with versions — from
+`Directory.Packages.props` with Central Package Management —, Frameworks, Analyzers) and the project's items: the
+`Compile` items of the evaluation (globbed and explicit), linked files in their `Link` folder with a link badge, other
+files as `None`/`Content`. C# files that the build does not compile (`Compile Remove`) are hidden, or shown greyed with
+`refyntra.solutionExplorer.excludedFiles = grey`. The view selects the active editor's file
+(`refyntra.solutionExplorer.autoReveal`, or **Reveal Active File** in its title bar).
+
+Context menus (trusted workspaces only; every change runs as a visible `dotnet` task, then the solution reloads, and
+the notification offers **Undo** that restores the changed files):
+
+- Open, Reveal in Explorer View / File Manager, Copy Path; Run, Debug, Set as Startup Project (the run target of
+  *Run and debug*), Run Tests of Project (the Test Explorer).
+- New Project… (`dotnet new list` → template → `dotnet new` → `dotnet sln add`), Add Existing Project…
+  (`dotnet sln add`, into the solution folder you clicked), Remove Project from Solution (`dotnet sln remove`).
+- Add / Remove Project Reference (`dotnet add|remove reference`).
+- Rename Project…: project file and its folder (when named after the project), the solution entry, `ProjectReference`
+  paths in other projects, `RootNamespace`/`AssemblyName` equal to the old name — shown in VS Code's Refactor Preview
+  first. Refused when ambiguous (a folder with other projects, an existing target, a reference through a property).
+  Namespaces in code are not renamed.
+- Unload / Reload Project: Refyntra-side only (greyed, no children; the solution file is not changed).
+
+**Manage NuGet Packages** (a project, the solution, or a `.csproj` in the Explorer): *Installed* (versions from the
+project, `Directory.Packages.props` and the restore), *Browse* (searches your configured NuGet sources when you press
+Search), *Updates* (**Check for updates** runs `dotnet list package --outdated`), *Consolidate* (one version across the
+projects of the solution). **Check vulnerable** / **Check deprecated** run `dotnet list package --vulnerable` /
+`--deprecated`. Install, update and uninstall run `dotnet add|remove package`; with Central Package Management an update
+changes the version in `Directory.Packages.props` (then `dotnet restore`).
+
+Network: only the sources of your NuGet configuration (`dotnet nuget list source`; nuget.org when there are none), only
+when you search, load versions or check for updates; nothing when the panel opens. Refyntra sends no credentials: a
+feed that needs them is searched with `dotnet package search`, which uses your credential providers, and installs go
+through `dotnet` as on the command line. Package icons are not loaded.
+
+**Project files** (`.csproj`, `.props`, `.targets`): completion for MSBuild properties and items and their values
+(`TargetFramework`, `Nullable`, `LangVersion`, `ImplicitUsings`, `OutputType` …), package ids in `PackageReference` /
+`PackageVersion` from the solution and the local NuGet cache, versions from the cache (**Load versions from NuGet
+sources…** asks your feeds), hover on properties and items. **Edit Project File** opens the project of the current file.
+Saving a project or solution file reloads it in the C# host; while the view is open, created or deleted files do too.
+
+Limits: a reload re-reads the whole solution; items added by custom targets at build time are not shown; Unload does not
+take a project out of Find, Rename and the other analyses.
+
 ## Commands
 
 | Command | Purpose |
@@ -1123,6 +1169,12 @@ constructor that needs them (the compile check refuses it).
 | `refyntra.generateLaunchJson` | Write the run and debug configurations to `.vscode/launch.json` |
 | `refyntra.tests.runRelated` | Run Tests for This Code: the test at the cursor, or the tests that reference the symbol (C#) |
 | `refyntra.tests.run` / `refyntra.tests.debug` | (not in the palette) Run / debug one test item (the test CodeLens) |
+| `refyntra.solution.show` | Show the Refyntra Solution view (solution folders, projects, dependencies, files as MSBuild sees them) |
+| `refyntra.solution.newProject` / `.addProject` / `.removeProject` / `.renameProject` | New Project from a template, Add Existing Project, Remove from Solution, Rename Project (preview) |
+| `refyntra.solution.addReference` / `.removeReference` / `.undo` | Add or remove a project reference; undo the last project operation |
+| `refyntra.solution.run` / `.debug` / `.setStartup` / `.runTests` / `.unloadProject` / `.reloadProject` / `.revealActive` / `.refresh` | Solution view item and title commands |
+| `refyntra.manageNuGet` | Manage NuGet Packages of a project or the solution: Installed, Browse, Updates, Consolidate |
+| `refyntra.editProjectFile` | Open the project file of the current file (completion and hover for MSBuild properties, items and packages) |
 | `refyntra.nativeRename` | (not in the palette) The editor's own Rename, offered when a TS/JS rename cannot be confirmed safe; not validated by Refyntra |
 
 ## Settings
@@ -1151,6 +1203,9 @@ constructor that needs them (the compile check refuses it).
 | `refyntra.run.view` | boolean, default on | The Refyntra Run view |
 | `refyntra.tests.codeLens` | boolean, default on | `Run \| Debug` CodeLens with the last result above C# test classes and methods |
 | `refyntra.debug.inlineValues` | boolean, default on | C# inline values after the lines of the stopped method (shown when `debug.inlineValues` is `auto` or `on`) |
+| `refyntra.solutionExplorer.enabled` | boolean, default on | The Refyntra Solution view |
+| `refyntra.solutionExplorer.excludedFiles` | `hide` (default), `grey` | C# files in a project folder that the build does not compile |
+| `refyntra.solutionExplorer.autoReveal` | boolean, default on | The Solution view selects the active editor's file while it is visible |
 | `refyntra.trace.level` | `info` (default) and other levels | Detail of the Refyntra output log. Source text is never logged |
 
 ## Troubleshooting
