@@ -4,6 +4,32 @@ All notable changes are listed here. The project is alpha; nothing has been rele
 
 ## Unreleased
 
+### Added (structural search and replace)
+
+- **Refyntra: Structural Search…** (C#, ADR-012): a panel with a pattern editor (C# with `$placeholders$`), a
+  placeholder table filled from the pattern (kind, type with derived types or exact, argument / statement counts,
+  regex), scope (file / project / solution), results in the panel and in the new *Structural Search Results* view
+  (files with counts, line previews, placeholder values, *Show more*). Matching on Roslyn ignores trivia and redundant
+  parentheses, binds names to symbols (qualified names, aliases and `using static` match; other symbols with the same
+  name do not; interface members match their implementations) and requires a repeated placeholder to match equivalent
+  code.
+- **Structural replace**: a template per pattern; *Replace…* per match or *Replace all…* as one plan through the
+  existing preview → revalidation → EditApplier pipeline with Undo; inserted code is parenthesised where needed, the
+  replaced nodes are formatted, needed usings are added, and matches whose replacement would add a compiler error are
+  refused and listed.
+- **Saved patterns** in `.refyntra/patterns.json` (workspace) and the user's profile, four built-in examples, and
+  **patterns as inspections**: rule ids `ORS-<name>` with a chosen severity in the Problems view, the replacement as
+  quick fix and Fix in scope; `refyntra.rules.ORS-<name>` overrides the severity.
+- Host protocol 1.19: `code/structuralSearch`, `code/structuralReplace` (a plan of action `csharp.structuralReplace`),
+  `analysis/run` `structuralPatterns` and the edit actions `csharp.edit.fix.structural.*`; cancellable, result cap with
+  `truncated`.
+- Test scripts: `REFYNTRA_E2E_IMAGE`, `REFYNTRA_SMOKE_IMAGE` and `REFYNTRA_DOCKER_VOLUME_PREFIX` select other Docker
+  image tags and cache volumes (parallel work trees).
+- Tests: .NET `StructuralSearchTests` on the new `tests/fixtures/StructuralSearch` (type constraints, counts, regex,
+  repeated placeholders, using static / aliases, no false matches across symbols, replacement formatting, usings,
+  compile-check refusal, inspections and quick fixes); unit tests of the panel model, page and pattern storage; e2e
+  scenario `structural-search`; visual baselines `structural-search` and `structural-results` (both themes).
+
 ### Added (go to metadata / decompiled sources)
 
 - **Read-only decompiled sources for .NET libraries** (ADR-010), Rider-style: a symbol without source in the solution

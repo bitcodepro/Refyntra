@@ -63,6 +63,7 @@ import { type FileStructureState, acceptStructureRow, fileStructureState, runFil
 import type { StructureFilter } from './fileStructureModel';
 import { type UsagesViewProvider, registerUsages } from './usages';
 import { type MetadataService, registerMetadata } from './metadata';
+import { type StructuralSearchService, registerStructuralSearch } from './structuralSearch';
 
 export const CSHARP_DESCRIPTOR: AdapterDescriptor = {
   adapterId: 'csharp',
@@ -147,6 +148,8 @@ export interface RefyntraTestApi {
   usages: UsagesViewProvider;
   /** Go to metadata (protocol 1.17): open decompiled documents, the store, the command at the cursor (e2e / visual). */
   metadata: MetadataService;
+  /** Structural search and replace (protocol 1.19): the panel, the results view and the saved patterns (e2e / visual). */
+  structuralSearch: StructuralSearchService;
   /** Recent Files / Recent Locations (e2e: the stored lists, the open list, accept / remove / toggle by id). */
   recent: RecentService;
   /** File Structure (Ctrl+F12): the open list, choosing a row, filters and the query (e2e / visual wait on it). */
@@ -317,6 +320,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
   const health = new HealthDocument(engine, () => solutions.selected(), debugStatus);
   const healthPage = new HealthPage(engine, () => solutions.selected(), isTrusted, debugStatus);
   const previews = new PreviewContentProvider();
+  // Structural Search and Replace (protocol 1.19, ADR-012); its saved inspections feed the rule diagnostics below.
+  const structural = registerStructuralSearch(context, engine, previews, editApplier);
+  context.subscriptions.push(structural.disposable);
   const bundlePreview = new BundlePreviewProvider();
   const debugBundle = new DebugBundleExporter({
     extensionVersion: version,
@@ -378,7 +384,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     vscode.workspace.registerTextDocumentContentProvider(BUNDLE_SCHEME, bundlePreview),
     vscode.commands.registerCommand('refyntra.exportDebugBundle', () => debugBundle.run()),
     registerDocumentSync(engine),
-    registerRuleDiagnostics(engine), // OR1001 in the "refyntra" DiagnosticCollection (diagnostics.ts)
+    registerRuleDiagnostics(engine, structural.inspections), // OR1001, the inspections and pattern inspections (diagnostics.ts)
     vscode.commands.registerCommand('refyntra.find', (initial?: unknown) => runFind(engine, typeof initial === 'string' ? initial : '')),
     vscode.commands.registerCommand('refyntra.findEndpoint', () => runFind(engine, 'route:')),
     vscode.commands.registerCommand('refyntra.findHandler', () => runRelatedGroupPick(engine, 'handlers', 'Refyntra: Find Handler')),
@@ -491,6 +497,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     navigateTo: { state: () => navigateToState(), accept: (id) => acceptNavigateTarget(id) },
     usages: usages.provider,
     metadata: metadata.service,
+    structuralSearch: structural.service,
     recent: recent.service,
     fileStructure: { state: () => fileStructureState(), accept: (id) => acceptStructureRow(id), setFilter: (f, on) => setStructureFilter(f, on), setQuery: (t) => setStructureQuery(t) },
   };

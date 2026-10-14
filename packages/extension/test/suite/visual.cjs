@@ -692,6 +692,38 @@ exports.cases = ({ api, csharp, waitFor }) => {
         }
       },
     ],
+    // Structural Search runs after every other case: its results view stays in the side bar from the first search on.
+    [
+      'visual: structural-search — Refyntra: Structural Search… with a type-constrained placeholder and its results',
+      async () => {
+        const a = await ready();
+        await reset();
+        const ss = a.structuralSearch;
+        await ss.open({ text: 'await $call$', replacement: '$call$.GetAwaiter().GetResult()', placeholders: [{ name: 'call', kind: 'expression', type: 'System.Threading.Tasks.Task' }], scope: 'solution' });
+        // Deterministic: the host answers the search (4 awaits in 2 files of Shop); the page renders the posted view.
+        const r = await ss.search();
+        assert.ok(r && r.matches.length === 4, JSON.stringify(r));
+        await waitFor(() => ss.view() && !ss.view().busy && ss.view().groups.length === 2, 'panel results', 30000);
+        await shot('structural-search', 2500);
+        await reset();
+      },
+    ],
+    [
+      'visual: structural-results — the Structural Search Results view: files with counts and line previews',
+      async () => {
+        const a = await ready();
+        await reset();
+        await waitFor(() => a.structuralSearch.results.state().total === 4, 'results of the previous case', 30000);
+        await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+        await vscode.commands.executeCommand('refyntra.relatedView.focus');
+        await vscode.commands.executeCommand('workbench.actions.view.toggleCollapse').then(undefined, () => undefined);
+        await vscode.commands.executeCommand('refyntra.structuralResultsView.focus');
+        await vscode.commands.executeCommand('list.focusFirst');
+        await shot('structural-results', 2500);
+        await vscode.commands.executeCommand('refyntra.structuralSearch.clear');
+        await reset();
+      },
+    ],
   ];
   // REFYNTRA_VISUAL_ONLY=codelens,find: only these screenshots (local debugging); the window setup always runs.
   return only.length ? cases.filter(([title], i) => i === 0 || only.some((o) => title.startsWith(`visual: ${o} `))) : cases;

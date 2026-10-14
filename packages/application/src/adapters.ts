@@ -81,7 +81,14 @@ export interface PrepareRequest {
   registration?: import('@refyntra/contracts').RegistrationParams;
   /** Fix in scope (protocol 1.11). */
   fixAll?: import('@refyntra/contracts').FixAllParams;
+  /** Structural replace (protocol 1.19): sent as code/structuralReplace. */
+  structural?: StructuralReplaceRequest;
 }
+
+/** code/structuralReplace (protocol 1.19) without the workspace / snapshot / trace fields the adapter adds. */
+export type StructuralReplaceRequest = Omit<import('@refyntra/contracts').StructuralReplaceParams, 'traceId' | 'workspaceId' | 'snapshotId'>;
+/** code/structuralSearch (protocol 1.19) without the workspace / snapshot / trace fields the adapter adds. */
+export type StructuralSearchRequest = Omit<import('@refyntra/contracts').StructuralSearchParams, 'traceId' | 'workspaceId' | 'snapshotId'>;
 
 export interface DelegatedRenameRequest {
   uri: string;
@@ -158,6 +165,8 @@ export interface LanguageAdapter {
   metadataSource?(params: MetadataSourceRequest, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').MetadataSourceResult | null>>;
   /** Optional (protocol 1.17): classified usages of a symbol id (code/usages without symbolAt); null when the host is older. */
   usagesOfSymbol?(symbolId: string, limit: number, token?: CancellationToken): Promise<RouteResult<{ subject: SymbolRef | null; result: import('@refyntra/contracts').UsagesResult | null }>>;
+  /** Optional (protocol 1.19): structural search; null when the host is older. */
+  structuralSearch?(params: StructuralSearchRequest, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').StructuralSearchResult | null>>;
   /** Optional (protocol 1.13): File Structure of a document; null when the host is older. */
   fileStructure?(uri: string, includeInherited: boolean, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').FileStructureResult | null>>;
   /** Optional (protocol 1.14): the calls of the statement a debugger stopped at (Smart Step Into); null when the host is older. */
@@ -193,7 +202,7 @@ export interface LanguageAdapter {
   /** Optional (protocol 1.4): the source symbol of a .NET stack frame (stack trace navigation). */
   resolveFrame?(req: import('@refyntra/contracts').ResolveFrameRequest, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').ResolveFrameResult>>;
   /** Optional: rule analysis (`analysis/run`, e.g. OR1001) on the current snapshot. */
-  analyze?(params: { uri?: string; documents?: readonly string[] }, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').AnalysisRunResult>>;
+  analyze?(params: AnalyzeRequest, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').AnalysisRunResult>>;
 }
 
 export interface FrameworkDescriptor {
@@ -301,4 +310,11 @@ export interface GenerateRequest {
   members?: string[];
   equatable?: boolean;
   operators?: boolean;
+}
+
+/** analysis/run: the workspace (or one document's) rules, the inspections of `documents` and (1.19) pattern inspections. */
+export interface AnalyzeRequest {
+  uri?: string;
+  documents?: readonly string[];
+  structuralPatterns?: readonly import('@refyntra/contracts').StructuralPattern[];
 }

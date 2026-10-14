@@ -153,7 +153,14 @@ export interface ActionPrepareOptions {
   registration?: import('@refyntra/contracts').RegistrationParams;
   /** Fix in scope (protocol 1.11): the edit action and the scope around the target document. */
   fixAll?: import('@refyntra/contracts').FixAllParams;
+  /** Structural replace (protocol 1.19): pattern, replacement, scope (no symbol is needed at the cursor). */
+  structural?: import('./adapters').StructuralReplaceRequest;
 }
+
+/** Structural search (protocol 1.19): the host's matches, or why there are none. */
+export type StructuralSearchOutcome =
+  | { kind: 'structural'; result: import('@refyntra/contracts').StructuralSearchResult }
+  | { kind: 'unavailable'; reasonCode: string; message: string; recoveryActions: RecoveryAction[] };
 
 /** Change Signature: the parameters of the method at the cursor, or why there are none. */
 export type SignatureOutcome = { kind: 'signature'; info: import('@refyntra/contracts').SignatureInfo } | Unavailable;
@@ -311,7 +318,9 @@ export interface EngineClient {
   discardPlan(planId: string): void;
   planState(planId: string): PlanState | undefined;
   /** Rule analysis (`analysis/run`) of every route that offers it; one outcome per route, never throws except on cancel. */
-  analyze(options?: { uri?: string; documents?: readonly string[] }, token?: CancellationToken): Promise<AnalysisOutcome[]>;
+  analyze(options?: import('./adapters').AnalyzeRequest, token?: CancellationToken): Promise<AnalysisOutcome[]>;
+  /** Structural search (owned route, protocol 1.19). */
+  structuralSearch?(params: import('./adapters').StructuralSearchRequest, token?: CancellationToken): Promise<StructuralSearchOutcome>;
   health(): HealthSummary;
   readonly onDidChangeHealth: (l: (h: HealthSummary) => void) => Disposable;
   /** Fires when previously shown results may be invalid (epoch change). */
@@ -726,10 +735,11 @@ export class RefyntraEngine implements EngineClient {
         ...(options.signature ? { signature: options.signature } : {}),
         ...(options.registration ? { registration: options.registration } : {}),
         ...(options.fixAll ? { fixAll: options.fixAll } : {}),
+        ...(options.structural ? { structural: options.structural } : {}),
       };
       const prepared = await this.withStaleRetry(async () => {
         // Extract Method works on a selection: no symbol is needed at the cursor.
-        if (options.range) return adapter.prepare({ symbolId: '', newName: options.newName ?? '', actionId, documentUri: target.uri, ...extra }, token);
+        if (options.range || options.structural) return adapter.prepare({ symbolId: '', newName: options.newName ?? '', actionId, documentUri: target.uri, ...extra }, token);
         const sym = await adapter.symbolAt(target.uri, target.position, token);
         if (!sym.value || !sym.value.symbolId) return undefined;
         const p = await adapter.prepare({ symbolId: sym.value.symbolId, newName: options.newName ?? '', actionId, documentUri: target.uri, ...extra }, token);
@@ -831,6 +841,19 @@ export class RefyntraEngine implements EngineClient {
       const r = await this.withStaleRetry(() => adapter.tests!(uris, token), token);
       if (!r.value) return { kind: 'unavailable', reasonCode: 'ProtocolTooOld', message: 'The C# host is too old for test discovery; update the extension.', recoveryActions: [] };
       return { kind: 'tests', result: r.value };
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      return this.toUnavailable(adapter, e);
+    }
+  }
+
+  async structuralSearch(params: import('./adapters').StructuralSearchRequest, token?: CancellationToken): Promise<StructuralSearchOutcome> {
+    const adapter = this.o.registry.languageAdapters().find((a) => a.descriptor.ownership === 'owned-semantic' && typeof a.structuralSearch === 'function');
+    if (!adapter) return { kind: 'unavailable', reasonCode: 'NoLanguageRoute', message: 'No Refyntra route provides structural search.', recoveryActions: [RECOVERY_SHOW_HEALTH] };
+    try {
+      const r = await this.withStaleRetry(() => adapter.structuralSearch!(params, token), token);
+      if (!r.value) return { kind: 'unavailable', reasonCode: 'ProtocolTooOld', message: 'The C# host is too old for structural search; update the extension.', recoveryActions: [] };
+      return { kind: 'structural', result: r.value };
     } catch (e) {
       if (e instanceof CancelledError) throw e;
       return this.toUnavailable(adapter, e);
@@ -1033,7 +1056,7 @@ export class RefyntraEngine implements EngineClient {
 
   // ---------------------------------------------------------------- Analysis (rules)
 
-  async analyze(options: { uri?: string; documents?: readonly string[] } = {}, token?: CancellationToken): Promise<AnalysisOutcome[]> {
+  async analyze(options: import('./adapters').AnalyzeRequest = {}, token?: CancellationToken): Promise<AnalysisOutcome[]> {
     const adapters = this.o.registry.languageAdapters().filter((a) => typeof a.analyze === 'function' && (!options.uri || a === this.o.registry.routeFor(options.uri)));
     return Promise.all(
       adapters.map(async (adapter): Promise<AnalysisOutcome> => {

@@ -365,6 +365,32 @@ a test class. It is not part of `initialize.capabilities`.
     minor ≥ 17.
   - `StructureMember.documentationId?` / `assemblyName?` (inherited metadata members) and
     `StepIntoTarget.documentationId?` / `assemblyName?` (reason `metadata`): for `code/metadataSource`.
+- 1.19 (additive): Structural search and replace (ADR-012).
+  - `code/structuralSearch` `StructuralSearchParams` `{traceId, workspaceId, snapshotId, pattern, scope: "document" |
+    "project" | "solution", uri?, limit?}` → `StructuralSearchResult` `{patternKind?: "expression" | "statements" |
+    "members", matches: [{uri, range, lineText, values}], truncated, filesSearched, filesWithMatches, notes, reasonCode?,
+    message?, elapsedMs, snapshotId}`. `pattern` (`StructuralPattern`): `{text, placeholders: [{name, kind?: "any" |
+    "expression" | "statement" | "identifier" | "type" | "argument" | "member", type?, exactType?, minCount?, maxCount?,
+    regex?}], replacement?, imports?}` — C# with placeholders `$name$` (pattern language and matching rules: ADR-012).
+    `uri` is the document of scope `document` / `project`. `limit`: default 200, at most 5000; `truncated` when there are
+    more (the client asks again with a larger limit). `values`: what each placeholder matched, one line, shortened.
+    An invalid pattern answers `reasonCode` (`EmptyPattern`, `InvalidPattern`, `InvalidPlaceholder`, `NoDocument`,
+    `InvalidParams`) and `message` instead of matches. `notes`: e.g. a constraint type a project does not have.
+  - `code/structuralReplace` `StructuralReplaceParams` `{traceId, workspaceId, snapshotId, pattern (with
+    replacement), scope, uri?, matches?: [{uri, start}]}` → `PrepareResult`, a plan of action
+    `csharp.structuralReplace` (applied, revalidated and undone like every plan). `matches` limits the replacement to
+    those matches. Matches whose replacement would add a compiler error to their document are left out and listed in
+    the plan's `limitations` (file:line: error); when every match is refused the result is `unavailable` with reason
+    `CompilationErrors` and the list. Other reasons: `NoReplacement`, `InvalidReplacement`, `NoChanges`,
+    `TooManyOccurrences`. `refactor/prepare` with `actionId` `csharp.structuralReplace` and `PrepareParams.structural`
+    (the same params) is equivalent.
+  - `analysis/run` `structuralPatterns?: StructuralPattern[]` with `ruleId` ("ORS-<name>": letters, digits, `_`,
+    `.`, `-`), `severity?` ("error" | "warning" | "information" | "hint"), `message?`, `fixTitle?`: pattern inspections
+    on `documents`. Each match is a `RuleDiagnostic` with that id and severity; a pattern with a replacement offers the
+    quick fix `csharp.edit.fix.structural.<ruleId>` (code/editActions at the result's start; also accepted by
+    `csharp.fixAll`). The host keeps the patterns of the latest run for these actions. An invalid pattern or rule id
+    is an abstention (`InvalidPattern`, `InvalidPlaceholder`, `InvalidReplacement`, `InvalidRuleId`), never an error.
+    `RuleDiagnostic.severity` may now be any of the four severities. Sent only to hosts with minor ≥ 19.
 - Additive (EF Core): relation kinds `efcore.*` and group `data` (above); `SearchFilters.entity?: boolean` ("entity:")
   and `SearchFilters.table?: string` ("table:NAME") return EF Core entities as symbol items. Older hosts ignore the
   filters (they return a normal symbol search); older clients render the kinds and the group generically. The
@@ -429,6 +455,8 @@ issuing semantic requests.
 | `code/usages` | req | `UsagesParams` `{…, symbolId, limit?}` | `UsagesResult` (since 1.12; Find Usages grouped) |
 | `code/fileStructure` | req | `FileStructureParams` `{…, uri, includeInherited?}` | `FileStructureResult` (since 1.13; File Structure) |
 | `code/metadataSource` | req | `MetadataSourceParams` `{…, symbolId? \| documentationId? \| uri?+position? \| document?+position?, sourcePolicy?, symbolOnly?}` | `MetadataSourceResult` (since 1.17; go to metadata) |
+| `code/structuralSearch` | req | `StructuralSearchParams` `{…, pattern, scope, uri?, limit?}` | `StructuralSearchResult` (since 1.19; structural search) |
+| `code/structuralReplace` | req | `StructuralReplaceParams` `{…, pattern, scope, uri?, matches?}` | `PrepareResult` (since 1.19; plan `csharp.structuralReplace`) |
 | `code/stepIntoTargets` | req | `StepIntoTargetsParams` `{…, uri, position}` | `StepIntoTargetsResult` (since 1.14; Smart Step Into) |
 | `code/tests` | req | `TestsParams` `{…, uris?}` | `TestsResult` (since 1.15; Test Explorer discovery) |
 | `code/constructorActions` | req | `ConstructorActionsParams` `{…, uri, position, actionId?, member?, members?, type?, constructorId?, typeId?}` | `ConstructorActionsResult` (since 1.11; constructor / DI helpers) |

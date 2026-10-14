@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
 import type { AnalysisView, EngineClient } from '@refyntra/application';
-import type { RuleAbstention, RuleDiagnostic } from '@refyntra/contracts';
+import type { RuleAbstention, RuleDiagnostic, StructuralPattern } from '@refyntra/contracts';
 import { fromLocation, fromRange, shortPath, toPosition } from './convert';
-import { type QuickFixOffer, compilerQuickFixes, explain, groupByUri, quickFixesOf, ruleLevel, severityOf } from './diagnosticsModel';
+import { type QuickFixOffer, compilerQuickFixes, explain, groupByUri, quickFixesOf, ruleLevel, severityOf, structuralSeverity } from './diagnosticsModel';
 import { EDIT_ACTION_COMMAND, FIX_ALL_COMMAND, type EditActionTarget } from './editActionsModel';
 
 /** Debounce after an edit before the rules run again (the host recomputes only components whose dependencies changed). */
@@ -18,7 +18,7 @@ export const EXPLAIN_SCHEME = 'refyntra-rules';
  * compile-checked, one undo step) and "… in document, project or solution" (Fix in scope, previewed); the compiler's
  * CS4014 gets "Add 'await'" and "Discard" the same way.
  */
-export function registerRuleDiagnostics(engine: EngineClient): vscode.Disposable {
+export function registerRuleDiagnostics(engine: EngineClient, structural?: { patterns(): readonly StructuralPattern[]; onDidChange: vscode.Event<void> }): vscode.Disposable {
   const collection = vscode.languages.createDiagnosticCollection('refyntra');
   let diagnostics: RuleDiagnostic[] = [];
   let abstentions: RuleAbstention[] = [];
@@ -40,7 +40,8 @@ export function registerRuleDiagnostics(engine: EngineClient): vscode.Disposable
     fixesOf.clear();
     for (const [uri, list] of groupByUri(diagnostics, level)) {
       const items = list.map((d) => {
-        const severity = severityOf(level(d.id));
+        // Pattern inspections (protocol 1.19): the pattern's severity unless refyntra.rules.ORS-<name> is set.
+        const severity = d.id.startsWith('ORS-') ? structuralSeverity(d.severity, vscode.workspace.getConfiguration('refyntra').get(`rules.${d.id}`)) : severityOf(level(d.id));
         const diagnostic = new vscode.Diagnostic(fromRange(d.location.range), d.message,
           severity === 'hint' ? vscode.DiagnosticSeverity.Hint
             : severity === 'information' ? vscode.DiagnosticSeverity.Information
@@ -64,7 +65,8 @@ export function registerRuleDiagnostics(engine: EngineClient): vscode.Disposable
     try {
       // OR1001 for the workspace; the per-document inspections for the C# files open in the editor.
       const documents = vscode.workspace.textDocuments.filter((doc) => doc.languageId === 'csharp' && relevant(doc)).map((doc) => doc.uri.toString());
-      const outcomes = await engine.analyze({ documents }, cts.token);
+      const structuralPatterns = structural?.patterns() ?? [];
+      const outcomes = await engine.analyze({ documents, ...(structuralPatterns.length ? { structuralPatterns } : {}) }, cts.token);
       if (mine !== generation || cts.token.isCancellationRequested) return;
       const ok = outcomes.filter((o): o is AnalysisView => o.kind === 'analysis');
       if (ok.length === 0 && outcomes.some((o) => o.kind === 'unavailable' && o.reasonCode === 'Stale')) {
@@ -177,6 +179,7 @@ export function registerRuleDiagnostics(engine: EngineClient): vscode.Disposable
       schedule();
     }),
     engine.onDidChangeHealth(() => schedule()),
+    ...(structural ? [structural.onDidChange(() => schedule(0))] : []),
     vscode.workspace.onDidChangeTextDocument((e) => {
       if (e.contentChanges.length > 0 && relevant(e.document)) schedule();
     }),

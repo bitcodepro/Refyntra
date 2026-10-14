@@ -733,6 +733,8 @@ public sealed class PrepareParams : WorkspaceParams
     public RegistrationParamsDto? Registration { get; set; }
     /// <summary>Fix in scope (protocol 1.11, action csharp.fixAll): the edit action and the scope around documentUri.</summary>
     public FixAllParamsDto? FixAll { get; set; }
+    /// <summary>Structural replace (protocol 1.19, action csharp.structuralReplace): pattern, replacement, scope, matches.</summary>
+    public StructuralReplaceParams? Structural { get; set; }
 }
 
 public sealed class RegistrationParamsDto
@@ -796,6 +798,8 @@ public sealed class AnalysisRunParams : WorkspaceParams
     public string? Uri { get; set; }
     /// <summary>Protocol 1.16: documents to run the per-document inspections (OR1002–OR1010) on (the client's open C# files).</summary>
     public List<string>? Documents { get; set; }
+    /// <summary>Protocol 1.19: pattern inspections (rule ids "ORS-name") run on <see cref="Documents"/>.</summary>
+    public List<StructuralPatternDto>? StructuralPatterns { get; set; }
 }
 
 /// <summary>A quick fix of an inspection result: an edit action computed at the result's start (protocol 1.16).</summary>

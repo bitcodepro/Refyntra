@@ -14,7 +14,7 @@ public sealed class ProtocolTests
         await using var c = TestClient.InProcess();
         var r = await c.InitializeAsync();
         Assert.Equal(1, r.GetProperty("protocolMajor").GetInt32());
-        Assert.Equal(17, r.GetProperty("protocolMinor").GetInt32());
+        Assert.Equal(19, r.GetProperty("protocolMinor").GetInt32());
         Assert.False(string.IsNullOrEmpty(r.GetProperty("sessionEpoch").GetString()));
         Assert.Equal(32L * 1024 * 1024, r.GetProperty("limits").GetProperty("maxMessageBytes").GetInt64());
         Assert.Contains("csharp.related", r.GetProperty("capabilities").EnumerateArray().Select(x => x.GetString()));

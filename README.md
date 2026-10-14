@@ -930,6 +930,38 @@ each page lists its false-positive guards.
 - Not inspected on purpose: `Count() > 0` (the SDK's CA1827/CA1829 already report it), missing `ConfigureAwait(false)`
   (a project policy, not a defect), unused private members (the IDE reports them).
 
+### Structural Search and Replace (C#)
+
+*Refyntra: Structural Search…* finds C# code by its shape, Rider/ReSharper-style, on Roslyn (pattern language and
+matching rules: [ADR-012](docs/adr/ADR-012-structural-search-patterns.md)).
+
+- **Pattern**: C# code (an expression, statements or members) with placeholders `$name$`, e.g. `$x$.Result`,
+  `$s$ == null || $s$ == ""`, `if ($c$) return true; else return false;`. The placeholder table fills itself from the
+  pattern; per placeholder: kind (expression, statement(s), identifier, type, argument(s), member), a type
+  (`System.Threading.Tasks.Task` matches `Task<int>` too; *Exact* for exactly that type; `IEnumerable<T>` for any
+  element type), a count for arguments and statements (min..max), a regular expression on the matched name.
+- **Semantic matching**: whitespace, comments and redundant parentheses do not matter; a one-statement block matches
+  the statement; `Console.WriteLine($a$)` matches `System.Console.WriteLine(x)`, an alias and `WriteLine(x)` behind
+  `using static System.Console`, but not another class's `WriteLine`; a member of an interface matches its
+  implementations; a placeholder used twice must match the same code.
+- **Scope**: the current file, its project or the solution. Results appear in the panel and in the *Structural Search
+  Results* view (files with counts, line previews and what each placeholder matched); *Show more* loads beyond the
+  first 200.
+- **Replace**: a template with the same placeholders. *Replace…* on one result or *Replace all…* prepares one plan for
+  the scope and shows it in the preview (Refactor Preview or Refyntra's diff list), revalidates and applies it as one
+  step with Undo. Replaced code is formatted, needed `using` directives are added, and every changed file is
+  compile-checked: matches whose replacement would not compile (e.g. `await` in a method that is not async) are left
+  out and listed.
+- **Saved patterns**: *Save to workspace* writes `.refyntra/patterns.json` (commit it to share), *Save for me* keeps it
+  in your profile. Built-in examples: `.Result` → `await`, null-or-empty → `string.IsNullOrEmpty`, if/return true/false
+  → `return` the condition, `Count() > 0` → `Any()`.
+- **Patterns as inspections**: a saved pattern with *Show as inspection* reports every match in the open C# files as
+  rule `ORS-<name>` with the chosen severity (Problems view, source *Refyntra*); its quick fix is the replacement
+  (compile-checked, one undo step) and *… in document, project or solution…*. `refyntra.rules.ORS-<name>` turns one off
+  or changes its severity.
+- Not supported: commutative reordering (`a == b` vs `b == a`), data flow, Visual Basic. Measurements:
+  [docs/performance/structural-search-2026-10-14.md](docs/performance/structural-search-2026-10-14.md).
+
 ### Postfix templates (C#)
 
 Type a dot after an expression and the completion list ends with Rider's postfix templates that fit the expression's
@@ -994,6 +1026,8 @@ constructor that needs them (the compile check refuses it).
 | `refyntra.recentLocations` | Recent Locations (Ctrl+Shift+E): edited and visited places with member and code line |
 | `refyntra.fileStructure` | File Structure (Ctrl+F12): members of the current file by type and region, filters, inherited members (C#) |
 | `refyntra.goToMetadata` | Go to Metadata / Decompiled Source (C#): the read-only embedded or decompiled source of the library symbol at the cursor (F12 inside such a document) |
+| `refyntra.structuralSearch` | Structural Search… (C#): find code by its shape with `$placeholders$`, replace it through the preview, save patterns and inspections |
+| `refyntra.structuralSearch.replaceAll` / `.rerun` / `.clear` | Replace all matches of the panel's pattern, search again, clear the Structural Search Results view |
 | `refyntra.openMetadata` | (not in the palette) Open the decompiled source of a documentation id (File Structure, stack traces, Smart Step Into) |
 | `refyntra.usages.next` / `.previous` | Next / previous usage of the Usages view (F4 / Shift+F4 in a C# editor while it has results) |
 | `refyntra.usages.groupBy` / `.filterKinds` / `.filterTests` / `.clearFilters` | Groupings and filters of the Usages view |

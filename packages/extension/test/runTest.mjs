@@ -325,6 +325,15 @@ const scenarios = visual
         settings: { 'refyntra.rename.apply': true, 'files.autoSave': 'off', 'refyntra.preview.style': 'native' },
         env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' },
       },
+      // Structural Search and Replace on a temp copy of the StructuralSearch fixture: a type-constrained search, Replace
+      // all through the Refactor Preview with Undo, a saved pattern as inspection with its quick fix.
+      {
+        name: 'structural-search',
+        fixtureCopy: ['StructuralSearch', 'StructuralSearch.sln'],
+        trusted: true,
+        settings: { 'refyntra.rename.apply': true, 'files.autoSave': 'off', 'refyntra.preview.style': 'native' },
+        env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' },
+      },
       // Native VS Code UI on a temp copy of Shop: code action kinds, CodeLens resolve, Call/Type Hierarchy, MediatR hover,
       // the Refactor Preview (apply, discard, stale refused) and the Change Signature dialog.
       {

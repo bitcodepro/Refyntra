@@ -9,7 +9,8 @@ if [ "${1:-}" != "--inside" ]; then
   repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
   # Git Bash on Windows would rewrite /src and /work; keep the container paths as they are.
   export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
-  docker build -q -t refyntra-linux-smoke - <<'DOCKERFILE'
+  # REFYNTRA_SMOKE_IMAGE: another tag for parallel work trees (default refyntra-linux-smoke).
+  docker build -q -t "${REFYNTRA_SMOKE_IMAGE:-refyntra-linux-smoke}" - <<'DOCKERFILE'
 FROM node:22-bookworm AS node
 FROM mcr.microsoft.com/dotnet/sdk:10.0
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
@@ -21,7 +22,7 @@ DOCKERFILE
   [ "${1:-}" = "--build-image-only" ] && exit 0 # used by linux-e2e.sh, which builds on this image
   # --init: a real init reaps orphans; without it a killed grandchild stays a zombie and kill(pid,0) still succeeds.
   exec docker run --rm --init -v "$repo:/src:ro" -e DOTNET_CLI_TELEMETRY_OPTOUT=1 -e DOTNET_NOLOGO=1 \
-    refyntra-linux-smoke bash /src/scripts/test/linux.sh --inside
+    "${REFYNTRA_SMOKE_IMAGE:-refyntra-linux-smoke}" bash /src/scripts/test/linux.sh --inside
 fi
 
 step() { printf '\n==== %s ====\n' "$*"; }
