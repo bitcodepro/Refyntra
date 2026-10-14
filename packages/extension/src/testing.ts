@@ -7,6 +7,8 @@ import type { EngineClient } from '@refyntra/application';
 import type { TestMethodInfo, TestProjectInfo } from '@refyntra/contracts';
 import { type DebuggerLocator, buildDotnet, killTree, onPath } from './run';
 import { DOTNET_DEBUG_TYPE, PYTHON_DEBUG_TYPE } from './runModel';
+import { caseAsResult, toTrxResult, type VsTestCase } from './vstestProtocol';
+import { VsTestSession } from './vstestSession';
 import {
   type JunitResult,
   type TestNode,
@@ -70,6 +72,8 @@ export interface TestingState {
   lastDebugProcessId?: number;
   /** Steps of the last debugged test run (process id, attach, session start and end). */
   debugTrace: string[];
+  /** Test cases the last .NET run sent to vstest.console (undefined: it ran through `dotnet test`). */
+  lastServerCases?: number;
 }
 
 const EXCLUDE = '**/{node_modules,bin,obj,.git,target,__pycache__,.venv,venv,dist,out}/**';
@@ -97,6 +101,18 @@ function capture(command: string, args: string[], cwd: string, timeoutMs: number
       resolve({ code, stdout: String(stdout ?? '') });
     });
   });
+}
+
+/** The folder of the `dotnet` on PATH (DOTNET_ROOT first): where the SDKs and their vstest.console live. */
+function dotnetRoot(): string | undefined {
+  if (process.env.DOTNET_ROOT && fs.existsSync(path.join(process.env.DOTNET_ROOT, 'sdk'))) return process.env.DOTNET_ROOT;
+  const exe = onPath(['dotnet']);
+  if (!exe) return undefined;
+  try {
+    return path.dirname(fs.realpathSync(exe));
+  } catch {
+    return path.dirname(exe);
+  }
 }
 
 export class TestingService implements vscode.Disposable {
@@ -171,6 +187,7 @@ export class TestingService implements vscode.Disposable {
   }
 
   dispose(): void {
+    this.vstest?.dispose();
     if (this.changeTimer) clearTimeout(this.changeTimer);
     for (const s of this.subs) s.dispose();
   }
@@ -365,6 +382,7 @@ export class TestingService implements vscode.Disposable {
       cargo: this.cargo,
       ...(this.lastDebugPid !== undefined ? { lastDebugProcessId: this.lastDebugPid } : {}),
       debugTrace: [...this.debugTrace],
+      ...(this.lastServerCases !== undefined ? { lastServerCases: this.lastServerCases } : {}),
     };
   }
 
@@ -565,6 +583,55 @@ export class TestingService implements vscode.Disposable {
 
   // ---------------------------------------------------------------------------------------------- .NET
 
+  private vstest: VsTestSession | undefined;
+  private lastServerCases: number | undefined;
+  private readonly discovered = new Map<string, { stamp: number; cases: VsTestCase[] }>();
+
+  private useServer(): boolean {
+    return vscode.workspace.getConfiguration('refyntra').get<boolean>('tests.vstestServer', true);
+  }
+
+  /**
+   * Build, discover through vstest.console (cached per assembly write time), choose the cases under the requested
+   * items, run exactly those. Undefined when this path is not possible (multi-targeting, no server, a failed discovery):
+   * the caller then runs `dotnet test`.
+   */
+  private async runViaServer(run: vscode.TestRun, project: string, items: vscode.TestItem[], cwd: string, token: vscode.CancellationToken): Promise<TrxResult[] | undefined> {
+    this.lastServerCases = undefined;
+    const build = await this.spawnForRun(run, 'dotnet', ['build', project, '-c', 'Debug', '--nologo', '-v', 'q'], cwd, {}, token);
+    if (build.code !== 0 || token.isCancellationRequested) return undefined;
+    const prop = await this.spawnForRun(run, 'dotnet', ['msbuild', project, '-nologo', '-getProperty:TargetPath', '-p:Configuration=Debug'], cwd, {}, token);
+    const target = prop.output.trim().split(/\r?\n/).pop()?.trim() ?? '';
+    if (!target || !fs.existsSync(target)) return undefined;
+    try {
+      this.vstest ??= new VsTestSession(() => VsTestSession.findConsole(dotnetRoot()), (l) => run.appendOutput(crlf(l)));
+      const stamp = fs.statSync(target).mtimeMs;
+      let cases = this.discovered.get(target)?.stamp === stamp ? this.discovered.get(target)!.cases : undefined;
+      if (!cases) {
+        cases = await this.vstest.discover([target]);
+        this.discovered.set(target, { stamp, cases });
+      }
+      const methods = new Map<string, TestNode>();
+      for (const n of this.nodes.values()) if (n.kind === 'method' && n.language === 'dotnet' && n.project === project) methods.set(n.key, n);
+      const wanted = new Set(items.map((i) => i.id));
+      const chosen = cases.filter((c) => {
+        const m = matchDotnetResults([caseAsResult(c)], methods)[0];
+        if (!m) return false;
+        for (let item = this.items.get(m.id) ?? (m.parentId ? this.items.get(m.parentId) : undefined); item; item = item.parent) if (wanted.has(item.id)) return true;
+        return false;
+      });
+      if (chosen.length === 0) return undefined;
+      this.lastServerCases = chosen.length;
+      run.appendOutput(crlf(`[Refyntra] running ${chosen.length} test case(s) through vstest.console\n`));
+      const results: TrxResult[] = [];
+      await this.vstest.run(chosen, (r) => results.push(toTrxResult(r)), (m) => run.appendOutput(crlf(`${m}\n`)), token);
+      return results.length > 0 ? results : undefined;
+    } catch (e) {
+      run.appendOutput(crlf(`[Refyntra] vstest.console server unavailable (${e instanceof Error ? e.message : String(e)}); using dotnet test\n`));
+      return undefined;
+    }
+  }
+
   /** VSTest or Microsoft Testing Platform, from the project file and the nearest global.json. */
   private runnerOf(project: string): ReturnType<typeof detectTestRunner> {
     let xml = '';
@@ -660,6 +727,7 @@ export class TestingService implements vscode.Disposable {
     let session: vscode.DebugSession | undefined;
     try {
       let outcome: { code: number | null; output: string };
+      let serverResults: TrxResult[] | undefined;
       const kind = this.runnerOf(project);
       if (kind.runner === 'mtp') {
         // Microsoft Testing Platform: build, then run (or debug) the test application itself.
@@ -727,14 +795,20 @@ export class TestingService implements vscode.Disposable {
         local.dispose();
         if (session) await Promise.race([ended, new Promise((r) => setTimeout(r, 10000))]);
       } else {
-        outcome = await this.spawnForRun(run, 'dotnet', dotnetTestArgs(project, { ...(filter ? { filter } : {}), resultsDirectory, coverage }), cwd, {}, token);
+        // VSTest in design mode (vstest.console as a server): the exact test cases run — one data row alone too.
+        // Coverage and an unavailable server take the `dotnet test` path.
+        const viaServer = coverage || !this.useServer() ? undefined : await this.runViaServer(run, project, items, cwd, token);
+        if (viaServer) {
+          serverResults = viaServer;
+          outcome = { code: 0, output: '' };
+        } else outcome = await this.spawnForRun(run, 'dotnet', dotnetTestArgs(project, { ...(filter ? { filter } : {}), resultsDirectory, coverage }), cwd, {}, token);
       }
       if (token.isCancellationRequested) {
         for (const l of leaves) run.skipped(l);
         return;
       }
-      const results: TrxResult[] = [];
-      for (const f of fs.readdirSync(resultsDirectory)) if (f.endsWith('.trx')) results.push(...parseTrx(fs.readFileSync(path.join(resultsDirectory, f), 'utf8')));
+      const results: TrxResult[] = serverResults ?? [];
+      if (!serverResults) for (const f of fs.readdirSync(resultsDirectory)) if (f.endsWith('.trx')) results.push(...parseTrx(fs.readFileSync(path.join(resultsDirectory, f), 'utf8')));
       if (coverage) this.reportCoverage(run, resultsDirectory);
       const methods = new Map<string, TestNode>();
       for (const n of this.nodes.values()) if (n.kind === 'method' && n.language === 'dotnet' && n.project === project) methods.set(n.key, n);
