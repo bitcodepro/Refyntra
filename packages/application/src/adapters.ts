@@ -189,6 +189,7 @@ export interface LanguageAdapter {
   /** Optional (protocol 1.13): File Structure of a document; null when the host is older. */
   fileStructure?(uri: string, includeInherited: boolean, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').FileStructureResult | null>>;
   /** Optional (protocol 1.14): the calls of the statement a debugger stopped at (Smart Step Into); null when the host is older. */
+  documentDiagnostics?(uri: string, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').DocumentDiagnosticsResult | null>>;
   hover?(uri: string, position: Position, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').HoverResult | null>>;
   signatureHelp?(uri: string, position: Position, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').SignatureHelpResult | null>>;
   completion?(uri: string, position: Position, triggerCharacter: string | undefined, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').CompletionResult | null>>;

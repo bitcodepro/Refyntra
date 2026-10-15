@@ -44,8 +44,9 @@ public sealed partial class Engine : IRpcHandler, IDisposable
     /// csharp.inlineMethod / csharp.inlineMethodAll (Inline Method across files).
     /// 1.22: code/completion and code/completionResolve (editor completion from Roslyn's CompletionService).
     /// 1.23: code/hover (Roslyn's QuickInfoService) and code/signatureHelp (overloads and the active argument).
+    /// 1.24: code/diagnostics (the compiler's errors and warnings of a document).
     /// </summary>
-    public const int ProtocolMinor = 23;
+    public const int ProtocolMinor = 24;
     /// <summary>How long workspace/snapshotBarrier waits for a missing document sequence (tests shorten it).</summary>
     public TimeSpan BarrierTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
@@ -147,6 +148,8 @@ public sealed partial class Engine : IRpcHandler, IDisposable
                 return await GenerateAsync(Params<GenerateParams>(p), ct).ConfigureAwait(false);
             case "code/constructorActions":
                 return await ConstructorActionsAsync(Params<ConstructorActionsParams>(p), ct).ConfigureAwait(false);
+            case "code/diagnostics":
+                return await DocumentDiagnosticsAsync(Params<DocumentDiagnosticsParams>(p), ct).ConfigureAwait(false);
             case "code/hover":
                 return await HoverAsync(Params<EditorPositionParams>(p), ct).ConfigureAwait(false);
             case "code/signatureHelp":
@@ -775,6 +778,35 @@ public sealed partial class Engine : IRpcHandler, IDisposable
         }
         if (RazorMapping.IsRazorPath(path) && await RazorMapping.ToGeneratedAsync(snap.Solution, path, at.Line, at.Character, ct).ConfigureAwait(false) is { } g) return (g.Document, g.Position, true);
         return null;
+    }
+
+    private async Task<DocumentDiagnosticsResultDto> DocumentDiagnosticsAsync(DocumentDiagnosticsParams p, CancellationToken ct)
+    {
+        var snap = RequireSnapshot(p.WorkspaceId, p.SnapshotId);
+        var result = new DocumentDiagnosticsResultDto { SnapshotId = snap.Id };
+        var doc = snap.Session.DocumentIdsForPath(PathOf(p.Uri)).Select(snap.Solution.GetDocument).FirstOrDefault(d => d != null);
+        if (doc == null)
+        {
+            result.ReasonCode = "DocumentNotFound";
+            return result;
+        }
+        var model = await doc.GetSemanticModelAsync(ct).ConfigureAwait(false);
+        if (model == null) return result;
+        foreach (var d in model.GetDiagnostics(cancellationToken: ct))
+        {
+            if (d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Hidden && !d.Descriptor.CustomTags.Contains(Microsoft.CodeAnalysis.WellKnownDiagnosticTags.Unnecessary)) continue;
+            if (!d.Location.IsInSource) continue;
+            result.Diagnostics.Add(new CompilerDiagnosticDto
+            {
+                Range = ToRange(d.Location.GetLineSpan().Span),
+                Severity = d.Severity switch { Microsoft.CodeAnalysis.DiagnosticSeverity.Error => "error", Microsoft.CodeAnalysis.DiagnosticSeverity.Warning => "warning", _ => "info" },
+                Code = d.Id,
+                Message = d.GetMessage(),
+                Unnecessary = d.Descriptor.CustomTags.Contains(Microsoft.CodeAnalysis.WellKnownDiagnosticTags.Unnecessary),
+            });
+            if (result.Diagnostics.Count >= 1000) break;
+        }
+        return result;
     }
 
     private async Task<HoverResultDto> HoverAsync(EditorPositionParams p, CancellationToken ct)

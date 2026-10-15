@@ -51,4 +51,24 @@ public sealed class EditorInfoTests : IClassFixture<EditActionsFixture>
             await _f.Client.DidChangeAsync(Greeter, original, 3);
         }
     }
+
+    [Fact]
+    public async Task DiagnosticsAreTheCompilersErrorsOfTheDocument()
+    {
+        var original = await File.ReadAllTextAsync(Greeter);
+        var edited = original.Replace("new Greeter().Greet(\"c\", 1)", "new Greeter().Greet(\"c\", \"x\")");
+        await _f.Client.DidOpenAsync(Greeter, original);
+        await _f.Client.DidChangeAsync(Greeter, edited);
+        try
+        {
+            var snap = await _f.Client.BarrierAsync();
+            var r = await _f.Client.RequestAsync("code/diagnostics", new { traceId = "t", workspaceId = _f.Client.WorkspaceId, snapshotId = snap, uri = UriPaths.ToUri(Greeter) });
+            var d = Assert.Single(r.GetProperty("diagnostics").EnumerateArray(), x => x.GetProperty("severity").GetString() == "error");
+            Assert.Equal("CS1503", d.GetProperty("code").GetString());
+        }
+        finally
+        {
+            await _f.Client.DidChangeAsync(Greeter, original, 3);
+        }
+    }
 }

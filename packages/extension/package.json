@@ -2543,6 +2543,11 @@
           "default": true,
           "markdownDescription": "When a git branch is checked out, its task context becomes active (one named after the branch is created the first time). Nothing is closed, deleted or emptied."
         },
+        "refyntra.editor.diagnostics": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "The C# compiler's errors and warnings of the open C# files in Problems (source `C#`), updated shortly after an edit. Not used while the C# extension (`ms-dotnettools.csharp`) is installed."
+        },
         "refyntra.editor.hover": {
           "type": "boolean",
           "default": true,

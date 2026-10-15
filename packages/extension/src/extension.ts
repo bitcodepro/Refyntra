@@ -49,6 +49,7 @@ import { registerLiveTemplates } from './liveTemplates';
 import { registerDefinition } from './definition';
 import { registerEditorCompletion } from './editorCompletion';
 import { registerEditorInfo } from './editorInfo';
+import { registerCompilerDiagnostics } from './compilerDiagnostics';
 import { type ImmediateViewProvider, registerImmediate } from './immediate';
 import { type DebugExtras, registerDebugExtras } from './debugExtras';
 import { type CSharpEvaluatableExpressionProvider, type CSharpInlineValuesProvider, registerInlineValues } from './inlineValues';
@@ -466,6 +467,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     registerDefinition(engine), // Ctrl+Click / F12 / Ctrl+F12 in C# when the C# extension is not installed
     registerEditorCompletion(engine), // C# completion from Roslyn (protocol 1.22) when the C# extension is not installed
     registerEditorInfo(engine), // C# hover and signature help (protocol 1.23) when the C# extension is not installed
+    registerCompilerDiagnostics(engine), // C# compiler errors and warnings in Problems (protocol 1.24) without the C# extension
     registerGenerate(engine, editApplier), // Generate… / Alt+Insert (protocol 1.10)
     inlineValues.disposable, // C# inline debug values and hover member chains (inlineValues.ts)
     immediate.disposable, // Refyntra Immediate panel (immediate.ts)

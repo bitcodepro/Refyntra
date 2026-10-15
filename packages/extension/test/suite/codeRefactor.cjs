@@ -516,5 +516,25 @@ exports.cases = ({ api, csharp, waitFor }) => {
         }
       },
     ],
+    [
+      'Compiler errors of an open C# file show up in Problems (source C#) and go away when fixed',
+      async () => {
+        await api();
+        const uri = lib('ChangeSignature/Greeter.cs');
+        const doc = await vscode.workspace.openTextDocument(uri);
+        const editor = await vscode.window.showTextDocument(doc);
+        const call = 'new Greeter().Greet("c", 1)';
+        const start = doc.getText().indexOf(call);
+        await editor.edit((e) => e.replace(new vscode.Range(doc.positionAt(start), doc.positionAt(start + call.length)), 'new Greeter().Greet("c", "x")'));
+        const errors = () => vscode.languages.getDiagnostics(uri).filter((d) => d.source === 'C#' && d.severity === vscode.DiagnosticSeverity.Error);
+        try {
+          const e = await waitFor(() => (errors().length ? errors() : undefined), 'a C# error in Problems', 60000);
+          assert.equal(e[0].code, 'CS1503');
+        } finally {
+          await vscode.commands.executeCommand('workbench.action.files.revert');
+        }
+        await waitFor(() => errors().length === 0, 'the error gone after the revert', 60000);
+      },
+    ],
   ];
 };

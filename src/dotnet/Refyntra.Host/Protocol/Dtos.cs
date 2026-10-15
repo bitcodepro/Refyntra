@@ -1023,6 +1023,31 @@ public sealed class ConstructorActionsResultDto
     public string SnapshotId { get; set; } = "";
 }
 
+/// <summary>code/diagnostics (protocol 1.24): the compiler's errors and warnings of one C# document.</summary>
+public sealed class DocumentDiagnosticsParams : WorkspaceParams
+{
+    public string SnapshotId { get; set; } = "";
+    public string Uri { get; set; } = "";
+}
+
+public sealed class CompilerDiagnosticDto
+{
+    public RangeDto Range { get; set; } = new();
+    /// <summary>error | warning | info.</summary>
+    public string Severity { get; set; } = "error";
+    public string Code { get; set; } = "";
+    public string Message { get; set; } = "";
+    /// <summary>Unnecessary code (shown faded), e.g. an unused using.</summary>
+    public bool Unnecessary { get; set; }
+}
+
+public sealed class DocumentDiagnosticsResultDto
+{
+    public List<CompilerDiagnosticDto> Diagnostics { get; set; } = new();
+    public string? ReasonCode { get; set; }
+    public string SnapshotId { get; set; } = "";
+}
+
 /// <summary>code/hover and code/signatureHelp (protocol 1.23): a position of a C# (or .razor) document.</summary>
 public sealed class EditorPositionParams : WorkspaceParams
 {

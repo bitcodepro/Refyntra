@@ -867,6 +867,15 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
     });
   }
 
+  /** Compiler diagnostics of a document (protocol 1.24); null for an older host. */
+  documentDiagnostics(uri: string, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').DocumentDiagnosticsResult | null>> {
+    return this.semantic('code/diagnostics', token, async (s, snapshotId, traceId) => {
+      if (s.protocolMinor < 24) return null;
+      const r = await s.transport.request('code/diagnostics', { traceId, workspaceId: this.opts.workspaceId, snapshotId, uri }, token);
+      return { diagnostics: Array.isArray(r?.diagnostics) ? r.diagnostics : [], reasonCode: r?.reasonCode ?? null, snapshotId: r?.snapshotId ?? snapshotId };
+    });
+  }
+
   /** Hover (protocol 1.23); null for an older host. */
   hover(uri: string, position: Position, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').HoverResult | null>> {
     return this.semantic('code/hover', token, async (s, snapshotId, traceId) => {

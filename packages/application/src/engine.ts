@@ -308,6 +308,8 @@ export interface EngineClient {
   expressionCompletions?(uri: string, position: Position, text: string, caret: number, token?: CancellationToken): Promise<string[]>;
   /** Go to Definition: the symbol at the position (with its declaration) and, on request, its implementations. Cheap: no Related. */
   definition?(target: DocumentTarget, withImplementations: boolean, token?: CancellationToken): Promise<{ subject: import('@refyntra/contracts').SymbolRef; implementations: import('@refyntra/contracts').Location[] } | undefined>;
+  /** The compiler's diagnostics of a C# document (protocol 1.24); undefined when not provided here. */
+  documentDiagnostics?(uri: string, token?: CancellationToken): Promise<import('@refyntra/contracts').CompilerDiagnostic[] | undefined>;
   /** Hover and signature help (protocol 1.23) of a C# / .razor document; undefined when not provided here. */
   hover?(target: DocumentTarget, token?: CancellationToken): Promise<import('@refyntra/contracts').HoverResult | undefined>;
   signatureHelp?(target: DocumentTarget, token?: CancellationToken): Promise<import('@refyntra/contracts').SignatureHelpResult | undefined>;
@@ -841,6 +843,18 @@ export class RefyntraEngine implements EngineClient {
     } catch (e) {
       if (e instanceof CancelledError) throw e;
       return this.toUnavailable(adapter, e);
+    }
+  }
+
+  async documentDiagnostics(uri: string, token?: CancellationToken): Promise<import('@refyntra/contracts').CompilerDiagnostic[] | undefined> {
+    const adapter = this.o.registry.routeFor(uri);
+    if (!adapter || adapter.descriptor.ownership !== 'owned-semantic' || typeof adapter.documentDiagnostics !== 'function') return undefined;
+    try {
+      const r = (await this.withStaleRetry(() => adapter.documentDiagnostics!(uri, token), token)).value;
+      return r && !r.reasonCode ? r.diagnostics : undefined;
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      return undefined;
     }
   }
 
