@@ -1,9 +1,8 @@
 import * as vscode from 'vscode';
 import { CancelledError, type EngineClient } from '@refyntra/application';
 import { fromLocation } from './convert';
-import { definitionTargets } from './definitionModel';
+import { declarationHasNoBody, definitionTargets } from './definitionModel';
 import { metadataService } from './metadata';
-import { group, located } from './navigateToModel';
 
 const CSHARP_EXTENSION = 'ms-dotnettools.csharp';
 
@@ -13,7 +12,8 @@ function active(): boolean {
 }
 
 /**
- * Go to Definition (Ctrl+Click, F12) and Go to Implementation (Ctrl+F12) for C# from the host's Related model: a method
+ * Go to Definition (Ctrl+Click, F12) and Go to Implementation (Ctrl+F12) for C# from the host's symbol at the position (one
+ * cheap request; implementations only when needed): a method
  * or class opens its source; an interface or abstract member (or a click on a declaration) opens its implementations
  * (a peek list when there are several); a library symbol opens its decompiled source.
  */
@@ -29,21 +29,22 @@ export class CSharpDefinitionProvider implements vscode.DefinitionProvider, vsco
   }
 
   private async resolve(document: vscode.TextDocument, position: vscode.Position, token: vscode.CancellationToken, implementations: boolean): Promise<vscode.Location[] | undefined> {
-    if (!active() || document.uri.scheme !== 'file') return undefined;
+    if (!active() || document.uri.scheme !== 'file' || !this.engine.definition) return undefined;
     const source = new vscode.CancellationTokenSource();
     const sub = token.onCancellationRequested(() => source.cancel());
     try {
-      const r = await this.engine.related({ uri: document.uri.toString(), position: { line: position.line, character: position.character } }, source.token);
-      if (r.kind !== 'related' || !r.subject || token.isCancellationRequested) return undefined;
-      const declarations = located(group(r.groups, 'declarations'));
-      const impls = located(group(r.groups, 'implementations'));
-      if (r.subject.origin === 'metadata' && declarations.length === 0 && r.subject.symbolId) {
+      const target = { uri: document.uri.toString(), position: { line: position.line, character: position.character } };
+      // One cheap request (the symbol and its declaration); implementations only when they decide where to go.
+      const first = await this.engine.definition(target, implementations, source.token);
+      if (!first || token.isCancellationRequested) return undefined;
+      const subject = first.subject;
+      const decl = subject.location;
+      if (subject.origin === 'metadata' && !decl && subject.symbolId) {
         // A library symbol: the decompiled (or embedded) source opens in a read-only editor.
-        void metadataService()?.open({ symbolId: r.subject.symbolId }, r.subject.name);
+        void metadataService()?.open({ symbolId: subject.symbolId }, subject.name);
         return [];
       }
-      if (implementations) return (impls.length ? impls : declarations).map(fromLocation);
-      const decl = declarations[0];
+      if (implementations) return (first.implementations.length ? first.implementations : decl ? [decl] : []).map(fromLocation);
       let declarationLine: string | undefined;
       let inInterface = false;
       if (decl) {
@@ -56,8 +57,11 @@ export class CSharpDefinitionProvider implements vscode.DefinitionProvider, vsco
           // The declaration's file cannot be read: no body check.
         }
       }
-      const clickedOnDeclaration = declarations.some((l) => l.uri === document.uri.toString() && l.range.start.line === position.line && position.character >= l.range.start.character && position.character <= l.range.end.character);
-      return definitionTargets({ subjectKind: r.subject.kind, declarations, implementations: impls, declarationLine, clickedOnDeclaration, inInterface }).map(fromLocation);
+      const declarations = decl ? [decl] : [];
+      const clickedOnDeclaration = !!decl && decl.uri === document.uri.toString() && decl.range.start.line === position.line && position.character >= decl.range.start.character && position.character <= decl.range.end.character;
+      const needImplementations = subject.kind === 'interface' || inInterface || clickedOnDeclaration || (declarationLine !== undefined && declarationHasNoBody(declarationLine));
+      const impls = needImplementations ? ((await this.engine.definition(target, true, source.token))?.implementations ?? []) : [];
+      return definitionTargets({ subjectKind: subject.kind, declarations, implementations: impls, declarationLine, clickedOnDeclaration, inInterface }).map(fromLocation);
     } catch (e) {
       if (e instanceof CancelledError) return undefined;
       return undefined;

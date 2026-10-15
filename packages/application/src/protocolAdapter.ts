@@ -601,6 +601,13 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
     });
   }
 
+  implementations(symbolId: string, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').Location[]>> {
+    return this.semantic('code/implementations', token, async (s, snapshotId, traceId) => {
+      const r = await s.transport.request('code/implementations', { traceId, workspaceId: this.opts.workspaceId, snapshotId, symbolId }, token);
+      return Array.isArray(r?.locations) ? r.locations : [];
+    });
+  }
+
   related(target: RelatedTarget, token?: CancellationToken): Promise<RouteResult<RelatedResult>> {
     return this.semantic(
       'code/related',
@@ -857,6 +864,24 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
         : [];
       const regions = Array.isArray(r?.regions) ? r.regions.filter((x) => x && typeof x.name === 'string' && isRange(x.range)) : [];
       return { types, regions, reasonCode: r?.reasonCode ?? null, completeness: r?.completeness ?? 'unknown', snapshotId: r?.snapshotId ?? snapshotId };
+    });
+  }
+
+  /** Hover (protocol 1.23); null for an older host. */
+  hover(uri: string, position: Position, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').HoverResult | null>> {
+    return this.semantic('code/hover', token, async (s, snapshotId, traceId) => {
+      if (s.protocolMinor < 23) return null;
+      const r = await s.transport.request('code/hover', { traceId, workspaceId: this.opts.workspaceId, snapshotId, uri, position }, token);
+      return { signature: r?.signature ?? null, sections: Array.isArray(r?.sections) ? r.sections : [], range: r?.range ?? null, snapshotId: r?.snapshotId ?? snapshotId };
+    });
+  }
+
+  /** Signature help (protocol 1.23); null for an older host. */
+  signatureHelp(uri: string, position: Position, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').SignatureHelpResult | null>> {
+    return this.semantic('code/signatureHelp', token, async (s, snapshotId, traceId) => {
+      if (s.protocolMinor < 23) return null;
+      const r = await s.transport.request('code/signatureHelp', { traceId, workspaceId: this.opts.workspaceId, snapshotId, uri, position }, token);
+      return { signatures: Array.isArray(r?.signatures) ? r.signatures : [], activeSignature: r?.activeSignature ?? 0, activeParameter: r?.activeParameter ?? 0, snapshotId: r?.snapshotId ?? snapshotId };
     });
   }
 

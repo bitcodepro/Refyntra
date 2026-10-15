@@ -306,6 +306,11 @@ export interface EngineClient {
   stepIntoTargets?(uri: string, position: Position, token?: CancellationToken): Promise<StepIntoTargetsOutcome>;
   /** Immediate window completions (protocol 1.21) at a stopped position of a C# file; [] when not available. */
   expressionCompletions?(uri: string, position: Position, text: string, caret: number, token?: CancellationToken): Promise<string[]>;
+  /** Go to Definition: the symbol at the position (with its declaration) and, on request, its implementations. Cheap: no Related. */
+  definition?(target: DocumentTarget, withImplementations: boolean, token?: CancellationToken): Promise<{ subject: import('@refyntra/contracts').SymbolRef; implementations: import('@refyntra/contracts').Location[] } | undefined>;
+  /** Hover and signature help (protocol 1.23) of a C# / .razor document; undefined when not provided here. */
+  hover?(target: DocumentTarget, token?: CancellationToken): Promise<import('@refyntra/contracts').HoverResult | undefined>;
+  signatureHelp?(target: DocumentTarget, token?: CancellationToken): Promise<import('@refyntra/contracts').SignatureHelpResult | undefined>;
   /** Editor completion (protocol 1.22) of a C# / .razor document; undefined when not provided here. */
   completion?(uri: string, position: Position, triggerCharacter: string | undefined, token?: CancellationToken): Promise<import('@refyntra/contracts').CompletionResult | undefined>;
   completionResolve?(uri: string, listId: string, index: number, token?: CancellationToken): Promise<import('@refyntra/contracts').CompletionResolveResult | undefined>;
@@ -836,6 +841,46 @@ export class RefyntraEngine implements EngineClient {
     } catch (e) {
       if (e instanceof CancelledError) throw e;
       return this.toUnavailable(adapter, e);
+    }
+  }
+
+  async hover(target: DocumentTarget, token?: CancellationToken): Promise<import('@refyntra/contracts').HoverResult | undefined> {
+    const adapter = this.o.registry.routeFor(target.uri);
+    if (!adapter || adapter.descriptor.ownership !== 'owned-semantic' || typeof adapter.hover !== 'function') return undefined;
+    try {
+      return (await this.withStaleRetry(() => adapter.hover!(target.uri, target.position, token), token)).value ?? undefined;
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      return undefined;
+    }
+  }
+
+  async signatureHelp(target: DocumentTarget, token?: CancellationToken): Promise<import('@refyntra/contracts').SignatureHelpResult | undefined> {
+    const adapter = this.o.registry.routeFor(target.uri);
+    if (!adapter || adapter.descriptor.ownership !== 'owned-semantic' || typeof adapter.signatureHelp !== 'function') return undefined;
+    try {
+      return (await this.withStaleRetry(() => adapter.signatureHelp!(target.uri, target.position, token), token)).value ?? undefined;
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      return undefined;
+    }
+  }
+
+  async definition(target: DocumentTarget, withImplementations: boolean, token?: CancellationToken): Promise<{ subject: import('@refyntra/contracts').SymbolRef; implementations: import('@refyntra/contracts').Location[] } | undefined> {
+    const adapter = this.o.registry.routeFor(target.uri);
+    if (!adapter || adapter.descriptor.ownership !== 'owned-semantic') return undefined;
+    try {
+      const s = await this.withStaleRetry(() => adapter.symbolAt(target.uri, target.position, token), token);
+      const subject = s.value;
+      if (!subject) return undefined;
+      let implementations: import('@refyntra/contracts').Location[] = [];
+      if (withImplementations && subject.symbolId && typeof adapter.implementations === 'function') {
+        implementations = (await adapter.implementations(subject.symbolId, token)).value;
+      }
+      return { subject, implementations };
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      return undefined;
     }
   }
 

@@ -32,8 +32,9 @@ export const PROTOCOL_MAJOR = 1;
  * 1.21: Immediate window completions (`code/expressionCompletions`) and Inline Method across files (plan actions
  *   `csharp.inlineMethod` / `csharp.inlineMethodAll`).
  * 1.22: Editor completion (`code/completion`, `code/completionResolve`) from Roslyn's CompletionService.
+ * 1.23: Hover (`code/hover`, Roslyn's QuickInfoService) and signature help (`code/signatureHelp`).
  */
-export const PROTOCOL_MINOR = 22;
+export const PROTOCOL_MINOR = 23;
 
 /** Zero-based line, UTF-16 code unit character. */
 export interface Position {
@@ -588,6 +589,27 @@ export interface FileStructureResult {
   /** "DocumentNotFound" when the document is not part of the loaded solution. */
   reasonCode?: string | null;
   completeness: 'complete' | 'partial' | 'unknown';
+  snapshotId: string;
+}
+
+/** code/hover and code/signatureHelp (protocol 1.23): a position of a C# (or .razor) document. */
+export interface EditorPositionParams extends WorkspaceParams {
+  snapshotId: string;
+  uri: string;
+  position: Position;
+}
+
+export interface HoverResult {
+  signature?: string | null;
+  sections: string[];
+  range?: Range | null;
+  snapshotId: string;
+}
+
+export interface SignatureHelpResult {
+  signatures: { label: string; documentation?: string | null; parameters: { label: string; documentation?: string | null }[] }[];
+  activeSignature: number;
+  activeParameter: number;
   snapshotId: string;
 }
 
@@ -1419,6 +1441,9 @@ export interface MethodMap {
   'solution/structure': [WorkspaceParams, SolutionStructureResult];
   /** Protocol 1.21. */
   'code/expressionCompletions': [ExpressionCompletionsParams, ExpressionCompletionsResult];
+  /** Protocol 1.23. */
+  'code/hover': [EditorPositionParams, HoverResult];
+  'code/signatureHelp': [EditorPositionParams, SignatureHelpResult];
   /** Protocol 1.22. */
   'code/completion': [CompletionParams, CompletionResult];
   'code/completionResolve': [CompletionResolveParams, CompletionResolveResult];

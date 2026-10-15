@@ -482,5 +482,39 @@ exports.cases = ({ api, csharp, waitFor }) => {
         }
       },
     ],
+    [
+      'Hover shows the signature and the XML documentation; signature help shows the parameters and the active one',
+      async () => {
+        await api();
+        const uri = lib('ChangeSignature/Greeter.cs');
+        const doc = await vscode.workspace.openTextDocument(uri);
+        const text = doc.getText();
+        let last = '';
+        const hovers = await waitFor(async () => {
+          const h = await vscode.commands.executeCommand('vscode.executeHoverProvider', uri, doc.positionAt(text.indexOf('new Greeter().Greet') + 'new Greeter().'.length + 1));
+          const md = (h ?? []).flatMap((x) => x.contents.map((c) => (typeof c === 'string' ? c : c.value))).join('\n');
+          last = md;
+          return /Greets(&nbsp;| )someone/.test(md) ? md : undefined;
+        }, 'the hover with the documentation', 60000).catch((e) => {
+          throw new Error(`${e.message}; last hover: ${JSON.stringify(last).slice(0, 600)}`);
+        });
+        assert.match(hovers, /Greet\(string name, int times\)/);
+        const editor = await vscode.window.showTextDocument(doc);
+        const call = 'new Greeter().Greet("c", 1)';
+        const start = text.indexOf(call);
+        await editor.edit((e) => e.replace(new vscode.Range(doc.positionAt(start), doc.positionAt(start + call.length)), 'new Greeter().Greet("c", '));
+        try {
+          const pos = doc.positionAt(start + 'new Greeter().Greet("c", '.length);
+          const help = await waitFor(async () => {
+            const h = await vscode.commands.executeCommand('vscode.executeSignatureHelpProvider', uri, pos, ',');
+            return h && h.signatures.length ? h : undefined;
+          }, 'signature help', 60000);
+          assert.match(help.signatures[help.activeSignature].label, /Greet\(string name, int times\)/);
+          assert.equal(help.activeParameter, 1);
+        } finally {
+          await vscode.commands.executeCommand('workbench.action.files.revert');
+        }
+      },
+    ],
   ];
 };

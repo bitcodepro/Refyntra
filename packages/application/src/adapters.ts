@@ -147,6 +147,8 @@ export interface LanguageAdapter {
   documentEvent(e: DocumentEvent): void;
   search(req: SearchRequest, token?: CancellationToken): Promise<RouteResult<SearchResult>>;
   symbolAt(uri: string, position: Position, token?: CancellationToken): Promise<RouteResult<SymbolRef | null>>;
+  /** Source implementations of a symbol (code/implementations): interface members and abstract or virtual members. */
+  implementations?(symbolId: string, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').Location[]>>;
   related(target: RelatedTarget, token?: CancellationToken): Promise<RouteResult<RelatedResult>>;
   capabilities(target: CapabilityTarget, token?: CancellationToken): Promise<RouteResult<Availability[]>>;
   prepare(req: PrepareRequest, token?: CancellationToken): Promise<RouteResult<PrepareResult>>;
@@ -187,6 +189,8 @@ export interface LanguageAdapter {
   /** Optional (protocol 1.13): File Structure of a document; null when the host is older. */
   fileStructure?(uri: string, includeInherited: boolean, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').FileStructureResult | null>>;
   /** Optional (protocol 1.14): the calls of the statement a debugger stopped at (Smart Step Into); null when the host is older. */
+  hover?(uri: string, position: Position, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').HoverResult | null>>;
+  signatureHelp?(uri: string, position: Position, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').SignatureHelpResult | null>>;
   completion?(uri: string, position: Position, triggerCharacter: string | undefined, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').CompletionResult | null>>;
   completionResolve?(listId: string, index: number, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').CompletionResolveResult | null>>;
   expressionCompletions?(uri: string, position: Position, text: string, caret: number, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').ExpressionCompletionsResult | null>>;

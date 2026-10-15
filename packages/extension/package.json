@@ -2543,6 +2543,16 @@
           "default": true,
           "markdownDescription": "When a git branch is checked out, its task context becomes active (one named after the branch is created the first time). Nothing is closed, deleted or emptied."
         },
+        "refyntra.editor.hover": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "C# hover from Refyntra's Roslyn host: the signature, XML documentation and type of the symbol under the mouse. Not used while the C# extension (`ms-dotnettools.csharp`) is installed."
+        },
+        "refyntra.editor.signatureHelp": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "C# signature help: the overloads of a call and the parameter being typed (after `(` and `,`). Not used while the C# extension (`ms-dotnettools.csharp`) is installed."
+        },
         "refyntra.editor.completion": {
           "type": "boolean",
           "default": true,

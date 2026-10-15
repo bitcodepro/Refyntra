@@ -43,8 +43,9 @@ public sealed partial class Engine : IRpcHandler, IDisposable
     /// 1.21: code/expressionCompletions (Immediate window completions at a stopped position) and the plan actions
     /// csharp.inlineMethod / csharp.inlineMethodAll (Inline Method across files).
     /// 1.22: code/completion and code/completionResolve (editor completion from Roslyn's CompletionService).
+    /// 1.23: code/hover (Roslyn's QuickInfoService) and code/signatureHelp (overloads and the active argument).
     /// </summary>
-    public const int ProtocolMinor = 22;
+    public const int ProtocolMinor = 23;
     /// <summary>How long workspace/snapshotBarrier waits for a missing document sequence (tests shorten it).</summary>
     public TimeSpan BarrierTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
@@ -146,6 +147,10 @@ public sealed partial class Engine : IRpcHandler, IDisposable
                 return await GenerateAsync(Params<GenerateParams>(p), ct).ConfigureAwait(false);
             case "code/constructorActions":
                 return await ConstructorActionsAsync(Params<ConstructorActionsParams>(p), ct).ConfigureAwait(false);
+            case "code/hover":
+                return await HoverAsync(Params<EditorPositionParams>(p), ct).ConfigureAwait(false);
+            case "code/signatureHelp":
+                return await SignatureHelpAsync(Params<EditorPositionParams>(p), ct).ConfigureAwait(false);
             case "code/completion":
                 return await CompletionAsync(Params<CompletionParams>(p), ct).ConfigureAwait(false);
             case "code/completionResolve":
@@ -753,6 +758,48 @@ public sealed partial class Engine : IRpcHandler, IDisposable
             Members = t.Members.Select(Member).ToList(), Inherited = t.Inherited.Select(Member).ToList(),
         }).ToList();
         result.Regions = model.Regions.Select(r => new StructureRegionDto { Name = r.Name, Range = ToRange(r.Range) }).ToList();
+        return result;
+    }
+
+    /// <summary>The document and offset of an editor position: a C# document, or the Razor-generated code of a .razor position.</summary>
+    private async Task<(Microsoft.CodeAnalysis.Document doc, int position, bool razor)?> EditorDocumentAsync(Refyntra.Workspaces.Snapshot snap, string uri, PositionDto at, CancellationToken ct)
+    {
+        var path = PathOf(uri);
+        var doc = snap.Session.DocumentIdsForPath(path).Select(snap.Solution.GetDocument).FirstOrDefault(d => d != null);
+        if (doc != null)
+        {
+            var text = await doc.GetTextAsync(ct).ConfigureAwait(false);
+            if (at.Line >= text.Lines.Count) return null;
+            var line = text.Lines[at.Line];
+            return (doc, Math.Min(line.Start + at.Character, line.End), false);
+        }
+        if (RazorMapping.IsRazorPath(path) && await RazorMapping.ToGeneratedAsync(snap.Solution, path, at.Line, at.Character, ct).ConfigureAwait(false) is { } g) return (g.Document, g.Position, true);
+        return null;
+    }
+
+    private async Task<HoverResultDto> HoverAsync(EditorPositionParams p, CancellationToken ct)
+    {
+        var snap = RequireSnapshot(p.WorkspaceId, p.SnapshotId);
+        var result = new HoverResultDto { SnapshotId = snap.Id };
+        if (await EditorDocumentAsync(snap, p.Uri, p.Position, ct).ConfigureAwait(false) is not { } at) return result;
+        var h = await EditorInfo.HoverAsync(at.doc, at.position, ct).ConfigureAwait(false);
+        if (h == null) return result;
+        result.Signature = h.Signature;
+        result.Sections = h.Sections;
+        if (!at.razor) result.Range = ToRange(h.Span);
+        return result;
+    }
+
+    private async Task<SignatureHelpResultDto> SignatureHelpAsync(EditorPositionParams p, CancellationToken ct)
+    {
+        var snap = RequireSnapshot(p.WorkspaceId, p.SnapshotId);
+        var result = new SignatureHelpResultDto { SnapshotId = snap.Id };
+        if (await EditorDocumentAsync(snap, p.Uri, p.Position, ct).ConfigureAwait(false) is not { } at) return result;
+        var s = await EditorInfo.SignatureHelpAsync(at.doc, at.position, ct).ConfigureAwait(false);
+        if (s == null) return result;
+        result.Signatures = s.Signatures.Select(x => new SignatureHelpSignatureDto { Label = x.Label, Documentation = x.Documentation, Parameters = x.Parameters.Select(q => new SignatureHelpParameterDto { Label = q.Label, Documentation = q.Documentation }).ToList() }).ToList();
+        result.ActiveSignature = s.ActiveSignature;
+        result.ActiveParameter = s.ActiveParameter;
         return result;
     }
 

@@ -1023,6 +1023,45 @@ public sealed class ConstructorActionsResultDto
     public string SnapshotId { get; set; } = "";
 }
 
+/// <summary>code/hover and code/signatureHelp (protocol 1.23): a position of a C# (or .razor) document.</summary>
+public sealed class EditorPositionParams : WorkspaceParams
+{
+    public string SnapshotId { get; set; } = "";
+    public string Uri { get; set; } = "";
+    public PositionDto Position { get; set; } = new();
+}
+
+public sealed class HoverResultDto
+{
+    /// <summary>The C# signature line (shown as code).</summary>
+    public string? Signature { get; set; }
+    /// <summary>Text sections: documentation, type parameters, exceptions…</summary>
+    public List<string> Sections { get; set; } = new();
+    public RangeDto? Range { get; set; }
+    public string SnapshotId { get; set; } = "";
+}
+
+public sealed class SignatureHelpParameterDto
+{
+    public string Label { get; set; } = "";
+    public string? Documentation { get; set; }
+}
+
+public sealed class SignatureHelpSignatureDto
+{
+    public string Label { get; set; } = "";
+    public string? Documentation { get; set; }
+    public List<SignatureHelpParameterDto> Parameters { get; set; } = new();
+}
+
+public sealed class SignatureHelpResultDto
+{
+    public List<SignatureHelpSignatureDto> Signatures { get; set; } = new();
+    public int ActiveSignature { get; set; }
+    public int ActiveParameter { get; set; }
+    public string SnapshotId { get; set; } = "";
+}
+
 /// <summary>code/completion (protocol 1.22): editor completion at a position of a C# document.</summary>
 public sealed class CompletionParams : WorkspaceParams
 {
