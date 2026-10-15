@@ -429,5 +429,32 @@ exports.cases = ({ api, csharp, waitFor }) => {
         await revertAll();
       },
     ],
+    [
+      'Ctrl+Click (Go to Definition): a method call opens its body; an interface member opens its implementations; Ctrl+F12 too',
+      async () => {
+        await api();
+        const uri = lib('ChangeSignature/Greeter.cs');
+        const doc = await vscode.workspace.openTextDocument(uri);
+        const text = doc.getText();
+        const lineOf = (needle) => doc.positionAt(text.indexOf(needle)).line;
+        const def = async (needle, offset) => {
+          const pos = doc.positionAt(text.indexOf(needle) + offset);
+          const r = await vscode.commands.executeCommand('vscode.executeDefinitionProvider', uri, pos);
+          return (r ?? []).map((l) => (l.targetUri ?? l.uri).path.split('/').pop() + ':' + (l.targetRange ?? l.range).start.line);
+        };
+        // new Greeter().Greet(...) → Greeter.Greet (its body).
+        const concrete = await def('new Greeter().Greet', 'new Greeter().'.length + 1);
+        assert.deepEqual(concrete, [`Greeter.cs:${lineOf('public virtual string Greet')}`], JSON.stringify(concrete));
+        // greeter.Greet(...) on IGreeter → the implementations (Greeter and the LoudGreeter override).
+        const iface = await def('greeter.Greet("a"', 'greeter.'.length + 1);
+        assert.ok(iface.includes(`Greeter.cs:${lineOf('public virtual string Greet')}`), JSON.stringify(iface));
+        assert.ok(!iface.includes(`Greeter.cs:${lineOf('string Greet(string name, int times);')}`), 'not the interface declaration');
+        // new Greeter() → the class.
+        const type = await def('new Greeter()', 'new '.length + 1);
+        assert.deepEqual(type, [`Greeter.cs:${lineOf('public class Greeter')}`], JSON.stringify(type));
+        const impl = await vscode.commands.executeCommand('vscode.executeImplementationProvider', uri, doc.positionAt(text.indexOf('public interface IGreeter') + 'public interface '.length + 1));
+        assert.ok(impl.some((l) => (l.targetRange ?? l.range).start.line === lineOf('public class Greeter')), JSON.stringify(impl));
+      },
+    ],
   ];
 };

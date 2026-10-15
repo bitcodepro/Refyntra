@@ -2535,6 +2535,11 @@
           "default": true,
           "markdownDescription": "When a git branch is checked out, its task context becomes active (one named after the branch is created the first time). Nothing is closed, deleted or emptied."
         },
+        "refyntra.navigation.goToDefinition": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Ctrl+Click, F12 (Go to Definition) and Ctrl+F12 (Go to Implementation) in C#: a method or class opens its source, an interface or abstract member opens its implementations, a library symbol its decompiled source. Not used while the C# extension (`ms-dotnettools.csharp`) is installed, which has its own."
+        },
         "refyntra.liveTemplates.enabled": {
           "type": "boolean",
           "default": true,

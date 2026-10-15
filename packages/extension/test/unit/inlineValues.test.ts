@@ -98,6 +98,24 @@ describe('inline values in top-level programs', () => {
     expect(inlineValueEntries(PROGRAM, 4).map((x) => `${x.line}:${x.name}`)).toEqual(['2:greeting', '3:count']);
     expect(inlineValueEntries(PROGRAM, 5).map((x) => `${x.line}:${x.name}`)).toEqual(['2:greeting', '3:count', '5:count']);
   });
+  it('shows the fields an if condition reads on the stopped line, never a call', () => {
+    const lines = [
+      'class W',
+      '{',
+      '    private bool HideToTrayInsteadOfClosing()',
+      '    {',
+      '        if (_quitRequested || _viewModel is not { KeepInTray: true } || this.Tray is null || _store.Load() != null)',
+      '        {',
+      '            return false;',
+      '        }',
+      '    }',
+      '}',
+    ];
+    const e = inlineValueEntries(lines, 4);
+    expect(e.map((x) => x.expression ?? x.name)).toEqual(['_quitRequested', '_viewModel', 'this.Tray', '_store']);
+    expect(e.every((x) => x.line === 4)).toBe(true);
+  });
+
   it('returns nothing inside a type of a file-scoped namespace without a method', () => {
     expect(inlineValueEntries(['namespace A;', 'class B', '{', '    int x = 1;', '}'], 3)).toEqual([]);
   });

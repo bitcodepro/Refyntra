@@ -36,9 +36,9 @@ export interface NavigateInputs {
 
 const TYPE_KINDS = new Set(['class', 'record', 'struct', 'interface', 'enum', 'delegate']);
 
-const group = (groups: readonly RelationGroupView[], name: string): MergedRelation[] => groups.find((g) => g.group === name)?.relations ?? [];
+export const group = (groups: readonly RelationGroupView[], name: string): MergedRelation[] => groups.find((g) => g.group === name)?.relations ?? [];
 
-const located = (relations: readonly MergedRelation[]): Location[] => dedupe(relations.map((r) => relationLocation(r)).filter((l): l is Location => !!l));
+export const located = (relations: readonly MergedRelation[]): Location[] => dedupe(relations.map((r) => relationLocation(r)).filter((l): l is Location => !!l));
 
 function dedupe(locations: readonly Location[]): Location[] {
   const seen = new Set<string>();

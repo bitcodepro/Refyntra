@@ -82,7 +82,7 @@ const common = [
     },
   ],
   [
-    'does not register Definition/Rename providers and contributes no default keybindings',
+    'contributes no default keybindings (only the opt-in presets) and limited support in untrusted workspaces',
     async () => {
       const pkg = vscode.extensions.getExtension('refyntra.refyntra').packageJSON;
       for (const kb of pkg.contributes.keybindings) assert.match(kb.when, /config\.refyntra\.keybindings\.preset == '(visualStudio|resharper)'/);

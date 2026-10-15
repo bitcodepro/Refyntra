@@ -196,6 +196,8 @@ export function inlineValueEntries(lines: readonly string[], stoppedLine: number
   const tupleRe = /\b(?:var\s*)?\(([^()]*)\)\s*=[^=>]/g;
   const assignRe = new RegExp(`(?<![.\\w])(this\\.)?(${IDENT})\\s*(?:[+\\-*/%&|^]|\\?\\?|<<|>>)?=(?![=>])|(?<![.\\w])(this\\.)?(${IDENT})\\s*(?:\\+\\+|--)|(?:\\+\\+|--)(this\\.)?(${IDENT})\\b`, 'g');
   const usedParamRe = new RegExp(`(?<![.\\w])(${IDENT})\\b`, 'g');
+  // A field read: `_name` / `m_name` or `this.Member`, not called (`(`) and not assigned (assignments are found above).
+  const fieldReadRe = /(?<![.\w])(this\.)?((?:_|m_)\w*|(?<=this\.)[A-Za-z_]\w*)\b(?!\s*\()(?!\s*(?:[-+*/%&|^]|\?\?|<<|>>)?=(?!=))/g;
 
   for (let l = headerEnd; l <= stoppedLine && l < masked.length; l++) {
     if (topLevel && /^\s*(using|global\s+using)\b/.test(masked[l]!)) continue;
@@ -227,6 +229,14 @@ export function inlineValueEntries(lines: readonly string[], stoppedLine: number
       if (isThis) add(l, col, name, 'expression', `this.${name}`);
       else if (locals.has(name)) add(l, col, name, 'lookup');
       else if (!/^[A-Z]/.test(name) || /^_/.test(name)) add(l, col, name, 'expression', name); // a field (implicit this)
+    }
+    // Fields read on the line (an `if` condition, an argument): `_name`, `this.Name`.
+    if (l > headerEnd || topLevel) {
+      for (const m of text.matchAll(fieldReadRe)) {
+        const name = m[2]!;
+        if (locals.has(name) || KEYWORDS.has(name)) continue;
+        add(l, offset + m.index!, name, 'expression', m[1] ? `this.${name}` : name);
+      }
     }
     // Parameters and known locals that appear on later lines (Rider shows them on the line where they are used last).
     if (l > headerEnd || topLevel) {
