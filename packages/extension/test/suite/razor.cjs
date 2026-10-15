@@ -87,5 +87,24 @@ exports.cases = ({ api, waitFor }) => {
         }
       },
     ],
+    [
+      'live templates: "fore" in a C# method offers the foreach template; accepting it inserts the loop',
+      async () => {
+        const svc = await vscode.workspace.openTextDocument(file('Services/CounterService.cs'));
+        const editor = await vscode.window.showTextDocument(svc);
+        const at = svc.positionAt(svc.getText().indexOf('public void Increment'));
+        await editor.edit((e) => e.insert(at, 'fore'));
+        try {
+          const pos = at.translate(0, 4);
+          const list = await vscode.commands.executeCommand('vscode.executeCompletionItemProvider', svc.uri, pos);
+          const item = list.items.find((i) => (typeof i.label === 'string' ? i.label : i.label.label) === 'foreach' && i.kind === vscode.CompletionItemKind.Snippet);
+          assert.ok(item, JSON.stringify(list.items.slice(0, 20).map((i) => i.label)));
+          assert.ok(item.insertText.value.startsWith('foreach (var ${1:item} in ${2:collection})'), item.insertText.value);
+          assert.ok(!list.items.some((i) => (typeof i.label === 'string' ? i.label : i.label.label) === 'prop' && i.kind === vscode.CompletionItemKind.Snippet), 'only templates starting with the typed word');
+        } finally {
+          await vscode.commands.executeCommand('workbench.action.files.revert');
+        }
+      },
+    ],
   ];
 };

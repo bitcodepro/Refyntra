@@ -2525,6 +2525,11 @@
           "default": true,
           "markdownDescription": "Show values of C# locals, parameters and assigned fields after the lines of the stopped method (up to the stopped line) while debugging with `refyntra-dotnet`. Only names and `this.member` are evaluated (watch context), never method calls; netcoredbg may run property getters. VS Code shows them when `#debug.inlineValues#` is `auto` (the default, which uses language providers like this one) or `on`."
         },
+        "refyntra.liveTemplates.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Offer Refyntra's C# live templates (`prop`, `ctor`, `foreach`, `try`, `fact`, `theory`, `testm`, `mapget`…) in completion. They are not offered while the C# extension (`ms-dotnettools.csharp`) is installed, which has its own snippets."
+        },
         "refyntra.tests.vstestServer": {
           "type": "boolean",
           "default": true,

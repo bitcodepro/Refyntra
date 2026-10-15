@@ -1,0 +1,219 @@
+{
+  "Property": {
+    "prefix": "prop",
+    "description": "Auto-implemented property (Refyntra)",
+    "body": ["public ${1:int} ${2:Name} { get; set; }$0"]
+  },
+  "Property, get only": {
+    "prefix": "propg",
+    "description": "Get-only auto property (Refyntra)",
+    "body": ["public ${1:int} ${2:Name} { get; }$0"]
+  },
+  "Property, init": {
+    "prefix": "propi",
+    "description": "Init-only auto property (Refyntra)",
+    "body": ["public ${1:int} ${2:Name} { get; init; }$0"]
+  },
+  "Required property": {
+    "prefix": "propr",
+    "description": "Required init-only property (Refyntra)",
+    "body": ["public required ${1:string} ${2:Name} { get; init; }$0"]
+  },
+  "Property with backing field": {
+    "prefix": "propfull",
+    "description": "Property with a backing field (Refyntra)",
+    "body": [
+      "private ${1:int} ${2:_name};",
+      "",
+      "public $1 ${3:Name}",
+      "{",
+      "\tget => $2;",
+      "\tset => $2 = value;",
+      "}$0"
+    ]
+  },
+  "Constructor": {
+    "prefix": "ctor",
+    "description": "Constructor (Refyntra)",
+    "body": ["public ${1:${TM_FILENAME_BASE}}($2)", "{", "\t$0", "}"]
+  },
+  "Class": {
+    "prefix": "class",
+    "description": "Class (Refyntra)",
+    "body": ["public ${1|class,sealed class,abstract class,static class|} ${2:${TM_FILENAME_BASE}}", "{", "\t$0", "}"]
+  },
+  "Interface": {
+    "prefix": "interface",
+    "description": "Interface (Refyntra)",
+    "body": ["public interface ${1:I${TM_FILENAME_BASE}}", "{", "\t$0", "}"]
+  },
+  "Record": {
+    "prefix": "record",
+    "description": "Positional record (Refyntra)",
+    "body": ["public ${1|sealed record,record,record struct,readonly record struct|} ${2:${TM_FILENAME_BASE}}(${3:string Name});$0"]
+  },
+  "Enum": {
+    "prefix": "enum",
+    "description": "Enum (Refyntra)",
+    "body": ["public enum ${1:${TM_FILENAME_BASE}}", "{", "\t${2:None},", "\t$0", "}"]
+  },
+  "Method": {
+    "prefix": "method",
+    "description": "Method (Refyntra)",
+    "body": ["${1|public,private,internal,protected|} ${2:void} ${3:Name}($4)", "{", "\t$0", "}"]
+  },
+  "Async method": {
+    "prefix": "amethod",
+    "description": "Async method returning Task (Refyntra)",
+    "body": ["${1|public,private,internal,protected|} async ${2:Task} ${3:NameAsync}(${4:CancellationToken cancellationToken = default})", "{", "\t$0", "}"]
+  },
+  "Main": {
+    "prefix": "svm",
+    "description": "static void Main (Refyntra)",
+    "body": ["static void Main(string[] args)", "{", "\t$0", "}"]
+  },
+  "Console.WriteLine": {
+    "prefix": "cw",
+    "description": "Console.WriteLine (Refyntra)",
+    "body": ["Console.WriteLine($1);$0"]
+  },
+  "if": {
+    "prefix": "if",
+    "description": "if statement (Refyntra)",
+    "body": ["if (${1:condition})", "{", "\t$0", "}"]
+  },
+  "else": {
+    "prefix": "else",
+    "description": "else block (Refyntra)",
+    "body": ["else", "{", "\t$0", "}"]
+  },
+  "for": {
+    "prefix": "for",
+    "description": "for loop (Refyntra)",
+    "body": ["for (var ${1:i} = 0; $1 < ${2:length}; $1++)", "{", "\t$0", "}"]
+  },
+  "reverse for": {
+    "prefix": "forr",
+    "description": "Reverse for loop (Refyntra)",
+    "body": ["for (var ${1:i} = ${2:length} - 1; $1 >= 0; $1--)", "{", "\t$0", "}"]
+  },
+  "foreach": {
+    "prefix": "foreach",
+    "description": "foreach loop (Refyntra)",
+    "body": ["foreach (var ${1:item} in ${2:collection})", "{", "\t$0", "}"]
+  },
+  "while": {
+    "prefix": "while",
+    "description": "while loop (Refyntra)",
+    "body": ["while (${1:condition})", "{", "\t$0", "}"]
+  },
+  "do while": {
+    "prefix": "do",
+    "description": "do-while loop (Refyntra)",
+    "body": ["do", "{", "\t$0", "} while (${1:condition});"]
+  },
+  "switch": {
+    "prefix": "switch",
+    "description": "switch statement (Refyntra)",
+    "body": ["switch (${1:value})", "{", "\tcase ${2:0}:", "\t\t$0", "\t\tbreak;", "\tdefault:", "\t\tbreak;", "}"]
+  },
+  "switch expression": {
+    "prefix": "switche",
+    "description": "switch expression (Refyntra)",
+    "body": ["${1:value} switch", "{", "\t${2:pattern} => ${3:result},", "\t_ => ${4:throw new ArgumentOutOfRangeException(nameof($1))},", "}$0"]
+  },
+  "try catch": {
+    "prefix": "try",
+    "description": "try / catch (Refyntra)",
+    "body": ["try", "{", "\t$1", "}", "catch (${2:Exception} ${3:ex})", "{", "\t$0", "}"]
+  },
+  "try finally": {
+    "prefix": "tryf",
+    "description": "try / finally (Refyntra)",
+    "body": ["try", "{", "\t$1", "}", "finally", "{", "\t$0", "}"]
+  },
+  "using statement": {
+    "prefix": "using",
+    "description": "using declaration (Refyntra)",
+    "body": ["using var ${1:resource} = ${2:new MemoryStream()};$0"]
+  },
+  "lock": {
+    "prefix": "lock",
+    "description": "lock statement (Refyntra)",
+    "body": ["lock (${1:_gate})", "{", "\t$0", "}"]
+  },
+  "throw ArgumentNullException": {
+    "prefix": "thrownull",
+    "description": "ArgumentNullException.ThrowIfNull (Refyntra)",
+    "body": ["ArgumentNullException.ThrowIfNull(${1:value});$0"]
+  },
+  "NotImplementedException": {
+    "prefix": "nie",
+    "description": "throw new NotImplementedException() (Refyntra)",
+    "body": ["throw new NotImplementedException();$0"]
+  },
+  "region": {
+    "prefix": "region",
+    "description": "#region (Refyntra)",
+    "body": ["#region ${1:Name}", "", "$0", "", "#endregion"]
+  },
+  "xUnit Fact": {
+    "prefix": "fact",
+    "description": "xUnit [Fact] test (Refyntra)",
+    "body": ["[Fact]", "public ${1|void,async Task|} ${2:Method_Scenario_Result}()", "{", "\t// Arrange", "\t$0", "", "\t// Act", "", "\t// Assert", "}"]
+  },
+  "xUnit Theory": {
+    "prefix": "theory",
+    "description": "xUnit [Theory] with [InlineData] (Refyntra)",
+    "body": ["[Theory]", "[InlineData(${1:1})]", "public void ${2:Method_Scenario_Result}(${3:int value})", "{", "\t$0", "}"]
+  },
+  "NUnit Test": {
+    "prefix": "ntest",
+    "description": "NUnit [Test] (Refyntra)",
+    "body": ["[Test]", "public ${1|void,async Task|} ${2:Method_Scenario_Result}()", "{", "\t$0", "}"]
+  },
+  "NUnit TestCase": {
+    "prefix": "ntestcase",
+    "description": "NUnit [TestCase] (Refyntra)",
+    "body": ["[TestCase(${1:1})]", "public void ${2:Method_Scenario_Result}(${3:int value})", "{", "\t$0", "}"]
+  },
+  "MSTest TestMethod": {
+    "prefix": "testm",
+    "description": "MSTest [TestMethod] (Refyntra)",
+    "body": ["[TestMethod]", "public ${1|void,async Task|} ${2:Method_Scenario_Result}()", "{", "\t$0", "}"]
+  },
+  "MSTest DataRow": {
+    "prefix": "datarow",
+    "description": "MSTest [DataRow] test (Refyntra)",
+    "body": ["[TestMethod]", "[DataRow(${1:1})]", "public void ${2:Method_Scenario_Result}(${3:int value})", "{", "\t$0", "}"]
+  },
+  "Minimal API endpoint": {
+    "prefix": "mapget",
+    "description": "app.MapGet endpoint (Refyntra)",
+    "body": ["app.Map${1|Get,Post,Put,Delete,Patch|}(\"/${2:items}\", ${3:() => Results.Ok()});$0"]
+  },
+  "Controller action": {
+    "prefix": "action",
+    "description": "ASP.NET Core controller action (Refyntra)",
+    "body": ["[Http${1|Get,Post,Put,Delete|}(\"${2:{id}}\")]", "public async Task<IActionResult> ${3:Get}(${4:int id})", "{", "\t$0", "\treturn Ok();", "}"]
+  },
+  "ILogger field": {
+    "prefix": "logger",
+    "description": "Injected ILogger<T> (Refyntra)",
+    "body": ["private readonly ILogger<${1:${TM_FILENAME_BASE}}> _logger;$0"]
+  },
+  "Dispose pattern": {
+    "prefix": "dispose",
+    "description": "IDisposable implementation (Refyntra)",
+    "body": [
+      "private bool _disposed;",
+      "",
+      "public void Dispose()",
+      "{",
+      "\tif (_disposed) return;",
+      "\t_disposed = true;",
+      "\t$0",
+      "}"
+    ]
+  }
+}
