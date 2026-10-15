@@ -1616,6 +1616,7 @@ scenarios.cleanup = require('./cleanup.cjs').cases({ api, csharp, waitFor });
 // Safe Delete, Extract Method, Change Signature (test/suite/codeRefactor.cjs).
 scenarios['code-refactor'] = require('./codeRefactor.cjs').cases({ api, csharp, waitFor });
 scenarios.razor = require('./razor.cjs').cases({ api, csharp, waitFor });
+scenarios['blazor-wasm'] = require('./blazorWasm.cjs').cases({ api, csharp, waitFor });
 // Stack trace navigation (test/suite/stackTrace.cjs).
 scenarios['stack-trace'] = require('./stackTrace.cjs').cases({ api, csharp, waitFor });
 // Frontend ↔ backend HTTP links (test/suite/fullStack.cjs).

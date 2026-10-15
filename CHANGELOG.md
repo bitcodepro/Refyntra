@@ -13,6 +13,9 @@ All notable changes are listed here. The project is alpha; nothing has been rele
 - **Tests**: one data row runs alone (vstest.console server mode; Microsoft Testing Platform server mode for xUnit v3 and
   MSTest.Sdk).
 - **Inline Method across files** (previewed plan) and **Immediate window completions** from Roslyn.
+- **Blazor WebAssembly** runs (development server, browser URL) and debugs in Edge / Chrome through VS Code's JavaScript
+  debugger and the app's debugging proxy.
+- **C# live templates** in completion; **task context** per git branch and shared in `.refyntra/task-contexts`.
 
 ### Added (debugger)
 

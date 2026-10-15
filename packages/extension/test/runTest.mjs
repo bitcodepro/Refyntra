@@ -417,6 +417,8 @@ const scenarios = visual
       // Run and Debug on a temp copy of the Runnable fixture, every other extension disabled: the bundled netcoredbg
       // (breakpoint, locals, exit code) and debugpy (system Python), a web app run with its launch profile.
       { name: 'run-debug', fixtureCopy: ['Runnable', 'Runnable.sln'], trusted: true, env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' } },
+      // Blazor WebAssembly: Run (development server, browser URL) and Debug (js-debug browser session through the debugging proxy).
+      { name: 'blazor-wasm', fixtureCopy: ['BlazorWasm', 'BlazorWasm.sln'], trusted: true, env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' } },
       // Solution Explorer, project operations, NuGet from a local feed, csproj editing (test/suite/solution.cjs, ADR-013).
       { name: 'solution', fixtureCopy: ['Explorer', 'Explorer.sln'], removeAfterCopy: ['Explorer.slnx'], trusted: true, settings: { 'files.autoSave': 'off' }, env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' } },
       // Test runner on a temp copy of the TestRunner fixture (xUnit, NUnit, MSTest), every other extension disabled:

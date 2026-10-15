@@ -42,6 +42,8 @@ import {
   targetForFile,
   validateDotnetConfiguration,
   validatePythonConfiguration,
+  isWebKind,
+  blazorWasmBrowserConfiguration,
 } from './runModel';
 
 // Run and Debug (ADR-008): Refyntra runs and debugs projects itself, with no other extension. .NET: the bundled Samsung
@@ -280,6 +282,8 @@ type TreeNode = { kind: 'group'; label: string; targets: RunTarget[] } | { kind:
 export interface RunTestHooks {
   pick?: <T extends vscode.QuickPickItem>(items: T[], title: string) => Promise<T | undefined>;
   openedUrls: string[];
+  /** Blazor WebAssembly: the browser debug configurations started (tests: no browser in CI). */
+  browserDebugConfigurations: Record<string, unknown>[];
   debugExitCodes: Map<string, number>;
 }
 
@@ -296,7 +300,7 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
   private refreshTimer: NodeJS.Timeout | undefined;
   readonly sessions = new Map<string, RunSession>();
   private readonly terminals = new Map<string, ProcessTerminal>();
-  readonly hooks: RunTestHooks = { openedUrls: [], debugExitCodes: new Map() };
+  readonly hooks: RunTestHooks = { openedUrls: [], browserDebugConfigurations: [], debugExitCodes: new Map() };
   readonly debuggers: DebuggerLocator;
 
   constructor(
@@ -587,7 +591,7 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
       return undefined;
     }
     const profile = r.target.dotnet?.profiles.find((p) => p.name === r.choice.profile);
-    const browser = r.target.dotnet?.project.kind === 'web' && profile?.launchBrowser ? profile : undefined;
+    const browser = isWebKind(r.target.dotnet?.project.kind) && profile?.launchBrowser ? profile : undefined;
     const steps = this.runSteps(r.target, r.choice, watch);
     if (watch && r.target.language === 'dotnet') steps[0] = { ...steps[0]!, args: watchArgs(steps[0]!.args, rudeEditPolicy()) };
     return this.startSession(r.target, steps, `${watch ? 'Watch' : 'Run'}: ${r.target.label}`, browser ? (url) => this.openBrowser(browserUrl(browser, url)) : undefined, watch && r.target.language === 'dotnet');
@@ -700,10 +704,32 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
     if (!this.requireTrust('build or debug projects')) return false;
     const r = await this.resolveTarget(arg);
     if (!r) return false;
+    if (r.target.dotnet?.project.kind === 'blazor-wasm') return this.debugBlazorWasm(r.target, r.choice);
     const cfg = this.debugConfiguration(r.target, r.choice);
     if (!cfg) return false;
     const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(r.target.cwd)) ?? vscode.workspace.workspaceFolders?.[0];
     return vscode.debug.startDebugging(folder, cfg);
+  }
+
+  /**
+   * Blazor WebAssembly: the C# runs in the browser, so netcoredbg is not involved. The development server starts like
+   * Run (`dotnet run`); when it listens, VS Code's built-in JavaScript debugger opens the app in Edge / Chrome and
+   * debugs its C# through the app's debugging proxy (inspectUri). Stopping the browser session leaves the server running.
+   */
+  async debugBlazorWasm(t: RunTarget, choice: RunChoice): Promise<boolean> {
+    const profile = t.dotnet!.profiles.find((p) => p.name === choice.profile) ?? t.dotnet!.profiles[0];
+    const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(t.cwd)) ?? vscode.workspace.workspaceFolders?.[0];
+    const projectDir = t.dotnet!.projectPath.replace(/[\\/][^\\/]+$/, '');
+    let started = false;
+    await this.startSession(t, this.runSteps(t, choice, false), `Debug: ${t.label}`, (url) => {
+      if (started) return;
+      started = true;
+      const cfg = blazorWasmBrowserConfiguration(browserUrl(profile, url) ?? url, profile, projectDir, process.platform);
+      this.hooks.browserDebugConfigurations.push(cfg);
+      if (this.context.extensionMode === vscode.ExtensionMode.Test) return; // no browser in CI; tests read the configuration
+      void vscode.debug.startDebugging(folder, cfg as vscode.DebugConfiguration);
+    });
+    return true;
   }
 
   /** The debug configuration of a target, or undefined with a message when it cannot be debugged here. */
@@ -806,7 +832,7 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
     item.description = `${t.kindLabel}${running ? ' · running' : ''}${selected ? ' · selected' : ''}`;
     item.tooltip = new vscode.MarkdownString(`**${t.label}** (${t.kindLabel})\n\n${t.cwd}${t.note ? `\n\n${t.note}` : ''}`);
     item.contextValue = !t.runnable ? 'refyntra.runTarget.unsupported' : running ? 'refyntra.runTarget.running' : 'refyntra.runTarget';
-    item.iconPath = new vscode.ThemeIcon(!t.runnable ? 'circle-slash' : running ? 'debug-stop' : t.language === 'dotnet' ? (t.dotnet?.project.kind === 'web' ? 'globe' : 'terminal') : t.language === 'node' ? 'json' : t.language === 'python' ? 'symbol-misc' : 'package');
+    item.iconPath = new vscode.ThemeIcon(!t.runnable ? 'circle-slash' : running ? 'debug-stop' : t.language === 'dotnet' ? (isWebKind(t.dotnet?.project.kind) ? 'globe' : 'terminal') : t.language === 'node' ? 'json' : t.language === 'python' ? 'symbol-misc' : 'package');
     item.accessibilityInformation = { label: `${t.label}, ${t.kindLabel}${running ? ', running' : ''}${!t.runnable ? `, not runnable: ${t.note ?? ''}` : ''}` };
     if (t.runnable) item.command = { command: 'refyntra.selectRunTargetById', title: 'Select', arguments: [t.id] };
     return item;

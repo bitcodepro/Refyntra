@@ -27,6 +27,32 @@ export interface LaunchProfile {
   launchBrowser: boolean;
   launchUrl?: string;
   workingDirectory?: string;
+  /** Blazor WebAssembly: the debugging proxy URL template of the profile (js-debug's inspectUri). */
+  inspectUri?: string;
+}
+
+/** Projects that serve web pages: ASP.NET Core apps and Blazor WebAssembly (its development server). */
+export function isWebKind(kind: string | undefined): boolean {
+  return kind === 'web' || kind === 'blazor-wasm';
+}
+
+/** The proxy of Blazor WebAssembly debugging (the template's default inspectUri). */
+export const BLAZOR_INSPECT_URI = '{wsProtocol}://{url.hostname}:{url.port}/_framework/debug/ws-proxy?browser={browserInspectUri}';
+
+/**
+ * A configuration for VS Code's built-in JavaScript debugger that opens the Blazor WebAssembly app in a browser and
+ * debugs its C# through the app's debugging proxy (Edge on Windows, Chrome elsewhere).
+ */
+export function blazorWasmBrowserConfiguration(url: string, profile: LaunchProfile | undefined, projectDir: string, platform: string): Record<string, unknown> {
+  return {
+    type: platform === 'win32' ? 'pwa-msedge' : 'pwa-chrome',
+    request: 'launch',
+    name: 'Refyntra: Blazor WebAssembly (browser)',
+    url,
+    inspectUri: profile?.inspectUri ?? BLAZOR_INSPECT_URI,
+    webRoot: `${projectDir.replace(/[\\/]$/, '')}/wwwroot`,
+    timeout: 60000,
+  };
 }
 
 export interface RunTarget {
@@ -89,6 +115,7 @@ export function parseLaunchSettings(text: string): LaunchProfile[] {
       launchBrowser: p.launchBrowser === true,
       ...(typeof p.launchUrl === 'string' && p.launchUrl.trim() ? { launchUrl: p.launchUrl.trim() } : {}),
       ...(typeof p.workingDirectory === 'string' && p.workingDirectory.trim() ? { workingDirectory: p.workingDirectory.trim() } : {}),
+      ...(typeof p.inspectUri === 'string' && p.inspectUri.trim() ? { inspectUri: p.inspectUri.trim() } : {}),
     });
   }
   return out;
@@ -279,7 +306,7 @@ export function dotnetDebugConfiguration(t: RunTarget, choice: RunChoice, platfo
   const rel = (p: string) => (workspaceFolder && p.toLowerCase().startsWith(workspaceFolder.toLowerCase()) ? `\${workspaceFolder}${p.slice(workspaceFolder.length).replace(/\\/g, '/')}` : p);
   const env: Record<string, string> = { ...(profile?.environmentVariables ?? {}) };
   if (profile?.applicationUrl && !env.ASPNETCORE_URLS) env.ASPNETCORE_URLS = profile.applicationUrl;
-  if (t.dotnet!.project.kind === 'web' && !env.ASPNETCORE_ENVIRONMENT) env.ASPNETCORE_ENVIRONMENT = 'Development';
+  if (isWebKind(t.dotnet!.project.kind) && !env.ASPNETCORE_ENVIRONMENT) env.ASPNETCORE_ENVIRONMENT = 'Development';
   const cwd = profile?.workingDirectory ?? dirOf(d.projectPath);
   const label = `${t.label}${profile && d.profiles.length > 1 ? ` (${profile.name})` : ''}${d.project.targetFrameworks.length > 1 ? ` [${fw}]` : ''}`;
   const cfg: DotnetDebugConfiguration = {
@@ -298,7 +325,7 @@ export function dotnetDebugConfiguration(t: RunTarget, choice: RunChoice, platfo
     justMyCode: true,
   };
   if (profile) cfg.launchProfile = profile.name;
-  if (d.project.kind === 'web') cfg.launchBrowser = { enabled: !!profile?.launchBrowser, ...(profile?.launchUrl ? { url: profile.launchUrl } : {}) };
+  if (isWebKind(d.project.kind)) cfg.launchBrowser = { enabled: !!profile?.launchBrowser, ...(profile?.launchUrl ? { url: profile.launchUrl } : {}) };
   return cfg;
 }
 

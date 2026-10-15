@@ -76,8 +76,9 @@ debugpy 1.8.22 (pure Python) is in every package; netcoredbg 3.2.0-1092 only whe
 | universal | yes | **no** | yes | 14.93 MiB |
 
 Where netcoredbg is missing, Health says ".NET debugging is unavailable on this platform" and Debug explains it; Run
-(`dotnet run`) still works. Windows Forms and WPF run and debug on Windows only. MAUI and Blazor WebAssembly are not run
-or debugged. Rust debugging needs an installed `lldb-dap` (not bundled). Verified 2026-10-12 in Docker (linux-x64,
+(`dotnet run`) still works. Windows Forms and WPF run and debug on Windows only. MAUI is not run or debugged. Blazor
+WebAssembly runs its development server and is debugged in Edge / Chrome by VS Code's JavaScript debugger (e2e scenario
+`blazor-wasm` checks the server, the browser URL and the debug configuration; no browser runs in CI). Rust debugging needs an installed `lldb-dap` (not bundled). Verified 2026-10-12 in Docker (linux-x64,
 VS Code 1.90.2, Xvfb): e2e scenario `run-debug` (netcoredbg breakpoint, locals, evaluate, exit code; web app on its
 profile URL; debugpy breakpoint with the system Python 3.12). Debugging on Windows, macOS and arm64 was not run.
 

@@ -726,7 +726,8 @@ the Run view, Run, Debug and Generate launch.json explain why nothing starts.
 | .NET console, web, worker apps | `dotnet run --project … [-f …] [--launch-profile …]` in a terminal; **Run with Hot Reload** = `dotnet watch run` | Bundled **netcoredbg** 3.2.0 (MIT, Samsung): build with `dotnet build`, then breakpoints, stepping, locals, watch expressions, exception breakpoints (`all`, `user-unhandled`), attach to a process. Not on win32-arm64, macOS Intel and Alpine (no official build): Run still works there |
 | Windows Forms, WPF | Windows only | Windows only (netcoredbg) |
 | Test projects | In VS Code's Test Explorer (see [Tests](#tests-test-explorer)) | Debug a test from the Test Explorer or its CodeLens |
-| .NET MAUI, Blazor WebAssembly | Not supported (listed with the reason) | — |
+| Blazor WebAssembly | `dotnet run` (the development server), the browser URL of the launch profile | VS Code's built-in JavaScript debugger: Edge (Windows) or Chrome opens the app and debugs its C# through the app's debugging proxy (`inspectUri`); breakpoints in `.razor` and `.cs` |
+| .NET MAUI | Not supported (listed with the reason) | — |
 | Python | `python <file>` with your interpreter (`python.defaultInterpreterPath`, a `.venv`/`venv`, or `python3`/`python` on PATH) | Bundled **debugpy** 1.8.22 (MIT), pure-Python parts; launch, `connect` attach. Attaching to a process id is not supported |
 | Rust | `cargo run --bin …` | Only with **lldb-dap** from an installed LLVM (detected, not bundled: CodeLLDB would add 45–56 MB per package) |
 | package.json scripts | `npm`/`pnpm`/`yarn run <script>` (package manager from the lock file) | VS Code's built-in JavaScript debugger: `node` launch of the script, and `msedge`/`chrome` on the dev-server URL (Vite, Next.js, CRA, Angular) |

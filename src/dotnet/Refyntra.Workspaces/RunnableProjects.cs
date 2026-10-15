@@ -95,7 +95,7 @@ public static class RunnableProjectDetector
         if (Prop("UseMaui") || Sdk("Microsoft.NET.Sdk.Maui"))
             return Make(RunnableKinds.Maui, false, ".NET MAUI apps need platform workloads, devices or emulators; Refyntra does not run or debug them.");
         if (Sdk("Microsoft.NET.Sdk.BlazorWebAssembly"))
-            return Make(RunnableKinds.BlazorWasm, false, "Blazor WebAssembly runs in the browser; Refyntra does not debug WebAssembly. Run the hosting server project instead.");
+            return Make(RunnableKinds.BlazorWasm, true);
         if (!exe && !web)
             return Make(RunnableKinds.Library, false, "Class library: nothing to start.");
         if (Prop("UseWPF") || Ref("presentationframework.dll"))

@@ -98,15 +98,16 @@ public sealed class RunnableClassifierTests
     }
 
     [Fact]
-    public void MauiAndBlazorWebAssemblyAreReportedAsUnsupported()
+    public void MauiIsReportedAsUnsupportedBlazorWebAssemblyRuns()
     {
         var maui = Classify("Desktop/MauiApp/MauiApp.csproj");
         Assert.Equal(RunnableKinds.Maui, maui.Kind);
         Assert.False(maui.Runnable);
         Assert.Contains("MAUI", maui.Reason);
+        // Blazor WebAssembly runs: the development server, the browser and VS Code's JavaScript debugger for debugging.
         var wasm = Classify("Desktop/BlazorClient/BlazorClient.csproj");
         Assert.Equal(RunnableKinds.BlazorWasm, wasm.Kind);
-        Assert.False(wasm.Runnable);
+        Assert.True(wasm.Runnable);
     }
 
     [Fact]
