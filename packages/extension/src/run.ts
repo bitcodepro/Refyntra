@@ -843,7 +843,8 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
       if (!this.isTrusted()) return [{ kind: 'message', text: 'Restricted Mode: Refyntra does not build or run projects until you trust the workspace.' }];
       const groups: TreeNode[] = [];
       const add = (label: string, lang: RunTarget['language']) => {
-        const ts = this.targetsCache.filter((t) => t.language === lang);
+        // Only what can start here: test projects (Test Explorer), libraries and apps of another OS are left out.
+        const ts = this.targetsCache.filter((t) => t.language === lang && t.runnable);
         if (ts.length) groups.push({ kind: 'group', label, targets: ts });
       };
       add('.NET', 'dotnet');

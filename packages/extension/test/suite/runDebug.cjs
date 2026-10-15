@@ -103,7 +103,7 @@ exports.cases = ({ api, csharp, waitFor }) => {
 
   return [
     [
-      'run: the host classifies the projects (console, web, worker, multi-target; tests not runnable; libraries left out)',
+      'run: the host classifies the projects (console, web, worker, multi-target; tests not runnable and not listed in the Run view; libraries left out)',
       async () => {
         const a = await ready();
         const ts = a.run.targets().filter((t) => t.language === 'dotnet');
@@ -119,6 +119,10 @@ exports.cases = ({ api, csharp, waitFor }) => {
         // The Run view lists them under .NET / Python.
         const groups = a.run.getChildren();
         assert.deepEqual(groups.map((g) => g.label), ['.NET', 'Python']);
+        // Only runnable targets are listed: the test project is not.
+        const dotnet = a.run.getChildren(groups[0]).map((n) => n.target.label);
+        assert.ok(!dotnet.includes('AppTests'), dotnet.join(', '));
+        assert.ok(dotnet.includes('ConsoleApp'), dotnet.join(', '));
         assert.match(a.run.statusBarText(), /^\$\(play\) /);
       },
     ],
