@@ -48,7 +48,7 @@ exports.cases = ({ api, csharp, waitFor }) => {
         assert.match(st.results[idOf(a, `|${p}.MatrixTests.Fails`)].message ?? '', /5|4/);
       },
     ]),
-    ...['XUnit3', 'NUnit4', 'MSTest4', 'MSTest2', 'XUnit3Mtp', 'MSTestSdk'].map((p) => [
+    ...['XUnit3', 'NUnit4', 'NUnit5', 'MSTest4', 'MSTest2', 'XUnit3Mtp', 'MSTestSdk'].map((p) => [
       `test-matrix: ${p} runs one data row alone (server mode)`,
       async () => {
         const a = await ready();
