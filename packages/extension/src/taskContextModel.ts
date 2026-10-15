@@ -73,7 +73,12 @@ export interface TaskContext {
   name: string;
   createdAt: number;
   items: TaskItem[];
+  /** The git branch this context follows (it becomes active when the branch is checked out). */
+  branch?: string;
 }
+
+/** Folder of the contexts shared through the repository (committed like any file, reviewed like code). */
+export const SHARED_TASK_CONTEXT_FOLDER = '.refyntra/task-contexts';
 
 export interface TaskContextStore {
   version: number;
@@ -217,7 +222,8 @@ export function parseContext(v: unknown): TaskContext | undefined {
     items.push(it);
     if (items.length >= TASK_CONTEXT_LIMITS.itemsPerContext) break;
   }
-  return { id, name, createdAt: num(v.createdAt) ?? 0, items };
+  const branch = str(v.branch, 250);
+  return { id, name, createdAt: num(v.createdAt) ?? 0, items, ...(branch ? { branch } : {}) };
 }
 
 export type LoadResult = { kind: 'ok'; store: TaskContextStore; dropped: number } | { kind: 'newer'; version: number };
@@ -302,6 +308,29 @@ export function deleteContext(store: TaskContextStore, id: string): TaskContextS
   const contexts = store.contexts.filter((c) => c.id !== id);
   const activeId = store.activeId === id ? contexts[0]?.id : store.activeId;
   return { version: store.version, ...(activeId ? { activeId } : {}), contexts };
+}
+
+/** The branch of a .git/HEAD file ("ref: refs/heads/feature/x" → "feature/x"); undefined for a detached HEAD. */
+export function branchOfHead(head: string): string | undefined {
+  const m = /^ref:\s*refs\/heads\/(.+?)\s*$/m.exec(head);
+  return m?.[1];
+}
+
+/**
+ * The context that follows `branch` becomes active; when there is none, a new one named after the branch is created
+ * for it (a context is never deleted or emptied by a branch switch).
+ */
+export function contextForBranch(store: TaskContextStore, branch: string, id: string, now: number): Mutation & { created?: boolean } {
+  const existing = store.contexts.find((c) => c.branch === branch);
+  if (existing) return { ok: true, store: switchContext(store, existing.id) };
+  const created = createContext(store, branch, id, now);
+  if (!created.ok) return created;
+  return { ok: true, created: true, store: { ...created.store, contexts: created.store.contexts.map((c) => (c.id === id ? { ...c, branch } : c)) } };
+}
+
+/** A file name for a shared context: the name with anything but letters, digits, '.', '-' and '_' replaced. */
+export function sharedFileName(name: string): string {
+  return `${name.replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'task'}.json`;
 }
 
 export function switchContext(store: TaskContextStore, id: string): TaskContextStore {

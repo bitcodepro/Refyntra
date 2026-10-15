@@ -257,5 +257,36 @@ exports.cases = ({ api, csharp, waitFor }) => {
         }
       },
     ],
+    [
+      'task context: shared in .refyntra/task-contexts; checking out a branch activates its own context (created once), switching back restores the first',
+      async () => {
+        const a = await ready();
+        const tc = a.taskContext;
+        const shared = await tc.share();
+        assert.ok(shared && fs.existsSync(shared.fsPath), 'written in the repository folder');
+        assert.match(shared.path, /\/\.refyntra\/task-contexts\/[^/]+\.json$/);
+        assert.equal((await tc.sharedFiles()).length, 1);
+        const git = path.join(root().fsPath, '.git');
+        fs.mkdirSync(git, { recursive: true });
+        const head = path.join(git, 'HEAD');
+        fs.writeFileSync(head, 'ref: refs/heads/main\n');
+        await new Promise((r) => setTimeout(r, 1500));
+        const before = tc.active().id;
+        try {
+          fs.writeFileSync(head, 'ref: refs/heads/feature/login\n');
+          await waitFor(() => tc.active()?.branch === 'feature/login', 'the context of feature/login active', 20000);
+          assert.equal(tc.active().name, 'feature/login');
+          fs.writeFileSync(head, 'ref: refs/heads/main\n');
+          await waitFor(() => tc.active()?.branch === 'main', 'the context of main active', 20000);
+          fs.writeFileSync(head, 'ref: refs/heads/feature/login\n');
+          await waitFor(() => tc.active()?.branch === 'feature/login', 'back on feature/login', 20000);
+          assert.equal(tc.store.contexts.filter((c) => c.branch === 'feature/login').length, 1, 'created once');
+          assert.ok(tc.store.contexts.some((c) => c.id === before), 'the earlier context is kept');
+        } finally {
+          fs.rmSync(git, { recursive: true, force: true });
+          fs.rmSync(path.join(root().fsPath, '.refyntra'), { recursive: true, force: true });
+        }
+      },
+    ],
   ];
 };

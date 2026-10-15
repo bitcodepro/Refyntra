@@ -10,6 +10,7 @@ import {
   type Mutation,
   type Resolution,
   type ResolutionStatus,
+  SHARED_TASK_CONTEXT_FOLDER,
   STATUS_WORD,
   TASK_CONTEXT_LIMITS,
   TASK_CONTEXT_STORAGE_KEY,
@@ -17,9 +18,11 @@ import {
   type TaskContextStore,
   type TaskItem,
   activeContext,
+  branchOfHead,
   addItem,
   clearItems,
   combineStatus,
+  contextForBranch,
   contextToMarkdown,
   createContext,
   decideEndpoint,
@@ -38,6 +41,7 @@ import {
   linesWithFingerprint,
   loadStore,
   moveItem,
+  sharedFileName,
   moveItemsTo,
   removeItem,
   renameContext,
@@ -634,8 +638,57 @@ export class TaskContextViewProvider implements vscode.TreeDataProvider<Node>, v
     return uri;
   }
 
+  /** Writes the active context to .refyntra/task-contexts/<name>.json in the workspace: shared with the team through the repository. */
+  async share(): Promise<vscode.Uri | undefined> {
+    const ctx = this.active();
+    const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
+    if (!ctx || !folder) {
+      this.say(ctx ? 'open a folder first.' : 'no task context is active.', 'warning');
+      return undefined;
+    }
+    const dir = vscode.Uri.joinPath(folder, ...SHARED_TASK_CONTEXT_FOLDER.split('/'));
+    await vscode.workspace.fs.createDirectory(dir);
+    const uri = await this.exportTo(vscode.Uri.joinPath(dir, sharedFileName(ctx.name)));
+    if (uri) this.say(`"${ctx.name}" is in ${SHARED_TASK_CONTEXT_FOLDER}; commit it to share it with your team (it holds file paths, symbol names and notes, no code).`);
+    return uri;
+  }
+
+  /** The contexts shared in the repository (.refyntra/task-contexts/*.json). */
+  async sharedFiles(): Promise<vscode.Uri[]> {
+    const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
+    if (!folder) return [];
+    const dir = vscode.Uri.joinPath(folder, ...SHARED_TASK_CONTEXT_FOLDER.split('/'));
+    try {
+      return (await vscode.workspace.fs.readDirectory(dir)).filter(([n, t]) => t === vscode.FileType.File && n.endsWith('.json')).map(([n]) => vscode.Uri.joinPath(dir, n));
+    } catch {
+      return [];
+    }
+  }
+
+  /** On a checkout: the context of the new branch becomes active (created for it when there is none). */
+  async followBranch(branch: string | undefined): Promise<void> {
+    if (!branch || !vscode.workspace.getConfiguration('refyntra').get<boolean>('taskContext.followBranch', true)) return;
+    const r = contextForBranch(this.store, branch, newId(), Date.now());
+    if (!r.ok || activeContext(r.store)?.id === this.store.activeId) return;
+    this.states.clear();
+    await this.apply(r);
+    this.schedule(0);
+  }
+
   async importFrom(source?: vscode.Uri): Promise<string[]> {
-    const uri = source ?? (await vscode.window.showOpenDialog({ title: 'Import Task Context', openLabel: 'Import', canSelectMany: false, filters: { JSON: ['json'] } }))?.[0];
+    let picked = source;
+    if (!picked) {
+      const shared = await this.sharedFiles();
+      if (shared.length) {
+        const choice = await vscode.window.showQuickPick(
+          [...shared.map((u) => ({ label: `$(repo) ${u.path.split('/').pop()}`, description: SHARED_TASK_CONTEXT_FOLDER, uri: u as vscode.Uri | undefined })), { label: '$(folder-opened) Browse…', description: 'another file', uri: undefined }],
+          { title: 'Import Task Context' },
+        );
+        if (!choice) return [];
+        picked = choice.uri;
+      }
+    }
+    const uri = picked ?? (await vscode.window.showOpenDialog({ title: 'Import Task Context', openLabel: 'Import', canSelectMany: false, filters: { JSON: ['json'] } }))?.[0];
     if (!uri) return [];
     let text: string;
     try {
@@ -1019,6 +1072,29 @@ export function registerTaskContext(engine: EngineClient, memento: vscode.Mement
     cmd('export', () => provider.exportTo()),
     cmd('import', () => provider.importFrom()),
     cmd('refresh', () => provider.resolveNow()),
+    cmd('share', () => provider.share()),
   );
+  // Follow the git branch: .git/HEAD is read directly (no git extension needed).
+  const folder = vscode.workspace.workspaceFolders?.[0];
+  if (folder) {
+    const head = vscode.Uri.joinPath(folder.uri, '.git', 'HEAD');
+    let branch: string | undefined;
+    const read = async () => {
+      try {
+        return branchOfHead(new TextDecoder().decode(await vscode.workspace.fs.readFile(head)));
+      } catch {
+        return undefined;
+      }
+    };
+    void read().then((b) => (branch = b));
+    const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(folder, '.git/HEAD'));
+    const changed = async () => {
+      const next = await read();
+      if (next === branch) return;
+      branch = next;
+      await provider.followBranch(next);
+    };
+    return { provider, disposable: vscode.Disposable.from(disposable, watcher, watcher.onDidChange(() => void changed()), watcher.onDidCreate(() => void changed())) };
+  }
   return { provider, disposable };
 }

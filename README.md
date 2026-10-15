@@ -660,6 +660,11 @@ when a backend restarts and before an item is opened, each item is resolved agai
 
 Files follow renames and moves VS Code reports; endpoints are found again by HTTP method and route.
 
+**Per branch and shared.** When a git branch is checked out, its task context becomes active; the first time, one named
+after the branch is created (`refyntra.taskContext.followBranch`, on by default; nothing is closed, deleted or emptied).
+*Share Task Context in Repository* writes the active context to `.refyntra/task-contexts/<name>.json` in the workspace:
+commit it and the team gets it in *Import Task Context* (it holds file paths, symbol names, lines and notes, no code).
+
 **Privacy and limits.** Task contexts live in VS Code's workspace storage on this machine: never synced, never sent,
 no telemetry. Workspace files are stored relative to their folder. Limits: 50 contexts, 500 items per context, 2,000
 characters per note, about 1 MB in total; imports up to 2 MB. A rename outside Refyntra that also changes other lines
@@ -1172,6 +1177,7 @@ take a project out of Find, Rename and the other analyses.
 | `refyntra.taskContext.new` / `.switch` / `.rename` / `.delete` | Create, switch, rename or delete a named task context |
 | `refyntra.taskContext.addSymbol` / `.addFile` | Add the symbol at the cursor or a file to the active task context |
 | `refyntra.taskContext.copyMarkdown` / `.export` / `.import` / `.clear` / `.refresh` | Copy as Markdown, export or import JSON, clear, resolve again |
+| `refyntra.taskContext.share` | Write the active task context to `.refyntra/task-contexts/` to share it through the repository |
 | `refyntra.findHandler` / `refyntra.findEndpoint` / `refyntra.findRegistration` | Find, narrowed to handlers, endpoints or DI registrations (the same search as Find, with a preset filter) |
 | `refyntra.run` / `refyntra.debug` | Run without debugging / start debugging the selected run target (or the project of the file, the Run view item, the CodeLens) |
 | `refyntra.runWatch` | Run the selected .NET project with `dotnet watch run` (hot reload) |

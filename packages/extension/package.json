@@ -341,6 +341,11 @@
         "category": "Refyntra"
       },
       {
+        "command": "refyntra.taskContext.share",
+        "title": "Share Task Context in Repository",
+        "category": "Refyntra"
+      },
+      {
         "command": "refyntra.taskContext.refresh",
         "title": "Resolve Task Context Again",
         "category": "Refyntra",
@@ -2524,6 +2529,11 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Show values of C# locals, parameters and assigned fields after the lines of the stopped method (up to the stopped line) while debugging with `refyntra-dotnet`. Only names and `this.member` are evaluated (watch context), never method calls; netcoredbg may run property getters. VS Code shows them when `#debug.inlineValues#` is `auto` (the default, which uses language providers like this one) or `on`."
+        },
+        "refyntra.taskContext.followBranch": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "When a git branch is checked out, its task context becomes active (one named after the branch is created the first time). Nothing is closed, deleted or emptied."
         },
         "refyntra.liveTemplates.enabled": {
           "type": "boolean",
