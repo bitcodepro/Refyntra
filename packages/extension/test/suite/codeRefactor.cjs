@@ -536,5 +536,39 @@ exports.cases = ({ api, csharp, waitFor }) => {
         await waitFor(() => errors().length === 0, 'the error gone after the revert', 60000);
       },
     ],
+    [
+      'F2 rename in the editor uses the Refyntra plan (every call site, the interface too); Format Document fixes the layout',
+      async () => {
+        await api();
+        const uri = lib('ChangeSignature/Greeter.cs');
+        const doc = await vscode.workspace.openTextDocument(uri);
+        const text = doc.getText();
+        const pos = doc.positionAt(text.indexOf('public static string UseConcrete') + 'public static string '.length + 1);
+        const edit = await vscode.commands.executeCommand('vscode.executeDocumentRenameProvider', uri, pos, 'UseGreeter');
+        assert.ok(edit && edit.size >= 1, 'a workspace edit');
+        // Minimal edits ("Concrete" → "Greeter" after the common "Use"): applied to the text they rename the method.
+        let renamed = text;
+        for (const e of [...edit.get(uri)].sort((a, b) => doc.offsetAt(b.range.start) - doc.offsetAt(a.range.start)))
+          renamed = renamed.slice(0, doc.offsetAt(e.range.start)) + e.newText + renamed.slice(doc.offsetAt(e.range.end));
+        assert.ok(renamed.includes('public static string UseGreeter()'), renamed);
+        // Formatting: a badly laid out line is fixed.
+        const editor = await vscode.window.showTextDocument(doc);
+        const line = 'public static string UseConcrete() => new Greeter().Greet("c", 1);';
+        const start = text.indexOf(line);
+        await editor.edit((e) => e.replace(new vscode.Range(doc.positionAt(start), doc.positionAt(start + line.length)), 'public static string UseConcrete()=>new Greeter( ).Greet( "c",1 );'));
+        try {
+          const fmt = await waitFor(async () => {
+            const r = await vscode.commands.executeCommand('vscode.executeFormatDocumentProvider', uri, { tabSize: 4, insertSpaces: true });
+            return r && r.length ? r : undefined;
+          }, 'formatting edits', 60000);
+          const we = new vscode.WorkspaceEdit();
+          we.set(uri, fmt);
+          assert.ok(await vscode.workspace.applyEdit(we));
+          assert.ok(doc.getText().includes(line), doc.getText());
+        } finally {
+          await vscode.commands.executeCommand('workbench.action.files.revert');
+        }
+      },
+    ],
   ];
 };

@@ -308,6 +308,8 @@ export interface EngineClient {
   expressionCompletions?(uri: string, position: Position, text: string, caret: number, token?: CancellationToken): Promise<string[]>;
   /** Go to Definition: the symbol at the position (with its declaration) and, on request, its implementations. Cheap: no Related. */
   definition?(target: DocumentTarget, withImplementations: boolean, token?: CancellationToken): Promise<{ subject: import('@refyntra/contracts').SymbolRef; implementations: import('@refyntra/contracts').Location[] } | undefined>;
+  /** Formatting edits of a C# document or a range of it (protocol 1.25); undefined when not provided here. */
+  format?(uri: string, range?: import('@refyntra/contracts').Range, token?: CancellationToken): Promise<import('@refyntra/contracts').TextEditDto[] | undefined>;
   /** The compiler's diagnostics of a C# document (protocol 1.24); undefined when not provided here. */
   documentDiagnostics?(uri: string, token?: CancellationToken): Promise<import('@refyntra/contracts').CompilerDiagnostic[] | undefined>;
   /** Hover and signature help (protocol 1.23) of a C# / .razor document; undefined when not provided here. */
@@ -843,6 +845,18 @@ export class RefyntraEngine implements EngineClient {
     } catch (e) {
       if (e instanceof CancelledError) throw e;
       return this.toUnavailable(adapter, e);
+    }
+  }
+
+  async format(uri: string, range?: import('@refyntra/contracts').Range, token?: CancellationToken): Promise<import('@refyntra/contracts').TextEditDto[] | undefined> {
+    const adapter = this.o.registry.routeFor(uri);
+    if (!adapter || adapter.descriptor.ownership !== 'owned-semantic' || typeof adapter.format !== 'function') return undefined;
+    try {
+      const r = (await this.withStaleRetry(() => adapter.format!(uri, range, token), token)).value;
+      return r && !r.reasonCode ? r.edits : undefined;
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      return undefined;
     }
   }
 

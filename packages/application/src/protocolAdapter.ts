@@ -867,6 +867,15 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
     });
   }
 
+  /** Formatting edits (protocol 1.25); null for an older host. */
+  format(uri: string, range: import('@refyntra/contracts').Range | undefined, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').FormatResult | null>> {
+    return this.semantic('code/format', token, async (s, snapshotId, traceId) => {
+      if (s.protocolMinor < 25) return null;
+      const r = await s.transport.request('code/format', { traceId, workspaceId: this.opts.workspaceId, snapshotId, uri, ...(range ? { range } : {}) }, token);
+      return { edits: Array.isArray(r?.edits) ? r.edits : [], reasonCode: r?.reasonCode ?? null, snapshotId: r?.snapshotId ?? snapshotId };
+    });
+  }
+
   /** Compiler diagnostics of a document (protocol 1.24); null for an older host. */
   documentDiagnostics(uri: string, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').DocumentDiagnosticsResult | null>> {
     return this.semantic('code/diagnostics', token, async (s, snapshotId, traceId) => {

@@ -1023,6 +1023,21 @@ public sealed class ConstructorActionsResultDto
     public string SnapshotId { get; set; } = "";
 }
 
+/// <summary>code/format (protocol 1.25): the formatting edits of a C# document (a range of it, or all).</summary>
+public sealed class FormatParams : WorkspaceParams
+{
+    public string SnapshotId { get; set; } = "";
+    public string Uri { get; set; } = "";
+    public RangeDto? Range { get; set; }
+}
+
+public sealed class FormatResultDto
+{
+    public List<TextEditDto> Edits { get; set; } = new();
+    public string? ReasonCode { get; set; }
+    public string SnapshotId { get; set; } = "";
+}
+
 /// <summary>code/diagnostics (protocol 1.24): the compiler's errors and warnings of one C# document.</summary>
 public sealed class DocumentDiagnosticsParams : WorkspaceParams
 {

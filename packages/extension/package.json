@@ -2543,6 +2543,16 @@
           "default": true,
           "markdownDescription": "When a git branch is checked out, its task context becomes active (one named after the branch is created the first time). Nothing is closed, deleted or emptied."
         },
+        "refyntra.editor.rename": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "F2 (Rename Symbol) in C# uses Refyntra's rename plan (compile-checked; .razor, .cshtml and EF Core migrations included). Not used while the C# extension (`ms-dotnettools.csharp`) is installed."
+        },
+        "refyntra.editor.formatting": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Format Document / Format Selection / format on save for C# with Roslyn's formatter and the .editorconfig options. Not used while the C# extension (`ms-dotnettools.csharp`) is installed."
+        },
         "refyntra.editor.diagnostics": {
           "type": "boolean",
           "default": true,

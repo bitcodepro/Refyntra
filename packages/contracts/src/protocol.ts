@@ -34,8 +34,9 @@ export const PROTOCOL_MAJOR = 1;
  * 1.22: Editor completion (`code/completion`, `code/completionResolve`) from Roslyn's CompletionService.
  * 1.23: Hover (`code/hover`, Roslyn's QuickInfoService) and signature help (`code/signatureHelp`).
  * 1.24: Compiler diagnostics of a document (`code/diagnostics`).
+ * 1.25: Formatting (`code/format`: Roslyn's formatter with the .editorconfig options; a range or the document).
  */
-export const PROTOCOL_MINOR = 24;
+export const PROTOCOL_MINOR = 25;
 
 /** Zero-based line, UTF-16 code unit character. */
 export interface Position {
@@ -590,6 +591,19 @@ export interface FileStructureResult {
   /** "DocumentNotFound" when the document is not part of the loaded solution. */
   reasonCode?: string | null;
   completeness: 'complete' | 'partial' | 'unknown';
+  snapshotId: string;
+}
+
+/** code/format (protocol 1.25). */
+export interface FormatParams extends WorkspaceParams {
+  snapshotId: string;
+  uri: string;
+  range?: Range;
+}
+
+export interface FormatResult {
+  edits: TextEditDto[];
+  reasonCode?: string | null;
   snapshotId: string;
 }
 
@@ -1462,6 +1476,8 @@ export interface MethodMap {
   'solution/structure': [WorkspaceParams, SolutionStructureResult];
   /** Protocol 1.21. */
   'code/expressionCompletions': [ExpressionCompletionsParams, ExpressionCompletionsResult];
+  /** Protocol 1.25. */
+  'code/format': [FormatParams, FormatResult];
   /** Protocol 1.24. */
   'code/diagnostics': [DocumentDiagnosticsParams, DocumentDiagnosticsResult];
   /** Protocol 1.23. */

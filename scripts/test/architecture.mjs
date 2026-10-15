@@ -177,7 +177,7 @@ for (const pkg of Object.keys(RULES)) {
     const text = stripComments(fs.readFileSync(file, 'utf8'));
     const r = path.relative(repo, file);
     // The one exception: C# Go to Definition / Implementation (definition.ts), only active without the C# extension.
-    const definitionFile = r.split(path.sep).join('/') === 'packages/extension/src/definition.ts';
+    const definitionFile = ['packages/extension/src/definition.ts', 'packages/extension/src/editorEdits.ts'].includes(r.split(path.sep).join('/'));
     if (!definitionFile && /\blanguages\.register(Definition|Rename|Reference|Implementation|DocumentSymbol|WorkspaceSymbol|TypeDefinition|Declaration)Provider\s*\(/.test(text)) violations.push(`${r}: Refyntra must not register VS Code navigation/rename providers`);
     if (/['"]vscode-languageclient(\/[^'"]*)?['"]/.test(text)) violations.push(`${r}: vscode-languageclient must not be used (own LSP client in infrastructure)`);
     if (pkg !== 'infrastructure' && pkg !== 'extension' && r.split(path.sep).join('/') !== 'packages/web-frameworks/src/host/workerProcess.ts' && /['"](node:)?child_process['"]/.test(text)) violations.push(`${r}: only infrastructure (and the composition root's tasks) may start processes`);

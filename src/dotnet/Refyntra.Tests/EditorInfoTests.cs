@@ -71,4 +71,30 @@ public sealed class EditorInfoTests : IClassFixture<EditActionsFixture>
             await _f.Client.DidChangeAsync(Greeter, original, 3);
         }
     }
+
+    [Fact]
+    public async Task FormatFixesTheLayoutOfTheDocument()
+    {
+        var original = await File.ReadAllTextAsync(Greeter);
+        var edited = original.Replace("public static string UseConcrete() => new Greeter().Greet(\"c\", 1);", "public static string UseConcrete()=>new Greeter( ).Greet( \"c\",1 );");
+        await _f.Client.DidOpenAsync(Greeter, original);
+        await _f.Client.DidChangeAsync(Greeter, edited);
+        try
+        {
+            var snap = await _f.Client.BarrierAsync();
+            var r = await _f.Client.RequestAsync("code/format", new { traceId = "t", workspaceId = _f.Client.WorkspaceId, snapshotId = snap, uri = UriPaths.ToUri(Greeter) });
+            var lines = edited.Replace("\r\n", "\n").Split('\n').ToList();
+            var text = edited.Replace("\r\n", "\n");
+            var starts = new List<int> { 0 };
+            for (var i = 0; i < text.Length; i++) if (text[i] == '\n') starts.Add(i + 1);
+            int Off(JsonElement p) => starts[p.GetProperty("line").GetInt32()] + p.GetProperty("character").GetInt32();
+            foreach (var e in r.GetProperty("edits").EnumerateArray().OrderByDescending(e => Off(e.GetProperty("range").GetProperty("start"))))
+                text = text[..Off(e.GetProperty("range").GetProperty("start"))] + e.GetProperty("newText").GetString() + text[Off(e.GetProperty("range").GetProperty("end"))..];
+            Assert.Contains("public static string UseConcrete() => new Greeter().Greet(\"c\", 1);", text);
+        }
+        finally
+        {
+            await _f.Client.DidChangeAsync(Greeter, original, 3);
+        }
+    }
 }
