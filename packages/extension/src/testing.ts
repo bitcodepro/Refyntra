@@ -9,7 +9,7 @@ import { type DebuggerLocator, buildDotnet, killTree, onPath } from './run';
 import { DOTNET_DEBUG_TYPE, PYTHON_DEBUG_TYPE } from './runModel';
 import { caseAsResult, splitCommandLine, toTrxResult, type VsTestCase, type VsTestProcessStartInfo } from './vstestProtocol';
 import { VsTestSession } from './vstestSession';
-import { mtpNodeAsResult, runMtpServer } from './mtpServer';
+import { MtpNotConnected, mtpNodeAsResult, runMtpServer } from './mtpServer';
 import {
   type JunitResult,
   type TestNode,
@@ -740,7 +740,38 @@ export class TestingService implements vscode.Disposable {
       return this.spawnForRun(run, 'dotnet', args, cwd, {}, token);
     }
     // Debug: netcoredbg launches the test application directly (attaching to an MTP application that waits for a
-    // debugger left its breakpoints pending in netcoredbg).
+    // debugger left its breakpoints pending in netcoredbg). In server mode it runs exactly the chosen nodes (one data
+    // row alone); an application without server mode is debugged from the command line with the filter.
+    if (this.useServer()) {
+      const serverId = ++this.runs;
+      const serverEnded = new Promise<void>((resolve) => {
+        const sub = vscode.debug.onDidTerminateDebugSession((s) => {
+          if (s.configuration.refyntraTestRun === serverId) {
+            sub.dispose();
+            resolve();
+          }
+        });
+      });
+      try {
+        const methods = this.dotnetMethods(project);
+        const wanted = new Set(items.map((i) => i.id));
+        const r = await runMtpServer(target, cwd, (nodes) => nodes.filter((n) => this.isWanted(mtpNodeAsResult(n), methods, wanted)), (l) => run.appendOutput(crlf(l)), token, 3600000, async (serverArgs) => {
+          const started = await vscode.debug.startDebugging(folder, { type: DOTNET_DEBUG_TYPE, request: 'launch', name: 'Refyntra: Debug tests', program: target, args: serverArgs, cwd, console: 'internalConsole', justMyCode: false, refyntraTestRun: serverId });
+          if (!started) throw new Error('the debug session did not start');
+        });
+        this.lastServerCases = r.chosen.length;
+        this.lastServerResults = r.results.length;
+        await Promise.race([serverEnded, new Promise((res) => setTimeout(res, 10000))]);
+        if (r.chosen.length > 0) return { code: 0, output: '', results: r.results.map(mtpNodeAsResult) };
+      } catch (e) {
+        if (token.isCancellationRequested) return undefined;
+        if (!(e instanceof MtpNotConnected)) {
+          for (const l of leaves) run.errored(l, new vscode.TestMessage(`The debug run failed: ${e instanceof Error ? e.message : String(e)}`));
+          return undefined;
+        }
+        run.appendOutput(crlf(`[Refyntra] server mode unavailable under the debugger (${e instanceof Error ? e.message : String(e)}); debugging from the command line\n`));
+      }
+    }
     const id = ++this.runs;
     const ended = new Promise<void>((resolve) => {
       const sub = vscode.debug.onDidTerminateDebugSession((s) => {

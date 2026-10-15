@@ -59,6 +59,9 @@ export function mtpNodeAsResult(n: MtpNode): TrxResult {
   return out;
 }
 
+/** The application never connected (it did not start, or has no server mode): the caller may use another way. */
+export class MtpNotConnected extends Error {}
+
 /**
  * Runs a Microsoft Testing Platform test application in server mode (`--server`, JSON-RPC over TCP): discovery returns
  * every test node — data rows included — and the run takes exactly the nodes chosen from them, so one data row runs
@@ -72,6 +75,8 @@ export function runMtpServer(
   log: (text: string) => void,
   cancel: { isCancellationRequested: boolean; onCancellationRequested(cb: () => void): unknown },
   timeoutMs = 600000,
+  /** Starts the application with these arguments instead of `dotnet exec` (debugging: netcoredbg launches it). */
+  starter?: (args: string[]) => Promise<void>,
 ): Promise<{ chosen: MtpNode[]; results: MtpNode[] }> {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
@@ -91,6 +96,15 @@ export function runMtpServer(
     server.once('error', (e) => done(e));
     server.listen(0, '127.0.0.1', () => {
       const port = (server.address() as net.AddressInfo).port;
+      if (starter) {
+        const connectTimer = setTimeout(() => done(new MtpNotConnected('the test application did not connect')), 120000);
+        server.once('connection', () => clearTimeout(connectTimer));
+        starter(['--server', '--client-host', '127.0.0.1', '--client-port', String(port)]).catch((e) => {
+          clearTimeout(connectTimer);
+          done(new MtpNotConnected(e instanceof Error ? e.message : String(e)));
+        });
+        return;
+      }
       child = spawn('dotnet', ['exec', target, '--server', '--client-host', '127.0.0.1', '--client-port', String(port)], { cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, DOTNET_NOLOGO: '1', DOTNET_CLI_TELEMETRY_OPTOUT: '1' } });
       child.stderr?.on('data', (d: Buffer) => log(d.toString()));
       child.on('error', (e) => done(e));
@@ -129,6 +143,7 @@ export function runMtpServer(
         }
       });
       sock.on('error', (e) => done(e));
+      sock.on('close', () => done(new Error('the test application closed the connection before the run finished')));
       void (async () => {
         try {
           await request('initialize', { processId: process.pid, clientInfo: { name: 'refyntra', version: '1' }, capabilities: { testing: { debuggerProvider: false } } });

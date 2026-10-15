@@ -122,5 +122,41 @@ exports.cases = ({ api, csharp, waitFor }) => {
         }
       },
     ]),
+    [
+      'test-matrix: debug one XUnit3Mtp data row (server mode under netcoredbg) → only that row runs, one stop',
+      async () => {
+        const a = await ready();
+        const p = 'XUnit3Mtp';
+        const text = fs.readFileSync(path.join(root(), p, 'MatrixTests.cs'), 'utf8').split(/\r?\n/);
+        const line = text.findIndex((l) => l.includes('public void Adds('));
+        const bp = new vscode.SourceBreakpoint(new vscode.Location(vscode.Uri.file(path.join(root(), p, 'MatrixTests.cs')), new vscode.Position(line, 0)));
+        vscode.debug.addBreakpoints([bp]);
+        const stops = [];
+        const tracker = vscode.debug.registerDebugAdapterTrackerFactory('refyntra-dotnet', {
+          createDebugAdapterTracker: (session) => ({
+            onDidSendMessage: (m) => {
+              if (m.type === 'event' && m.event === 'stopped') {
+                stops.push(m.body);
+                void session.customRequest('continue', { threadId: m.body.threadId });
+              }
+            },
+          }),
+        });
+        try {
+          const row = a.testing.state().ids.find((i) => i.includes(`|${p}.MatrixTests.Adds|`) && /2, 2, 5/.test(i));
+          assert.ok(row, 'the failing row of Adds');
+          await Promise.race([a.testing.runIds([row], true), new Promise((_, rej) => setTimeout(() => rej(new Error('the debug run did not finish')), 240000))]);
+          const st = a.testing.state();
+          assert.equal(st.lastServerCases, 1, `one node went to the server (${st.lastServerCases})`);
+          assert.equal(st.lastServerResults, 1, `the server ran that node only (${st.lastServerResults})`);
+          assert.equal(stops.length, 1, `one stop: ${JSON.stringify(stops)}`);
+          assert.equal(st.results[row].outcome, 'failed');
+        } finally {
+          tracker.dispose();
+          vscode.debug.removeBreakpoints([bp]);
+          if (vscode.debug.activeDebugSession) await Promise.race([vscode.debug.stopDebugging(), new Promise((r) => setTimeout(r, 15000))]);
+        }
+      },
+    ],
   ];
 };
