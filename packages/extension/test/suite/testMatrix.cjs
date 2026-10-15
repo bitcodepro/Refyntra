@@ -48,15 +48,15 @@ exports.cases = ({ api, csharp, waitFor }) => {
         assert.match(st.results[idOf(a, `|${p}.MatrixTests.Fails`)].message ?? '', /5|4/);
       },
     ]),
-    ...['XUnit3', 'NUnit4', 'MSTest4', 'MSTest2'].map((p) => [
-      `test-matrix: ${p} runs one data row alone (vstest.console server)`,
+    ...['XUnit3', 'NUnit4', 'MSTest4', 'MSTest2', 'XUnit3Mtp', 'MSTestSdk'].map((p) => [
+      `test-matrix: ${p} runs one data row alone (server mode)`,
       async () => {
         const a = await ready();
         const row = a.testing.state().ids.find((i) => i.includes(`|${p}.MatrixTests.Adds|`) && /2, 2, 5/.test(i));
         assert.ok(row, `the failing row of ${p}.Adds`);
         await a.testing.runIds([row]);
         const st = a.testing.state();
-        assert.equal(st.lastServerCases, 1, `exactly one case went to vstest.console (${st.lastServerCases})`);
+        assert.equal(st.lastServerCases, 1, `exactly one case went to the server (${st.lastServerCases})`);
         assert.deepEqual(st.lastRun, [row]);
         assert.equal(st.results[row].outcome, 'failed');
         assert.match(st.results[row].message ?? '', /5/);

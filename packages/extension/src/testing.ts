@@ -9,6 +9,7 @@ import { type DebuggerLocator, buildDotnet, killTree, onPath } from './run';
 import { DOTNET_DEBUG_TYPE, PYTHON_DEBUG_TYPE } from './runModel';
 import { caseAsResult, splitCommandLine, toTrxResult, type VsTestCase, type VsTestProcessStartInfo } from './vstestProtocol';
 import { VsTestSession } from './vstestSession';
+import { mtpNodeAsResult, runMtpServer } from './mtpServer';
 import {
   type JunitResult,
   type TestNode,
@@ -592,6 +593,21 @@ export class TestingService implements vscode.Disposable {
   private lastServerCases: number | undefined;
   private readonly discovered = new Map<string, { stamp: number; cases: VsTestCase[] }>();
 
+  private dotnetMethods(project: string): Map<string, TestNode> {
+    const methods = new Map<string, TestNode>();
+    for (const n of this.nodes.values()) if (n.kind === 'method' && n.language === 'dotnet' && n.project === project) methods.set(n.key, n);
+    return methods;
+  }
+
+  /** The case belongs to a requested item: its own data case, its method or an ancestor of it. */
+  private isWanted(row: TrxResult, methods: Map<string, TestNode>, wanted: Set<string>): boolean {
+    const m = matchDotnetResults([row], methods)[0];
+    if (!m) return false;
+    if (wanted.has(m.id)) return true;
+    for (let item = this.items.get(m.id) ?? (m.parentId ? this.items.get(m.parentId) : undefined); item; item = item.parent) if (wanted.has(item.id)) return true;
+    return false;
+  }
+
   private useServer(): boolean {
     return vscode.workspace.getConfiguration('refyntra').get<boolean>('tests.vstestServer', true);
   }
@@ -626,15 +642,9 @@ export class TestingService implements vscode.Disposable {
         cases = await this.vstest.discover([target]);
         this.discovered.set(target, { stamp, cases });
       }
-      const methods = new Map<string, TestNode>();
-      for (const n of this.nodes.values()) if (n.kind === 'method' && n.language === 'dotnet' && n.project === project) methods.set(n.key, n);
+      const methods = this.dotnetMethods(project);
       const wanted = new Set(items.map((i) => i.id));
-      const chosen = cases.filter((c) => {
-        const m = matchDotnetResults([caseAsResult(c)], methods)[0];
-        if (!m) return false;
-        for (let item = this.items.get(m.id) ?? (m.parentId ? this.items.get(m.parentId) : undefined); item; item = item.parent) if (wanted.has(item.id)) return true;
-        return false;
-      });
+      const chosen = cases.filter((c) => this.isWanted(caseAsResult(c), methods, wanted));
       if (chosen.length === 0) return undefined;
       this.lastServerCases = chosen.length;
       run.appendOutput(crlf(`[Refyntra] running ${chosen.length} test case(s) through vstest.console\n`));
@@ -685,7 +695,8 @@ export class TestingService implements vscode.Disposable {
     token: vscode.CancellationToken,
     debug: boolean,
     coverage: boolean,
-  ): Promise<{ code: number | null; output: string } | undefined> {
+    items: vscode.TestItem[] = [],
+  ): Promise<{ code: number | null; output: string; results?: TrxResult[] } | undefined> {
     if (coverage) run.appendOutput(crlf(`${path.basename(project)} runs on Microsoft Testing Platform; Refyntra collects coverage for VSTest projects (coverlet.collector) only, so this run has no coverage.\n`));
     if (debug && !this.debuggers.netcoredbg()) {
       for (const l of leaves) run.errored(l, new vscode.TestMessage(`.NET debugging is unavailable on ${process.platform}-${process.arch}: this Refyntra package has no netcoredbg. Use Run.`));
@@ -702,7 +713,25 @@ export class TestingService implements vscode.Disposable {
       return undefined;
     }
     const args = mtpTestArgs(target, { report, resultsDirectory, ...(filter ? { filter } : {}) });
-    if (!debug) return this.spawnForRun(run, 'dotnet', args, cwd, {}, token);
+    if (!debug) {
+      // Server mode: the exact nodes (one data row alone too); an application without it runs from the command line.
+      if (this.useServer() && !coverage) {
+        try {
+          const methods = this.dotnetMethods(project);
+          const wanted = new Set(items.map((i) => i.id));
+          const r = await runMtpServer(target, cwd, (nodes) => nodes.filter((n) => this.isWanted(mtpNodeAsResult(n), methods, wanted)), (l) => run.appendOutput(crlf(l)), token);
+          if (r.chosen.length > 0) {
+            this.lastServerCases = r.chosen.length;
+            run.appendOutput(crlf(`[Refyntra] ran ${r.chosen.length} test(s) through the test application's server mode\n`));
+            return { code: 0, output: '', results: r.results.map(mtpNodeAsResult) };
+          }
+        } catch (e) {
+          if (token.isCancellationRequested) return undefined;
+          run.appendOutput(crlf(`[Refyntra] server mode unavailable (${e instanceof Error ? e.message : String(e)}); running from the command line\n`));
+        }
+      }
+      return this.spawnForRun(run, 'dotnet', args, cwd, {}, token);
+    }
     // Debug: netcoredbg launches the test application directly (attaching to an MTP application that waits for a
     // debugger left its breakpoints pending in netcoredbg).
     const id = ++this.runs;
@@ -747,8 +776,10 @@ export class TestingService implements vscode.Disposable {
       const kind = this.runnerOf(project);
       if (kind.runner === 'mtp') {
         // Microsoft Testing Platform: build, then run (or debug) the test application itself.
-        const r = await this.runMtp(run, project, kind.report, filter, resultsDirectory, cwd, folder, leaves, token, debug, coverage);
+        this.lastServerCases = undefined;
+        const r = await this.runMtp(run, project, kind.report, filter, resultsDirectory, cwd, folder, leaves, token, debug, coverage, items);
         if (!r) return;
+        if (r.results) serverResults = r.results;
         outcome = r;
       } else if (debug) {
         if (!this.debuggers.netcoredbg()) {
