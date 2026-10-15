@@ -107,6 +107,8 @@ export interface EngineStatus {
   /** Short machine reason when state is not Ready. */
   reasonCode?: string;
   message?: string;
+  /** The solution was opened from the persistent project index; MSBuild is still loading it (refactorings wait). */
+  fromProjectIndex?: boolean;
 }
 
 export interface WorkspaceOpenParams extends WorkspaceParams {

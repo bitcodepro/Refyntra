@@ -4,6 +4,16 @@ All notable changes are listed here. The project is alpha; nothing has been rele
 
 ## Unreleased
 
+### Added (recent)
+
+- **Persistent project index** (ADR-014): a reopened, unchanged solution is usable at once (Shop: 0.1 s instead of 3.9 s)
+  while MSBuild loads it again in the background; refactorings wait for that load (`IndexVerifying`).
+- **Blazor / Razor**: Find Usages and Rename of C# symbols cover `.razor` and `.cshtml` markup (also from a `.razor`
+  editor, `@code` members included, unsaved markup seen).
+- **Tests**: one data row runs alone (vstest.console server mode; Microsoft Testing Platform server mode for xUnit v3 and
+  MSTest.Sdk).
+- **Inline Method across files** (previewed plan) and **Immediate window completions** from Roslyn.
+
 ### Added (debugger)
 
 - **Logpoints and hit counts for C#** (`refyntra-dotnet`): netcoredbg has neither, so Refyntra runs it behind its own

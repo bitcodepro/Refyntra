@@ -305,7 +305,10 @@ public sealed partial class Engine : IRpcHandler, IDisposable
         var session = new WorkspaceSession(p.WorkspaceId, p.Path, Epoch);
         _sessions[p.WorkspaceId] = session;
         // Synchronous up to here so document notifications that follow this request find the session.
-        await session.StartLoad(CancellationToken.None).WaitAsync(ct).ConfigureAwait(false);
+        // Answered when the solution is usable: from the persistent project index (MSBuild keeps loading in the
+        // background; the status says fromProjectIndex until it is done) or after MSBuild's load.
+        var load = session.StartLoad(CancellationToken.None);
+        await Task.WhenAny(load, session.FirstUsable).WaitAsync(ct).ConfigureAwait(false);
         if (session.State == EngineStates.Failed && session.ReasonCode == "SdkNotFound")
             throw new EngineException(ErrorCodes.SdkNotFound, "SdkNotFound", session.Message ?? "No .NET SDK was found.",
                 session.Recovery ?? "Install the .NET SDK required by global.json, then reload the workspace.");
@@ -344,6 +347,7 @@ public sealed partial class Engine : IRpcHandler, IDisposable
             Diagnostics = Mapper.Diagnostics(s.Diagnostics, s.SolutionPath),
             ReasonCode = s.ReasonCode,
             Message = s.Message,
+            FromProjectIndex = s.FromProjectIndex ? true : null,
         };
     }
 
@@ -1034,6 +1038,8 @@ public sealed partial class Engine : IRpcHandler, IDisposable
     private async Task<PrepareResultDto> PrepareAsync(PrepareParams p, CancellationToken ct)
     {
         var snap = RequireSnapshot(p.WorkspaceId, p.SnapshotId);
+        if (snap.Generation < 0)
+            return new PrepareResultDto { Kind = "unavailable", ReasonCode = "IndexVerifying", Message = "The solution was opened from the project index and MSBuild is still loading it; refactorings are available when that load finishes (usually a few seconds)." };
         if (p.ActionId is not ("csharp.rename" or MoveTypePlanner.ActionId or GenerateHandlerPlanner.ActionId or Refactorings.Cleanup.CleanupPlanner.ActionId
             or SafeDeletePlanner.ActionId or ExtractMethodPlanner.ActionId or ChangeSignaturePlanner.ActionId or EditActionsPlanner.IntroduceParameterAction
             or EditActionsPlanner.InlineMethodPlanAction or EditActionsPlanner.InlineMethodAllPlanAction

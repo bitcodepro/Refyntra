@@ -68,6 +68,8 @@ public sealed class WorkspaceSession : IDisposable
     private Dictionary<string, ImmutableArray<DocumentId>> _pathIndex = new(UriPaths.PathComparer);
     private readonly Dictionary<DocumentId, (string name, IReadOnlyList<string> folders, string? filePath, Encoding? encoding)> _removed = new();
     private MSBuildWorkspace? _workspace;
+    /// <summary>The workspace of a solution built from the project index (until MSBuild's own load replaces it).</summary>
+    private Workspace? _cacheWorkspace;
     private Snapshot? _current;
     private long _appliedSequence = -1; // protocol: client sequences are zero-based, -1 = nothing received yet
     private long _revision;
@@ -88,6 +90,11 @@ public sealed class WorkspaceSession : IDisposable
     public IReadOnlyList<ProjectContext> Projects { get; private set; } = Array.Empty<ProjectContext>();
     public IReadOnlyList<LoadDiagnosticModel> Diagnostics { get; private set; } = Array.Empty<LoadDiagnosticModel>();
     public Task LoadTask { get; private set; } = Task.CompletedTask;
+    /// <summary>The current solution comes from the persistent project index; MSBuild is still loading in the background.</summary>
+    public bool FromProjectIndex { get; private set; }
+    private readonly TaskCompletionSource _firstUsable = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    /// <summary>Completes when the first load produced a usable solution (from the project index or MSBuild) or ended.</summary>
+    public Task FirstUsable => _firstUsable.Task;
 
     public WorkspaceSession(string workspaceId, string path, string epoch)
     {
@@ -139,7 +146,26 @@ public sealed class WorkspaceSession : IDisposable
                 Recovery = ex.Recovery;
                 return;
             }
+            // The persistent project index: on a first load whose inputs are unchanged, the solution is built from it
+            // at once (reads work while MSBuild loads); MSBuild's load then replaces it and refreshes the index.
+            var expected = ExpectedProjects();
+            var key = Sdk?.Version is { } sdkVersion && expected.Count > 0 ? ProjectCache.Key(Path, expected, sdkVersion) : null;
+            if (key != null && Current == null && ProjectCache.Load(Path, key) is { } entry)
+            {
+                try
+                {
+                    InstallFromIndex(generation, entry);
+                    Log.Write("info", "workspace", $"opened {entry.Projects.Count} project(s) from the project index", op: "workspace/index", durationMs: sw.Elapsed.TotalMilliseconds);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    Log.Warn("cache", "project index not usable: " + ex.GetType().Name + ": " + ex.Message);
+                }
+            }
             await LoadWithWorkspaceAsync(generation, ct).ConfigureAwait(false);
+            if (key != null && State == EngineStates.Ready && Current is { } loaded && loaded.Generation == generation
+                && Sdk?.Version is { } v && ProjectCache.Key(Path, expected, v) == key)
+                ProjectCache.Store(Path, key, loaded.Solution, Projects);
             Log.Write("info", "workspace", $"loaded {Projects.Count} project(s), state {State}", op: "workspace/load",
                 durationMs: sw.Elapsed.TotalMilliseconds, status: State);
         }
@@ -152,6 +178,55 @@ public sealed class WorkspaceSession : IDisposable
             Log.Error("workspace", "load failed: " + ex.GetType().Name + ": " + ex.Message);
             SetFailed("LoadFailed", "Loading failed: " + ex.GetType().Name + ": " + ex.Message);
         }
+        finally
+        {
+            _firstUsable.TrySetResult();
+        }
+    }
+
+    private void InstallFromIndex(long generation, ProjectCache.Entry entry)
+    {
+        var (workspace, solution, ids) = ProjectCache.Build(entry);
+        var contexts = entry.Contexts.Select(c => new ProjectContext
+        {
+            ContextId = c.ContextId,
+            ProjectId = ids[c.ProjectIndex],
+            Name = c.Name,
+            ProjectPath = c.ProjectPath,
+            TargetFramework = c.TargetFramework,
+            State = ProjectStates.Loaded,
+            DocumentCount = c.DocumentCount,
+        }).ToList();
+        var index = new Dictionary<string, ImmutableArray<DocumentId>>(UriPaths.PathComparer);
+        foreach (var project in solution.Projects)
+        foreach (var doc in project.Documents)
+        {
+            if (doc.FilePath == null) continue;
+            index[doc.FilePath] = index.TryGetValue(doc.FilePath, out var arr) ? arr.Add(doc.Id) : ImmutableArray.Create(doc.Id);
+        }
+        lock (_gate)
+        {
+            if (_disposed || generation != _loadGeneration || _current != null)
+            {
+                workspace.Dispose();
+                return;
+            }
+            _cacheWorkspace = workspace;
+            // A negative generation: plans are not prepared on it (MSBuild's load has not confirmed the projects yet).
+            _solutionGeneration = -generation;
+            _pathIndex = index;
+            var sol = solution;
+            foreach (var (p, text) in _overlays) sol = ApplyText(sol, p, text);
+            _current = NewSnapshotLocked(sol);
+            Projects = contexts;
+            Diagnostics = Array.Empty<LoadDiagnosticModel>();
+            FromProjectIndex = true;
+            State = EngineStates.Ready;
+            ReasonCode = null;
+            Message = null;
+            ReleaseWaitersLocked();
+        }
+        _firstUsable.TrySetResult();
     }
 
     private void SetFailed(string reason, string message)
@@ -271,6 +346,9 @@ public sealed class WorkspaceSession : IDisposable
                 return;
             }
             old = _workspace;
+            _cacheWorkspace?.Dispose();
+            _cacheWorkspace = null;
+            FromProjectIndex = false;
             _solutionGeneration = generation;
             _workspace = workspace;
             _pathIndex = index;
@@ -742,6 +820,8 @@ public sealed class WorkspaceSession : IDisposable
             _disposed = true;
             ws = _workspace;
             _workspace = null;
+            _cacheWorkspace?.Dispose();
+            _cacheWorkspace = null;
             foreach (var w in _waiters) w.tcs.TrySetCanceled();
             _waiters.Clear();
         }

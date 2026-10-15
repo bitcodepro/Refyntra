@@ -282,6 +282,8 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
       if (barrier.acknowledgedSequence < session.sentSequence) throw new StartupError('ProtocolViolation', 'Backend did not acknowledge the replayed documents', true);
       session.started = true;
       this.applyStatus(status);
+      // Opened from the persistent project index: MSBuild is still loading; its final status replaces this one.
+      if (status.fromProjectIndex) void this.followIndexLoad(session);
     } catch (e) {
       if (transport && this.session?.transport !== transport) await transport.dispose().catch(() => undefined);
       if (this.disposed) return;
@@ -307,6 +309,24 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
       // Transport failure during startup → bounded automatic restart.
       await this.teardownSession('startup-failed');
       this.scheduleAutoRestart('StartupFailed', describeError(e));
+    }
+  }
+
+  private async followIndexLoad(session: NonNullable<typeof this.session>): Promise<void> {
+    for (let i = 0; i < 1800 && this.session === session && !this.disposed; i++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      if (this.session !== session) return;
+      try {
+        const s = await session.transport.request('engine/status', { traceId: this.traceIds.next() });
+        if (this.session !== session) return;
+        if (!s.fromProjectIndex) {
+          this.status = s;
+          this.applyStatus(s);
+          return;
+        }
+      } catch {
+        return;
+      }
     }
   }
 

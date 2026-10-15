@@ -106,6 +106,8 @@ public sealed class SdkDto
 
 public sealed class EngineStatusDto
 {
+    /// <summary>The solution was opened from the persistent project index; MSBuild is still loading it (absent: false).</summary>
+    public bool? FromProjectIndex { get; set; }
     public string State { get; set; } = "NotStarted";
     public string SessionEpoch { get; set; } = "";
     public SdkDto Sdk { get; set; } = new();
