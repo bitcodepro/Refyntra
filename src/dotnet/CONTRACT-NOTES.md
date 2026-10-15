@@ -98,7 +98,7 @@ MSBuild BuildHost child processes are started by MSBuildWorkspace and stopped wh
     heuristic `<Name>Tests`/`<Name>Test` test class) and `test.subject` (reverse; production symbols referenced by a test
     method or by every test of a test class). A test method is recognised only by attribute identity (full metadata name
     + assembly, base attribute types included). References in a test project outside a test method are not listed.
-    `capability/query` adds `tests.run` = `unavailable`/`NoPublicTestIntegration` for test subjects; it is not in
+    `capability/query` adds `tests.run` = `available` for test subjects (run by the client's test runner); it is not in
     `initialize.capabilities`.
 20. **DI facts** (Stage D). Registrations now carry structured traits (factory, instance, open generic, TryAdd,
     conditional, framework extension). "Conditional" is broader than before: also loops, `try`/`catch`, lambdas, local

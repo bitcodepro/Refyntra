@@ -59,6 +59,9 @@ export function commandForCapability(capabilityId: string): string | undefined {
       return 'refyntra.extractMethod';
     case 'changeSignature':
       return 'refyntra.changeSignature';
+    case 'run':
+      // tests.run: the test at the cursor, through Refyntra's test runner.
+      return capabilityId === 'tests.run' ? 'refyntra.tests.runRelated' : undefined;
     default:
       return undefined;
   }

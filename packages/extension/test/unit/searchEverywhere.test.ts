@@ -85,5 +85,7 @@ describe('search everywhere ranking', () => {
   });
   it('reads command titles from a manifest', () => {
     expect(commandTitles({ contributes: { commands: [{ command: 'x.a', title: 'A', category: 'X' }, { command: 'x.b', title: 'B' }] } })).toEqual(new Map([['x.a', 'X: A'], ['x.b', 'B']]));
+    // Commands hidden from the Command Palette (they need arguments from a view) are left out.
+    expect(commandTitles({ contributes: { commands: [{ command: 'x.a', title: 'A' }, { command: 'x.open', title: 'Open' }], menus: { commandPalette: [{ command: 'x.open', when: 'false' }] } } })).toEqual(new Map([['x.a', 'A']]));
   });
 });

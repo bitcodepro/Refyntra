@@ -182,8 +182,14 @@ export function pushRecent(list: readonly string[], key: string, max = 50): stri
 }
 
 /** Commands contributed in a package.json manifest: id -> "Category: Title". */
-export function commandTitles(manifest: { contributes?: { commands?: { command: string; title: string; category?: string }[] } }): Map<string, string> {
+export function commandTitles(manifest: { contributes?: { commands?: { command: string; title: string; category?: string }[]; menus?: { commandPalette?: { command: string; when?: string }[] } } }): Map<string, string> {
+  // Commands an extension hides from the Command Palette (`when: false`) need arguments from a tree or a view: they are
+  // not offered on their own.
+  const hidden = new Set((manifest.contributes?.menus?.commandPalette ?? []).filter((e) => e.when === 'false').map((e) => e.command));
   const m = new Map<string, string>();
-  for (const c of manifest.contributes?.commands ?? []) m.set(c.command, c.category ? `${c.category}: ${c.title}` : c.title);
+  for (const c of manifest.contributes?.commands ?? []) {
+    if (hidden.has(c.command) || typeof c.title !== 'string') continue;
+    m.set(c.command, c.category ? `${c.category}: ${c.title}` : c.title);
+  }
   return m;
 }

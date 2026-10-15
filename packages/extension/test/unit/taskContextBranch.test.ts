@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { activeContext, branchOfHead, contextForBranch, createContext, emptyStore, loadStore, sharedFileName } from '../../src/taskContextModel';
+import { activeContext, branchOfHead, gitDirOfFile, contextForBranch, createContext, emptyStore, loadStore, sharedFileName } from '../../src/taskContextModel';
 
 describe('task contexts per git branch and shared in the repository', () => {
   it('reads the branch from .git/HEAD', () => {
@@ -27,6 +27,12 @@ describe('task contexts per git branch and shared in the repository', () => {
   it('keeps the branch of a stored context', () => {
     const r = loadStore({ version: 1, activeId: 'b', contexts: [{ id: 'b', name: 'main', createdAt: 1, items: [], branch: 'main' }] });
     expect(r.kind === 'ok' && r.store.contexts[0]?.branch).toBe('main');
+  });
+
+  it('reads the git directory of a linked worktree from its .git file', () => {
+    expect(gitDirOfFile('gitdir: E:/repo/.git/worktrees/feature\n')).toBe('E:/repo/.git/worktrees/feature');
+    expect(gitDirOfFile('gitdir: ../.git/modules/lib')).toBe('../.git/modules/lib');
+    expect(gitDirOfFile('ref: refs/heads/main')).toBeUndefined();
   });
 
   it('names the shared file after the context', () => {

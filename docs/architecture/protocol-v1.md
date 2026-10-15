@@ -82,9 +82,8 @@ The catalogue shared by `initialize.capabilities`, `capability/query` and the UI
 
 Unknown capability ids from newer backends are shown by id.
 
-Outside the catalogue, `capability/query` adds `tests.run` (state `unavailable`, reasonCode `NoPublicTestIntegration`,
-message starting with "Run test: unavailable — no supported public test integration") when the subject is a test method or
-a test class. It is not part of `initialize.capabilities`.
+Outside the catalogue, `capability/query` adds `tests.run` (state `available`; the client runs it with its own test runner,
+command `refyntra.tests.runRelated`) when the subject is a test method or a test class. It is not part of `initialize.capabilities`.
 
 ## Versions
 

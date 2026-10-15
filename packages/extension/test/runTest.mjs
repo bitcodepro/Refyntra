@@ -36,6 +36,8 @@ const baseSettings = {
   'update.mode': 'none',
   'extensions.autoUpdate': false,
   'workbench.startupEditor': 'none',
+  // The e2e keyboard checks use the Visual Studio preset (the product default keeps VS Code's keys).
+  'refyntra.keybindings.preset': 'visualStudio',
 };
 
 /**

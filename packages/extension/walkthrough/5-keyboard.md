@@ -1,6 +1,6 @@
 # Keyboard presets
 
-Refyntra uses the Visual Studio preset by default. Change **refyntra.keybindings.preset** to switch, or to `none` to turn shortcuts off:
+Refyntra keeps VS Code's keys by default (its actions are in Ctrl+. and the editor context menu); the first start offers the Visual Studio or ReSharper preset. Change **refyntra.keybindings.preset** to switch, or to `none` to turn shortcuts off:
 
 | Preset | Find | Actions | Rename | Related | Navigate To (C#) | Recent Files | Recent Locations | File Structure |
 |---|---|---|---|---|---|---|---|---|

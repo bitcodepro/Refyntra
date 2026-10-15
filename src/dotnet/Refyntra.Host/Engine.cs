@@ -565,11 +565,10 @@ public sealed partial class Engine : IRpcHandler, IDisposable
         list.Add(references);
         if (subject != null) list.AddRange(await CreateFileActionsAsync(snap, subject.Value.symbol, p.Uri, Make, ct).ConfigureAwait(false));
         list.AddRange(await CodeActionsAsync(snap, subject?.symbol, p.Uri, p.Position, Make, ct).ConfigureAwait(false));
-        // Code ↔ tests: there is no supported public test integration, so running is explained, not offered.
+        // A test method or class: Refyntra's own test runner runs it (Test Explorer, CodeLens, Actions).
         if (subject != null && TestNavigation.IsTestSymbol(subject.Value.symbol))
         {
-            var run = Make("tests.run", "unavailable", "NoPublicTestIntegration",
-                "Run test: unavailable — no supported public test integration. VS Code does not expose other extensions' test controllers, and Refyntra does not call undocumented commands; run the test from the Testing view of your test extension.");
+            var run = Make("tests.run", "available", null, "Run the test with Refyntra's test runner (results in the Test Explorer).");
             run.Scope.ProjectContextId = contextId;
             run.Limitations.Add("Navigation between tests and code is available in Related (group Tests).");
             list.Add(run);

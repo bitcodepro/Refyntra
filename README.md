@@ -1207,7 +1207,7 @@ take a project out of Find, Rename and the other analyses.
 | Setting | Values | Description |
 |---|---|---|
 | `refyntra.hostPath` | path, machine scope | Use a host build from this location instead of the packaged one (development use). Only user or machine settings, never workspace settings, so a project cannot choose the executable |
-| `refyntra.keybindings.preset` | `visualStudio` (default), `resharper`, `none` | Optional keybinding preset |
+| `refyntra.keybindings.preset` | `none` (default: VS Code keys), `visualStudio`, `resharper` | Optional keybinding preset; the first start offers one |
 | `refyntra.rename.apply` | boolean, default on | Offer **Apply rename** after the preview (revalidated after you confirm, not saved). Off = preview-only |
 | `refyntra.cleanup.profile` | list of fix ids, default `removeUnnecessaryUsings`, `sortUsings`, `whitespace` | Fixes pre-selected by Code Cleanup (`fileScopedNamespace` is opt-in) |
 | `refyntra.related.followCursor` | boolean, default on | The Related view follows the cursor unless it is pinned |

@@ -19,6 +19,7 @@ import {
   type TaskItem,
   activeContext,
   branchOfHead,
+  gitDirOfFile,
   addItem,
   clearItems,
   combineStatus,
@@ -1074,27 +1075,60 @@ export function registerTaskContext(engine: EngineClient, memento: vscode.Mement
     cmd('refresh', () => provider.resolveNow()),
     cmd('share', () => provider.share()),
   );
-  // Follow the git branch: .git/HEAD is read directly (no git extension needed).
-  const folder = vscode.workspace.workspaceFolders?.[0];
-  if (folder) {
-    const head = vscode.Uri.joinPath(folder.uri, '.git', 'HEAD');
+  // Follow the git branch of every workspace folder: HEAD is read directly (no git extension needed). In a linked
+  // worktree (or a submodule) .git is a file "gitdir: <path>"; its HEAD is in that directory.
+  const watches: vscode.Disposable[] = [];
+  for (const folder of vscode.workspace.workspaceFolders ?? []) {
     let branch: string | undefined;
+    let head: vscode.Uri | undefined;
+    const locate = async (): Promise<vscode.Uri | undefined> => {
+      const dotGit = vscode.Uri.joinPath(folder.uri, '.git');
+      try {
+        const stat = await vscode.workspace.fs.stat(dotGit);
+        if (stat.type & vscode.FileType.Directory) return vscode.Uri.joinPath(dotGit, 'HEAD');
+        const gitdir = gitDirOfFile(new TextDecoder().decode(await vscode.workspace.fs.readFile(dotGit)));
+        if (!gitdir) return undefined;
+        const dir = /^([a-zA-Z]:[\\/]|\/)/.test(gitdir) ? vscode.Uri.file(gitdir) : vscode.Uri.joinPath(folder.uri, gitdir);
+        return vscode.Uri.joinPath(dir, 'HEAD');
+      } catch {
+        return undefined;
+      }
+    };
     const read = async () => {
+      head ??= await locate();
+      if (!head) return undefined;
       try {
         return branchOfHead(new TextDecoder().decode(await vscode.workspace.fs.readFile(head)));
       } catch {
         return undefined;
       }
     };
-    void read().then((b) => (branch = b));
-    const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(folder, '.git/HEAD'));
     const changed = async () => {
       const next = await read();
       if (next === branch) return;
       branch = next;
       await provider.followBranch(next);
     };
-    return { provider, disposable: vscode.Disposable.from(disposable, watcher, watcher.onDidChange(() => void changed()), watcher.onDidCreate(() => void changed())) };
+    // .git (a folder or a worktree's file) and .git/HEAD of the folder: created later, switched, or a checkout.
+    let outside: vscode.Disposable[] = [];
+    const relocate = async () => {
+      head = undefined;
+      head = await locate();
+      for (const d of outside) d.dispose();
+      outside = [];
+      // A worktree's HEAD lives outside the folder: watch it there too.
+      if (head && !head.path.startsWith(`${folder.uri.path}/`)) {
+        const w = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.joinPath(head, '..'), 'HEAD'));
+        outside.push(w, w.onDidChange(() => void changed()), w.onDidCreate(() => void changed()));
+      }
+      await changed();
+    };
+    const local = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(folder, '{.git,.git/HEAD}'));
+    watches.push(local, local.onDidChange(() => void relocate()), local.onDidCreate(() => void relocate()), local.onDidDelete(() => void relocate()), { dispose: () => outside.forEach((d) => d.dispose()) });
+    void (async () => {
+      branch = await read();
+      if (head && !head.path.startsWith(`${folder.uri.path}/`)) await relocate();
+    })();
   }
-  return { provider, disposable };
+  return { provider, disposable: vscode.Disposable.from(disposable, { dispose: () => { for (const w of watches) w.dispose(); } }) };
 }

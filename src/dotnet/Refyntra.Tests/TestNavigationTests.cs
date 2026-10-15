@@ -67,16 +67,14 @@ public sealed class TestNavigationTests
     }
 
     [Fact]
-    public async Task ActionsExplainThatRunningATestIsUnavailable()
+    public async Task ActionsOfferRunningATest()
     {
         var snap = await C.BarrierAsync();
         var text = await File.ReadAllTextAsync(Tests);
         var (line, ch) = TestClient.Position(text, "TotalIsZeroForAnEmptyRepository", 1);
         var list = await C.RequestAsync("capability/query", new { traceId = "t", workspaceId = C.WorkspaceId, snapshotId = snap, uri = Refyntra.Workspaces.UriPaths.ToUri(Tests), position = new { line, character = ch } });
         var run = Assert.Single(list.EnumerateArray(), a => a.GetProperty("capabilityId").GetString() == "tests.run");
-        Assert.Equal("unavailable", run.GetProperty("state").GetString());
-        Assert.Equal("NoPublicTestIntegration", run.GetProperty("reasonCode").GetString());
-        Assert.StartsWith("Run test: unavailable — no supported public test integration", run.GetProperty("message").GetString());
+        Assert.Equal("available", run.GetProperty("state").GetString());
 
         // Not offered on production code, nor on a method marked with a foreign [Fact].
         var directText = await File.ReadAllTextAsync(Direct);

@@ -328,6 +328,12 @@ export function contextForBranch(store: TaskContextStore, branch: string, id: st
   return { ok: true, created: true, store: { ...created.store, contexts: created.store.contexts.map((c) => (c.id === id ? { ...c, branch } : c)) } };
 }
 
+/** The git directory a `.git` file points to ("gitdir: ../.git/worktrees/feature"), or undefined. */
+export function gitDirOfFile(text: string): string | undefined {
+  const m = /^gitdir:\s*(.+?)\s*$/m.exec(text);
+  return m?.[1];
+}
+
 /** A file name for a shared context: the name with anything but letters, digits, '.', '-' and '_' replaced. */
 export function sharedFileName(name: string): string {
   return `${name.replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'task'}.json`;

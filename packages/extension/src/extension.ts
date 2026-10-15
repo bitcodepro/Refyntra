@@ -177,9 +177,25 @@ function atTarget(arg: unknown): { uri: string; position: { line: number; charac
   return t ? { uri: t.uri, position: t.position } : undefined;
 }
 
+/**
+ * Once per machine: VS Code's keys stay until the user picks a preset (Visual Studio or ReSharper keys override some
+ * VS Code keys, so they are never on without asking). Not shown in tests or when a preset is already set.
+ */
+async function offerKeyboardPreset(context: vscode.ExtensionContext): Promise<void> {
+  const key = 'refyntra.keyboardPresetOffered';
+  if (context.extensionMode === vscode.ExtensionMode.Test || context.globalState.get<boolean>(key)) return;
+  const inspected = vscode.workspace.getConfiguration('refyntra').inspect<string>('keybindings.preset');
+  await context.globalState.update(key, true);
+  if (inspected?.globalValue !== undefined || inspected?.workspaceValue !== undefined) return;
+  const pick = await vscode.window.showInformationMessage('Refyntra: use Visual Studio or ReSharper shortcuts for Find, Actions, Rename and Related? VS Code keeps its own keys otherwise.', 'Visual Studio', 'ReSharper', 'Keep VS Code');
+  const preset = pick === 'Visual Studio' ? 'visualStudio' : pick === 'ReSharper' ? 'resharper' : undefined;
+  if (preset) await vscode.workspace.getConfiguration('refyntra').update('keybindings.preset', preset, vscode.ConfigurationTarget.Global);
+}
+
 export async function activate(context: vscode.ExtensionContext): Promise<RefyntraTestApi> {
   const output = vscode.window.createOutputChannel('Refyntra');
   context.subscriptions.push(output);
+  void offerKeyboardPreset(context);
   // The debug bundle reads the last lines of this channel from a ring (same lines, same redaction).
   const logRing = new LogRing(1000);
   const sink = {

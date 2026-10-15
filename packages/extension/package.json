@@ -2176,12 +2176,12 @@
             "resharper"
           ],
           "enumDescriptions": [
-            "No Refyntra keybindings. F12, Shift+F12 and your shortcuts stay untouched.",
-            "Visual Studio-like (default): Ctrl+, Find, Ctrl+. Actions, Ctrl+R Ctrl+R Rename, Ctrl+Shift+Alt+F12 Related.",
+            "VS Code (default): VS Code's own keys stay as they are; Refyntra's actions are in Ctrl+. (Quick Fix), the editor context menu and the Command Palette.",
+            "Visual Studio-like: Ctrl+, Find, Ctrl+. Actions, Ctrl+R Ctrl+R Rename, Ctrl+Shift+Alt+F12 Related.",
             "ReSharper-like: Ctrl+T Find, Alt+Enter Actions, Ctrl+Shift+R Rename, Ctrl+Shift+G Related."
           ],
-          "default": "visualStudio",
-          "markdownDescription": "Keybinding preset for Find / Related / Actions / Rename. Presets override some VS Code defaults (e.g. Ctrl+T, Ctrl+.) while active; choose `none` to turn Refyntra shortcuts off."
+          "default": "none",
+          "markdownDescription": "Keybinding preset for Find / Related / Actions / Rename. `none` (default) keeps VS Code's keys; the Visual Studio and ReSharper presets override some VS Code keys (e.g. Ctrl+, Ctrl+T, Ctrl+.) while active."
         },
         "refyntra.postfix.enabled": {
           "type": "boolean",

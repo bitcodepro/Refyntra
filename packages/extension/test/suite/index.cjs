@@ -998,16 +998,15 @@ scenarios['di-rules'] = [
     },
   ],
   [
-    'Actions on a test: "Run test" is unavailable with the reason (no public test integration)',
+    'Actions on a test: "Run test" is offered and runs it with Refyntra\'s test runner',
     async () => {
       const a = await api();
       const { at } = await shopPosition('DiRules.Tests/OrderServiceTests.cs', 'TotalIsZeroForAnEmptyRepository', 1);
       const actions = await a.engine.actions(at);
       const run = actions.items.find((i) => i.capabilityId === 'tests.run');
       assert.ok(run, JSON.stringify(actions.items.map((i) => i.capabilityId)));
-      assert.equal(run.state, 'unavailable');
-      assert.equal(run.reasonCode, 'NoPublicTestIntegration');
-      assert.match(run.message, /^Run test: unavailable — no supported public test integration/);
+      assert.equal(run.state, 'available');
+      assert.equal(run.command?.command ?? 'refyntra.tests.runRelated', 'refyntra.tests.runRelated');
       // The reverse direction: the test lists the production symbols it references.
       const rel = await a.engine.related(at);
       const subjects = rel.groups.find((g) => g.group === 'tests').relations.filter((r) => r.relationKind === 'test.subject').map((r) => r.target.symbol.name);
