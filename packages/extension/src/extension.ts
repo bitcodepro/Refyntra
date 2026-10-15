@@ -75,7 +75,8 @@ export const CSHARP_DESCRIPTOR: AdapterDescriptor = {
   providerRouteId: 'csharp.roslyn',
   displayName: 'C#',
   languageIds: ['csharp'],
-  fileExtensions: ['.cs'],
+  // Razor markup: symbols at a position map to the Razor-generated C# (rename, usages, navigation).
+  fileExtensions: ['.cs', '.razor', '.cshtml'],
   uriSchemes: ['file'],
   ownership: 'owned-semantic',
   operations: ['find', 'related', 'actions', 'rename'],

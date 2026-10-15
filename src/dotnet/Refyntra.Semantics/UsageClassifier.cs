@@ -83,7 +83,7 @@ public static class UsageClassifier
                 string? markupPath = null;
                 string line;
                 // Razor-generated code: the use is shown where it is written, in the .razor / .cshtml markup.
-                if (RazorMapping.Map(loc) is { } razor && ReadLines(markup, razor.Path) is { } lines && razor.Span.Start.Line < lines.Length)
+                if (RazorMapping.Map(loc) is { } razor && ReadLines(markup, doc.Project.Solution, razor.Path) is { } lines && razor.Span.Start.Line < lines.Length)
                 {
                     markupPath = razor.Path;
                     lineSpan = razor.Span;
@@ -99,9 +99,18 @@ public static class UsageClassifier
         return new UsagesModel(items, ordered.Count, ordered.Count > limit, "complete");
     }
 
-    private static string[]? ReadLines(Dictionary<string, string[]> cache, string path)
+    /// <summary>The lines of a markup file as the snapshot has it (the editor text when it is open), else from the disk.</summary>
+    private static string[]? ReadLines(Dictionary<string, string[]> cache, Solution solution, string path)
     {
         if (cache.TryGetValue(path, out var lines)) return lines;
+        var additional = solution.Projects.SelectMany(p => p.AdditionalDocuments)
+            .FirstOrDefault(d => d.FilePath != null && string.Equals(Path.GetFullPath(d.FilePath), Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase));
+        if (additional != null && additional.TryGetText(out var t))
+        {
+            lines = t.Lines.Select(l => l.ToString()).ToArray();
+            cache[path] = lines;
+            return lines;
+        }
         try
         {
             lines = File.ReadAllText(path).Replace("\r\n", "\n").Split('\n');

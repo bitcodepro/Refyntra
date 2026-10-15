@@ -593,9 +593,24 @@ public sealed class WorkspaceSession : IDisposable
         return solution.RemoveDocuments(present.ToImmutableArray());
     }
 
+    /// <summary>
+    /// Razor markup (.razor / .cshtml) is an additional document that the Razor source generator reads: the editor text
+    /// replaces it, so the generated code (and every feature on it) follows unsaved markup.
+    /// </summary>
+    private static Solution ApplyAdditionalText(Solution solution, string path, string text)
+    {
+        if (!(path.EndsWith(".razor", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".cshtml", StringComparison.OrdinalIgnoreCase))) return solution;
+        foreach (var project in solution.Projects.ToList())
+            foreach (var doc in project.AdditionalDocuments)
+                if (doc.FilePath != null && string.Equals(System.IO.Path.GetFullPath(doc.FilePath), System.IO.Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase)
+                    && doc.GetTextAsync().GetAwaiter().GetResult().ToString() != text)
+                    solution = solution.WithAdditionalDocumentText(doc.Id, SourceText.From(text, new UTF8Encoding(false), SourceHashAlgorithm.Sha256));
+        return solution;
+    }
+
     private Solution ApplyText(Solution solution, string path, string text)
     {
-        if (!_pathIndex.TryGetValue(path, out var ids) || ids.IsEmpty) return solution;
+        if (!_pathIndex.TryGetValue(path, out var ids) || ids.IsEmpty) return ApplyAdditionalText(solution, path, text);
         // A document removed by didClose of a missing file comes back with the text of the next didOpen/didChange.
         foreach (var id in ids)
         {

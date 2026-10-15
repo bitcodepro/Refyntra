@@ -71,4 +71,36 @@ public sealed class RazorTests : IClassFixture<RazorFixture>
         Assert.EndsWith("Counter.razor", UriPaths.ToPath(item.GetProperty("uri").GetString()!));
         Assert.Equal("<button @onclick=\"Service.Increment\">Add</button>", item.GetProperty("lineText").GetString());
     }
+
+    [Fact]
+    public async Task RenameAMemberDeclaredInACodeBlock()
+    {
+        var razor = Path.Combine(_f.Dir, "BlazorApp", "Components", "Pages", "Counter.razor");
+        var snap = await _f.Client.BarrierAsync();
+        var s = await _f.Client.SymbolAtTextAsync(snap, razor, "Title { get", 0);
+        var r = await _f.Client.RequestAsync("refactor/prepare", new { traceId = "t", workspaceId = _f.Client.WorkspaceId, snapshotId = snap, actionId = "csharp.rename", symbolId = s.GetProperty("symbolId").GetString(), newName = "Heading" });
+        var after = RefactoringFixture.After(RefactoringFixture.Prepared(r), razor);
+        Assert.Contains("<h1>@Heading</h1>", after);
+        Assert.Contains("private string Heading { get; set; }", after);
+    }
+
+    [Fact]
+    public async Task UnsavedMarkupIsSeen()
+    {
+        var razor = Path.Combine(_f.Dir, "BlazorApp", "Components", "Pages", "Counter.razor");
+        var text = await File.ReadAllTextAsync(razor);
+        await _f.Client.DidOpenAsync(razor, text);
+        await _f.Client.DidChangeAsync(razor, text.Replace("@code", "<p>@Service.Describe(3)</p>\n@code"));
+        try
+        {
+            var snap = await _f.Client.BarrierAsync();
+            var s = await _f.Client.SymbolAtTextAsync(snap, Service, "Describe(int step)");
+            var r = await _f.Client.RequestAsync("code/usages", new { traceId = "t", workspaceId = _f.Client.WorkspaceId, snapshotId = snap, symbolId = s.GetProperty("symbolId").GetString() });
+            Assert.Contains(r.GetProperty("items").EnumerateArray(), i => i.GetProperty("lineText").GetString() == "<p>@Service.Describe(3)</p>");
+        }
+        finally
+        {
+            await _f.Client.DidChangeAsync(razor, text, 3);
+        }
+    }
 }

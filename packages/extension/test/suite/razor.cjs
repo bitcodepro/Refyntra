@@ -48,5 +48,44 @@ exports.cases = ({ api, waitFor }) => {
         assert.equal(item.lineText, '<button @onclick="Service.Increment">Add</button>');
       },
     ],
+    [
+      'razor: rename from a .razor editor a property of its @code block → declaration and markup use are renamed; Undo',
+      async () => {
+        const a = await api();
+        const razor = await vscode.workspace.openTextDocument(file('Components/Pages/Counter.razor'));
+        const original = razor.getText();
+        const p = razor.positionAt(original.indexOf('Title { get'));
+        const r = await waitFor(async () => {
+          const x = await a.engine.prepareRename({ uri: razor.uri.toString(), position: { line: p.line, character: p.character } }, 'Heading');
+          return x.kind === 'preview' ? x : undefined;
+        }, 'a rename plan from the .razor file', 120000);
+        const out = await a.engine.applyRename(r.planId);
+        assert.equal(out.status, 'applied', out.message);
+        assert.ok(razor.getText().includes('<h1>@Heading</h1>') && razor.getText().includes('private string Heading { get; set; }'), razor.getText());
+        await a.undoCode(r.plan.writeSet, new Map());
+        assert.equal(razor.getText(), original);
+        if (razor.isDirty) await razor.save();
+      },
+    ],
+    [
+      'razor: unsaved markup is seen by the host → a use typed in the .razor editor is found by Find Usages',
+      async () => {
+        const a = await api();
+        const razor = await vscode.workspace.openTextDocument(file('Components/Pages/Counter.razor'));
+        const editor = await vscode.window.showTextDocument(razor);
+        const original = razor.getText();
+        await editor.edit((e) => e.insert(razor.positionAt(original.indexOf('@code')), '<p>@Service.Describe(3)</p>\n'));
+        const svc = await vscode.workspace.openTextDocument(file('Services/CounterService.cs'));
+        const p = svc.positionAt(svc.getText().indexOf('Describe(int step)'));
+        try {
+          await waitFor(async () => {
+            const r = await a.engine.usages({ uri: svc.uri.toString(), position: { line: p.line, character: p.character } }, 100);
+            return r.kind === 'usages' && r.items.some((i) => i.lineText === '<p>@Service.Describe(3)</p>');
+          }, 'the unsaved use in Counter.razor', 60000);
+        } finally {
+          await vscode.commands.executeCommand('workbench.action.files.revert');
+        }
+      },
+    ],
   ];
 };

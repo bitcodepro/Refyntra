@@ -120,6 +120,16 @@ public static class SemanticService
             symbol = source ?? symbol;
             return (symbol, SymbolFacts.OwningProject(snapshot.Solution, symbol) ?? doc.Project);
         }
+        // .razor / .cshtml: the symbol at the matching position of the Razor-generated code.
+        if (ids.Length == 0 && RazorMapping.IsRazorPath(path) && await RazorMapping.ToGeneratedAsync(snapshot.Solution, path, line, character, ct).ConfigureAwait(false) is { } g)
+        {
+            var symbol = await SymbolFinder.FindSymbolAtPositionAsync(g.Document, g.Position, ct).ConfigureAwait(false);
+            if (symbol == null && g.Position > 0) symbol = await SymbolFinder.FindSymbolAtPositionAsync(g.Document, g.Position - 1, ct).ConfigureAwait(false);
+            if (symbol == null) return null;
+            symbol = SymbolIds.Normalize(symbol);
+            symbol = await SymbolFinder.FindSourceDefinitionAsync(symbol, snapshot.Solution, ct).ConfigureAwait(false) ?? symbol;
+            return (symbol, SymbolFacts.OwningProject(snapshot.Solution, symbol) ?? g.Document.Project);
+        }
         return null;
     }
 

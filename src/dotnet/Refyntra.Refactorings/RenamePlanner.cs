@@ -93,7 +93,7 @@ public static class RenamePlanner
         if (symbol.IsImplicitlyDeclared)
             return ("UnsupportedSymbolKind", "The symbol is implicitly declared.");
         foreach (var loc in symbol.Locations.Where(l => l.IsInSource))
-            if (SymbolFacts.IsGeneratedTree(snapshot.Solution, loc.SourceTree!, ct))
+            if (SymbolFacts.IsGeneratedTree(snapshot.Solution, loc.SourceTree!, ct) && RazorMapping.Map(loc) == null)
                 return ("GeneratedCode", "The symbol is declared in generated code.");
         if (ImplementsOrOverridesMetadata(symbol))
             return ("ImplementsMetadataMember", "The member implements or overrides a member declared in a referenced assembly; renaming it would break that contract.");
@@ -372,7 +372,8 @@ public static class RenamePlanner
         var oldTexts = new Dictionary<string, SourceText>(UriPaths.PathComparer);
         var spans = new Dictionary<string, SortedSet<(int start, int end)>>(UriPaths.PathComparer);
         var refs = await SymbolFinder.FindReferencesAsync(symbol, solution, ct).ConfigureAwait(false);
-        foreach (var loc in refs.SelectMany(r => r.Locations).Select(l => l.Location))
+        // Declarations written in markup (@code blocks) and the references.
+        foreach (var loc in symbol.Locations.Where(l => l.IsInSource).Concat(refs.SelectMany(r => r.Locations).Select(l => l.Location)))
         {
             if (loc.SourceTree == null || solution.GetDocument(loc.SourceTree) is not SourceGeneratedDocument) continue;
             var mapped = Semantics.RazorMapping.Map(loc);
