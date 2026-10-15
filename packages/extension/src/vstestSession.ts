@@ -2,7 +2,7 @@ import { type ChildProcess, spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as net from 'node:net';
 import * as path from 'node:path';
-import { EMPTY_RUN_SETTINGS, MessageReader, VSTEST_PROTOCOL_VERSION, type VsTestCase, type VsTestMessage, type VsTestResult, encodeMessage } from './vstestProtocol';
+import { EMPTY_RUN_SETTINGS, MessageReader, VSTEST_PROTOCOL_VERSION, type VsTestCase, type VsTestMessage, type VsTestProcessStartInfo, type VsTestResult, encodeMessage } from './vstestProtocol';
 
 /**
  * One vstest.console process in design mode (the server mode IDEs use), started from the .NET SDK on demand. Discovery
@@ -87,6 +87,11 @@ export class VsTestSession {
     this.socket?.write(encodeMessage(m));
   }
 
+  /** Stops the current request (it fails with this reason) and the process; the next request starts a new one. */
+  abort(reason: string): void {
+    this.reset(new Error(reason));
+  }
+
   private reset(error?: Error): void {
     if (error) this.listener?.({ MessageType: 'Refyntra.Error', Payload: error.message });
     this.listener = undefined;
@@ -141,6 +146,53 @@ export class VsTestSession {
           else if (m.MessageType === 'Refyntra.Error') reject(new Error(String(m.Payload)));
         };
         this.send({ MessageType: 'TestExecution.RunAllWithDefaultHost', Version: VSTEST_PROTOCOL_VERSION, Payload: { Sources: [...new Set(cases.map((c) => c.Source))], TestCases: cases, RunSettings: EMPTY_RUN_SETTINGS, KeepAlive: false, DebuggingEnabled: false } });
+      });
+    });
+  }
+
+  /**
+   * Debugs exactly these test cases: vstest.console asks the editor to start the test host (CustomTestHostLaunch) —
+   * `launch` starts it and returns its process id — or, in newer versions, to attach to a host it started
+   * (EditorAttachDebugger) — `attach`. Results arrive like in run().
+   */
+  debug(
+    cases: readonly VsTestCase[],
+    launch: (info: VsTestProcessStartInfo) => Promise<number>,
+    attach: (pid: number) => Promise<boolean>,
+    onResult: (r: VsTestResult) => void,
+    onMessage?: (text: string) => void,
+    cancel?: { onCancellationRequested(cb: () => void): unknown },
+  ): Promise<void> {
+    return this.exclusive(async () => {
+      await this.start();
+      return new Promise<void>((resolve, reject) => {
+        cancel?.onCancellationRequested(() => this.send({ MessageType: 'TestExecution.Cancel' }));
+        this.listener = (m) => {
+          if (m.MessageType === 'TestExecution.CustomTestHostLaunch') {
+            launch(m.Payload as VsTestProcessStartInfo).then(
+              (pid) => this.send({ MessageType: 'TestExecution.CustomTestHostLaunchCallback', Version: VSTEST_PROTOCOL_VERSION, Payload: { HostProcessId: pid, ErrorMessage: null } }),
+              (e) => this.send({ MessageType: 'TestExecution.CustomTestHostLaunchCallback', Version: VSTEST_PROTOCOL_VERSION, Payload: { HostProcessId: -1, ErrorMessage: String(e) } }),
+            );
+          } else if (m.MessageType === 'TestExecution.EditorAttachDebugger' || m.MessageType === 'TestExecution.EditorAttachDebugger2') {
+            const p = m.Payload as { ProcessID?: number; ProcessId?: number } | number;
+            const pid = typeof p === 'number' ? p : (p?.ProcessID ?? p?.ProcessId ?? -1);
+            attach(pid).then(
+              (ok) => this.send({ MessageType: 'TestExecution.EditorAttachDebuggerCallback', Version: VSTEST_PROTOCOL_VERSION, Payload: { Attached: ok, ErrorMessage: ok ? null : 'The debugger did not attach.' } }),
+              (e) => this.send({ MessageType: 'TestExecution.EditorAttachDebuggerCallback', Version: VSTEST_PROTOCOL_VERSION, Payload: { Attached: false, ErrorMessage: String(e) } }),
+            );
+          } else if (m.MessageType === 'TestExecution.StatsChange') for (const r of (m.Payload as { NewTestResults?: VsTestResult[] })?.NewTestResults ?? []) onResult(r);
+          else if (m.MessageType === 'TestExecution.Completed') {
+            for (const r of (m.Payload as { LastRunTests?: { NewTestResults?: VsTestResult[] } })?.LastRunTests?.NewTestResults ?? []) onResult(r);
+            this.listener = undefined;
+            resolve();
+          } else if (m.MessageType === 'TestSession.Message') onMessage?.((m.Payload as { Message?: string })?.Message ?? '');
+          else if (m.MessageType === 'Refyntra.Error') reject(new Error(String(m.Payload)));
+        };
+        this.send({
+          MessageType: 'TestExecution.GetTestRunnerProcessStartInfoForRunSelected',
+          Version: VSTEST_PROTOCOL_VERSION,
+          Payload: { Sources: [...new Set(cases.map((c) => c.Source))], TestCases: cases, RunSettings: EMPTY_RUN_SETTINGS, KeepAlive: false, DebuggingEnabled: true },
+        });
       });
     });
   }

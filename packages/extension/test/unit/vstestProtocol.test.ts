@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MessageReader, caseAsResult, encodeMessage, splitFullyQualifiedName, toTrxResult } from '../../src/vstestProtocol';
+import { MessageReader, caseAsResult, encodeMessage, splitCommandLine, splitFullyQualifiedName, toTrxResult } from '../../src/vstestProtocol';
 
 describe('vstest.console design-mode protocol', () => {
   it('frames messages as .NET BinaryWriter strings (7-bit length) and reads them back, also split across chunks', () => {
@@ -29,5 +29,10 @@ describe('vstest.console design-mode protocol', () => {
     expect(r).toEqual({ className: 'M.T', methodName: 'Adds', testName: 'Adds (2,2,5)', outcome: 'failed', durationMs: 1250, message: 'expected 5', stackTrace: 'at M.T.Adds() in /a/T.cs:line 20', stdout: 'hello' });
     expect(toTrxResult({ TestCase: { Id: '2', FullyQualifiedName: 'M.T.S', DisplayName: 'S' }, Outcome: 3 }).outcome).toBe('skipped');
     expect(toTrxResult({ TestCase: { Id: '3', FullyQualifiedName: 'M.T.P', DisplayName: 'P' }, Outcome: 1 }).outcome).toBe('passed');
+  });
+
+  it('splits the test host command line of a custom launch', () => {
+    expect(splitCommandLine('exec --runtimeconfig "/a b/x.json" --port 123 C:\\dir\\x.dll')).toEqual(['exec', '--runtimeconfig', '/a b/x.json', '--port', '123', 'C:\\dir\\x.dll']);
+    expect(splitCommandLine('  a  ""  b ')).toEqual(['a', '', 'b']);
   });
 });

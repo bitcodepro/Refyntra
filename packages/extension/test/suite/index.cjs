@@ -1674,7 +1674,10 @@ exports.run =async function run() {
   const failures = [];
   for (const [title, fn] of cases) {
     try {
-      await fn();
+      // A hung case fails after a fixed time instead of blocking the run (REFYNTRA_CASE_TIMEOUT_MS, default 6 minutes).
+      const limit = Number(process.env.REFYNTRA_CASE_TIMEOUT_MS || 360000);
+      let timer;
+      await Promise.race([fn(), new Promise((_, rej) => (timer = setTimeout(() => rej(new Error(`timed out after ${limit / 1000} s`)), limit)))]).finally(() => clearTimeout(timer));
       console.log(`  ✓ ${title}`);
     } catch (e) {
       console.log(`  ✗ ${title}\n    ${e && e.stack ? e.stack : e}`);

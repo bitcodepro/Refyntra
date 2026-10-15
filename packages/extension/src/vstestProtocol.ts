@@ -106,3 +106,48 @@ export function toTrxResult(r: VsTestResult): TrxResult {
 }
 
 export const EMPTY_RUN_SETTINGS = '<RunSettings><RunConfiguration><DisableAppDomain>true</DisableAppDomain></RunConfiguration></RunSettings>';
+
+/** How vstest.console asks the editor to start the test host itself (TestExecution.CustomTestHostLaunch, debugging). */
+export interface VsTestProcessStartInfo {
+  FileName: string;
+  Arguments?: string | null;
+  WorkingDirectory?: string | null;
+  EnvironmentVariables?: Record<string, string> | null;
+}
+
+/** Splits a Windows-style command line (double quotes group, backslashes escape quotes) into arguments. */
+export function splitCommandLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = '';
+  let quoted = false;
+  let has = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]!;
+    if (ch === '\\') {
+      let n = 0;
+      while (line[i + n] === '\\') n++;
+      if (line[i + n] === '"') {
+        cur += '\\'.repeat(Math.floor(n / 2));
+        if (n % 2 === 1) cur += '"';
+        else quoted = !quoted;
+        i += n;
+      } else {
+        cur += '\\'.repeat(n);
+        i += n - 1;
+      }
+      has = true;
+    } else if (ch === '"') {
+      quoted = !quoted;
+      has = true;
+    } else if (!quoted && /\s/.test(ch)) {
+      if (has) out.push(cur);
+      cur = '';
+      has = false;
+    } else {
+      cur += ch;
+      has = true;
+    }
+  }
+  if (has) out.push(cur);
+  return out;
+}

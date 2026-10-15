@@ -7,7 +7,7 @@ import type { EngineClient } from '@refyntra/application';
 import type { TestMethodInfo, TestProjectInfo } from '@refyntra/contracts';
 import { type DebuggerLocator, buildDotnet, killTree, onPath } from './run';
 import { DOTNET_DEBUG_TYPE, PYTHON_DEBUG_TYPE } from './runModel';
-import { caseAsResult, toTrxResult, type VsTestCase } from './vstestProtocol';
+import { caseAsResult, splitCommandLine, toTrxResult, type VsTestCase, type VsTestProcessStartInfo } from './vstestProtocol';
 import { VsTestSession } from './vstestSession';
 import {
   type JunitResult,
@@ -114,6 +114,11 @@ function dotnetRoot(): string | undefined {
     return path.dirname(exe);
   }
 }
+
+/** How long a debug run through vstest.console may wait for its debug session before it goes the `dotnet test` way. */
+const SERVER_DEBUG_TIMEOUT_MS = 90000;
+/** Debugging through vstest.console (custom test host launch) is not finished: the host does not continue after the attach yet. */
+const DEBUG_THROUGH_SERVER = false;
 
 export class TestingService implements vscode.Disposable {
   readonly controller = vscode.tests.createTestController(TEST_CONTROLLER_ID, 'Refyntra Tests');
@@ -596,10 +601,20 @@ export class TestingService implements vscode.Disposable {
    * items, run exactly those. Undefined when this path is not possible (multi-targeting, no server, a failed discovery):
    * the caller then runs `dotnet test`.
    */
-  private async runViaServer(run: vscode.TestRun, project: string, items: vscode.TestItem[], cwd: string, token: vscode.CancellationToken): Promise<TrxResult[] | undefined> {
+  private async runViaServer(
+    run: vscode.TestRun,
+    project: string,
+    items: vscode.TestItem[],
+    cwd: string,
+    token: vscode.CancellationToken,
+    debug?: { launch: (info: VsTestProcessStartInfo) => Promise<number>; attach: (pid: number) => Promise<boolean> },
+  ): Promise<TrxResult[] | undefined> {
     this.lastServerCases = undefined;
-    const build = await this.spawnForRun(run, 'dotnet', ['build', project, '-c', 'Debug', '--nologo', '-v', 'q'], cwd, {}, token);
-    if (build.code !== 0 || token.isCancellationRequested) return undefined;
+    if (!debug) {
+      // Debugging builds before (a task, like F5).
+      const build = await this.spawnForRun(run, 'dotnet', ['build', project, '-c', 'Debug', '--nologo', '-v', 'q'], cwd, {}, token);
+      if (build.code !== 0 || token.isCancellationRequested) return undefined;
+    }
     const prop = await this.spawnForRun(run, 'dotnet', ['msbuild', project, '-nologo', '-getProperty:TargetPath', '-p:Configuration=Debug'], cwd, {}, token);
     const target = prop.output.trim().split(/\r?\n/).pop()?.trim() ?? '';
     if (!target || !fs.existsSync(target)) return undefined;
@@ -624,7 +639,8 @@ export class TestingService implements vscode.Disposable {
       this.lastServerCases = chosen.length;
       run.appendOutput(crlf(`[Refyntra] running ${chosen.length} test case(s) through vstest.console\n`));
       const results: TrxResult[] = [];
-      await this.vstest.run(chosen, (r) => results.push(toTrxResult(r)), (m) => run.appendOutput(crlf(`${m}\n`)), token);
+      if (debug) await this.vstest.debug(chosen, debug.launch, debug.attach, (r) => results.push(toTrxResult(r)), (m) => run.appendOutput(crlf(`${m}\n`)), token);
+      else await this.vstest.run(chosen, (r) => results.push(toTrxResult(r)), (m) => run.appendOutput(crlf(`${m}\n`)), token);
       return results.length > 0 ? results : undefined;
     } catch (e) {
       run.appendOutput(crlf(`[Refyntra] vstest.console server unavailable (${e instanceof Error ? e.message : String(e)}); using dotnet test\n`));
@@ -778,18 +794,74 @@ export class TestingService implements vscode.Disposable {
         token.onCancellationRequested(() => {
           if (session) void vscode.debug.stopDebugging(session);
         });
-        outcome = await this.spawnForRun(run, 'dotnet', dotnetTestArgs(project, { ...(filter ? { filter } : {}), resultsDirectory, noBuild: true }), cwd, { VSTEST_HOST_DEBUG: '1', VSTEST_DEBUG_NOBP: '1' }, local.token, (all) => {
-          if (attached) return;
-          const pid = testhostProcessId(all);
-          if (pid === undefined) return;
+        const attach = (pid: number): Promise<boolean> => {
           attached = true;
           this.lastDebugPid = pid;
           trace(`test host process ${pid} waits for the debugger; attaching netcoredbg`);
-          vscode.debug.startDebugging(folder, { type: DOTNET_DEBUG_TYPE, request: 'attach', name: 'Refyntra: Debug tests', processId: pid, justMyCode: true, refyntraTestRun: this.runs }).then(
-            (ok) => (ok ? trace('attach requested') : giveUp('the debug session did not start')),
-            (e) => giveUp(`attach failed: ${String(e)}`),
+          return Promise.resolve(vscode.debug.startDebugging(folder, { type: DOTNET_DEBUG_TYPE, request: 'attach', name: 'Refyntra: Debug tests', processId: pid, justMyCode: true, refyntraTestRun: this.runs })).then(
+            (ok) => {
+              if (ok) trace('attach requested');
+              else giveUp('the debug session did not start');
+              return ok;
+            },
+            (e) => {
+              giveUp(`attach failed: ${String(e)}`);
+              return false;
+            },
           );
-        });
+        };
+        // vstest.console as a server: the exact cases (one data row alone too). The editor starts the test host, which
+        // waits for the debugger (VSTEST_HOST_DEBUG=1), and netcoredbg attaches to it.
+        const hosts: ChildProcess[] = [];
+        const launch = async (info: VsTestProcessStartInfo): Promise<number> => {
+          const child = spawn(info.FileName, splitCommandLine(info.Arguments ?? ''), {
+            cwd: info.WorkingDirectory || cwd,
+            env: { ...process.env, ...(info.EnvironmentVariables ?? {}), VSTEST_HOST_DEBUG: '1', VSTEST_DEBUG_NOBP: '1' },
+            stdio: ['ignore', 'pipe', 'pipe'],
+            windowsHide: true,
+          });
+          hosts.push(child);
+          child.stdout?.on('data', (d: Buffer) => run.appendOutput(crlf(d.toString())));
+          child.stderr?.on('data', (d: Buffer) => run.appendOutput(crlf(d.toString())));
+          local.token.onCancellationRequested(() => {
+            if (child.exitCode === null) child.kill();
+          });
+          const pid = await new Promise<number>((resolve, reject) => {
+            child.once('spawn', () => resolve(child.pid!));
+            child.once('error', reject);
+          });
+          void attach(pid);
+          return pid;
+        };
+        // A debug run through the server that does not finish in time (no attach, a host that waits forever) is stopped:
+        // its test host is killed and the run goes the `dotnet test` way.
+        const stopServerRun = (why: string) => {
+          trace(why);
+          for (const h of hosts) if (h.exitCode === null) h.kill();
+          this.vstest?.abort(why);
+        };
+        const watchdog = setTimeout(() => {
+          if (!session) stopServerRun('no debug session started for the vstest.console run; using dotnet test');
+        }, SERVER_DEBUG_TIMEOUT_MS);
+        const cancelled = local.token.onCancellationRequested(() => setTimeout(() => stopServerRun('the debug run was stopped'), 10000).unref());
+        const viaServer = DEBUG_THROUGH_SERVER && this.useServer() ? await this.runViaServer(run, project, items, cwd, local.token, { launch, attach }).finally(() => {
+              clearTimeout(watchdog);
+              cancelled.dispose();
+            }) : undefined;
+        if (!viaServer) {
+          attached = false;
+          session = undefined;
+        }
+        if (viaServer) {
+          serverResults = viaServer;
+          outcome = { code: 0, output: '' };
+        } else
+          outcome = await this.spawnForRun(run, 'dotnet', dotnetTestArgs(project, { ...(filter ? { filter } : {}), resultsDirectory, noBuild: true }), cwd, { VSTEST_HOST_DEBUG: '1', VSTEST_DEBUG_NOBP: '1' }, local.token, (all) => {
+            if (attached) return;
+            const pid = testhostProcessId(all);
+            if (pid === undefined) return;
+            void attach(pid);
+          });
         starting.dispose();
         linked.dispose();
         local.dispose();
