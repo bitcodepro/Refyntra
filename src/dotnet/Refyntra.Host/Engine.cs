@@ -42,8 +42,9 @@ public sealed partial class Engine : IRpcHandler, IDisposable
     /// 1.20: solution/structure (Solution Explorer: solution folders, projects, dependencies and items as MSBuild sees them).
     /// 1.21: code/expressionCompletions (Immediate window completions at a stopped position) and the plan actions
     /// csharp.inlineMethod / csharp.inlineMethodAll (Inline Method across files).
+    /// 1.22: code/completion and code/completionResolve (editor completion from Roslyn's CompletionService).
     /// </summary>
-    public const int ProtocolMinor = 21;
+    public const int ProtocolMinor = 22;
     /// <summary>How long workspace/snapshotBarrier waits for a missing document sequence (tests shorten it).</summary>
     public TimeSpan BarrierTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
@@ -145,6 +146,10 @@ public sealed partial class Engine : IRpcHandler, IDisposable
                 return await GenerateAsync(Params<GenerateParams>(p), ct).ConfigureAwait(false);
             case "code/constructorActions":
                 return await ConstructorActionsAsync(Params<ConstructorActionsParams>(p), ct).ConfigureAwait(false);
+            case "code/completion":
+                return await CompletionAsync(Params<CompletionParams>(p), ct).ConfigureAwait(false);
+            case "code/completionResolve":
+                return await CompletionResolveAsync(Params<CompletionResolveParams>(p), ct).ConfigureAwait(false);
             case "code/expressionCompletions":
                 return await ExpressionCompletionsAsync(Params<ExpressionCompletionsParams>(p), ct).ConfigureAwait(false);
             case "code/stepIntoTargets":
@@ -750,6 +755,54 @@ public sealed partial class Engine : IRpcHandler, IDisposable
         }).ToList();
         result.Regions = model.Regions.Select(r => new StructureRegionDto { Name = r.Name, Range = ToRange(r.Range) }).ToList();
         return result;
+    }
+
+    private async Task<CompletionResultDto> CompletionAsync(CompletionParams p, CancellationToken ct)
+    {
+        var snap = RequireSnapshot(p.WorkspaceId, p.SnapshotId);
+        var result = new CompletionResultDto { SnapshotId = snap.Id };
+        var path = PathOf(p.Uri);
+        var doc = snap.Session.DocumentIdsForPath(path).Select(snap.Solution.GetDocument).FirstOrDefault(d => d != null);
+        int? razorPosition = null;
+        if (doc == null && RazorMapping.IsRazorPath(path) && await RazorMapping.ToGeneratedAsync(snap.Solution, path, p.Position.Line, p.Position.Character, ct).ConfigureAwait(false) is { } g)
+        {
+            doc = g.Document;
+            razorPosition = g.Position;
+        }
+        if (doc == null)
+        {
+            result.ReasonCode = "DocumentNotFound";
+            return result;
+        }
+        var trigger = string.IsNullOrEmpty(p.TriggerCharacter) ? (char?)null : p.TriggerCharacter[0];
+        Microsoft.CodeAnalysis.Text.LinePosition at;
+        if (razorPosition is { } rp) at = (await doc.GetTextAsync(ct).ConfigureAwait(false)).Lines.GetLinePosition(rp);
+        else at = new Microsoft.CodeAnalysis.Text.LinePosition(p.Position.Line, p.Position.Character);
+        var model = await EditorCompletion.ComputeAsync(doc, at, trigger, ct).ConfigureAwait(false);
+        if (model == null)
+        {
+            result.ReasonCode = "NoCompletionService";
+            return result;
+        }
+        result.ListId = model.ListId;
+        // In a .razor file the replaced word is the one under the cursor in the markup.
+        result.Range = razorPosition == null ? ToRange(model.Span)
+            : new RangeDto { Start = new PositionDto { Line = p.Position.Line, Character = p.Position.Character - (model.Span.End.Character - model.Span.Start.Character) }, End = new PositionDto { Line = p.Position.Line, Character = p.Position.Character } };
+        result.Items = model.Items.Select(i => new CompletionItemDto { Label = i.Label, LabelDetail = i.LabelDetail, InsertText = i.InsertText, Kind = i.Kind, SortText = i.SortText, FilterText = i.FilterText, Preselect = i.Preselect, Index = i.Index }).ToList();
+        return result;
+    }
+
+    private async Task<CompletionResolveResultDto> CompletionResolveAsync(CompletionResolveParams p, CancellationToken ct)
+    {
+        var d = await EditorCompletion.ResolveAsync(p.ListId, p.Index, ct).ConfigureAwait(false);
+        if (d == null) return new CompletionResolveResultDto();
+        return new CompletionResolveResultDto
+        {
+            Detail = d.Detail,
+            Documentation = d.Documentation,
+            TextEdit = d.NewText != null && d.Span is { } s ? new TextEditDto { Range = ToRange(s), NewText = d.NewText } : null,
+            AdditionalTextEdits = d.AdditionalEdits.Select(e => new TextEditDto { Range = ToRange(e.Span), NewText = e.NewText }).ToList(),
+        };
     }
 
     private async Task<ExpressionCompletionsResultDto> ExpressionCompletionsAsync(ExpressionCompletionsParams p, CancellationToken ct)

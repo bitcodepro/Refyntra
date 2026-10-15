@@ -306,6 +306,9 @@ export interface EngineClient {
   stepIntoTargets?(uri: string, position: Position, token?: CancellationToken): Promise<StepIntoTargetsOutcome>;
   /** Immediate window completions (protocol 1.21) at a stopped position of a C# file; [] when not available. */
   expressionCompletions?(uri: string, position: Position, text: string, caret: number, token?: CancellationToken): Promise<string[]>;
+  /** Editor completion (protocol 1.22) of a C# / .razor document; undefined when not provided here. */
+  completion?(uri: string, position: Position, triggerCharacter: string | undefined, token?: CancellationToken): Promise<import('@refyntra/contracts').CompletionResult | undefined>;
+  completionResolve?(uri: string, listId: string, index: number, token?: CancellationToken): Promise<import('@refyntra/contracts').CompletionResolveResult | undefined>;
   /**
    * Go to metadata (owned route, protocol 1.17): the decompiled / embedded-source document of a metadata symbol, or the
    * symbol at a position inside such a document.
@@ -833,6 +836,29 @@ export class RefyntraEngine implements EngineClient {
     } catch (e) {
       if (e instanceof CancelledError) throw e;
       return this.toUnavailable(adapter, e);
+    }
+  }
+
+  async completion(uri: string, position: Position, triggerCharacter: string | undefined, token?: CancellationToken): Promise<import('@refyntra/contracts').CompletionResult | undefined> {
+    const adapter = this.o.registry.routeFor(uri);
+    if (!adapter || adapter.descriptor.ownership !== 'owned-semantic' || typeof adapter.completion !== 'function') return undefined;
+    try {
+      const r = await this.withStaleRetry(() => adapter.completion!(uri, position, triggerCharacter, token), token);
+      return r.value ?? undefined;
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      return undefined;
+    }
+  }
+
+  async completionResolve(uri: string, listId: string, index: number, token?: CancellationToken): Promise<import('@refyntra/contracts').CompletionResolveResult | undefined> {
+    const adapter = this.o.registry.routeFor(uri);
+    if (!adapter || typeof adapter.completionResolve !== 'function') return undefined;
+    try {
+      return (await adapter.completionResolve(listId, index, token)).value ?? undefined;
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      return undefined;
     }
   }
 

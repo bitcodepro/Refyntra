@@ -31,8 +31,9 @@ export const PROTOCOL_MAJOR = 1;
  * 1.20: Solution Explorer (`solution/structure`: solution folders, projects, dependencies and items as MSBuild sees them).
  * 1.21: Immediate window completions (`code/expressionCompletions`) and Inline Method across files (plan actions
  *   `csharp.inlineMethod` / `csharp.inlineMethodAll`).
+ * 1.22: Editor completion (`code/completion`, `code/completionResolve`) from Roslyn's CompletionService.
  */
-export const PROTOCOL_MINOR = 21;
+export const PROTOCOL_MINOR = 22;
 
 /** Zero-based line, UTF-16 code unit character. */
 export interface Position {
@@ -588,6 +589,49 @@ export interface FileStructureResult {
   reasonCode?: string | null;
   completeness: 'complete' | 'partial' | 'unknown';
   snapshotId: string;
+}
+
+/** code/completion (protocol 1.22): editor completion at a position of a C# (or .razor) document. */
+export interface CompletionParams extends WorkspaceParams {
+  snapshotId: string;
+  uri: string;
+  position: Position;
+  /** The character that triggered completion ("."); absent: invoked. */
+  triggerCharacter?: string;
+}
+
+export type CompletionKind = 'method' | 'property' | 'field' | 'constant' | 'variable' | 'class' | 'interface' | 'struct' | 'enum' | 'enumMember' | 'event' | 'module' | 'keyword' | 'typeParameter' | 'snippet' | 'operator' | 'text';
+
+export interface CompletionItemInfo {
+  label: string;
+  labelDetail?: string | null;
+  insertText: string;
+  kind: CompletionKind;
+  sortText: string;
+  filterText: string;
+  preselect: boolean;
+  index: number;
+}
+
+export interface CompletionResult {
+  listId: string;
+  /** The text the items replace (the word typed so far). */
+  range?: Range | null;
+  items: CompletionItemInfo[];
+  reasonCode?: string | null;
+  snapshotId: string;
+}
+
+export interface CompletionResolveParams extends WorkspaceParams {
+  listId: string;
+  index: number;
+}
+
+export interface CompletionResolveResult {
+  detail?: string | null;
+  documentation?: string | null;
+  textEdit?: TextEditDto | null;
+  additionalTextEdits: TextEditDto[];
 }
 
 /** code/expressionCompletions (protocol 1.21): names for the debugger's Immediate window at a stopped position (Roslyn, nothing evaluated). */
@@ -1375,6 +1419,9 @@ export interface MethodMap {
   'solution/structure': [WorkspaceParams, SolutionStructureResult];
   /** Protocol 1.21. */
   'code/expressionCompletions': [ExpressionCompletionsParams, ExpressionCompletionsResult];
+  /** Protocol 1.22. */
+  'code/completion': [CompletionParams, CompletionResult];
+  'code/completionResolve': [CompletionResolveParams, CompletionResolveResult];
   'code/references': [SymbolQueryParams, LocationsResult];
   'code/implementations': [SymbolQueryParams, LocationsResult];
   'refactor/prepare': [PrepareParams, PrepareResult];

@@ -1023,6 +1023,56 @@ public sealed class ConstructorActionsResultDto
     public string SnapshotId { get; set; } = "";
 }
 
+/// <summary>code/completion (protocol 1.22): editor completion at a position of a C# document.</summary>
+public sealed class CompletionParams : WorkspaceParams
+{
+    public string SnapshotId { get; set; } = "";
+    public string Uri { get; set; } = "";
+    public PositionDto Position { get; set; } = new();
+    /// <summary>The character that triggered completion ("." …); absent: invoked (Ctrl+Space or typing a word).</summary>
+    public string? TriggerCharacter { get; set; }
+}
+
+public sealed class CompletionItemDto
+{
+    public string Label { get; set; } = "";
+    public string? LabelDetail { get; set; }
+    public string InsertText { get; set; } = "";
+    /// <summary>method | property | field | constant | variable | class | interface | struct | enum | enumMember | event | module | keyword | typeParameter | snippet | operator | text.</summary>
+    public string Kind { get; set; } = "text";
+    public string SortText { get; set; } = "";
+    public string FilterText { get; set; } = "";
+    public bool Preselect { get; set; }
+    public int Index { get; set; }
+}
+
+public sealed class CompletionResultDto
+{
+    /// <summary>Identifies the list for code/completionResolve (only the newest list of a document is kept).</summary>
+    public string ListId { get; set; } = "";
+    /// <summary>The text the items replace (the word typed so far).</summary>
+    public RangeDto? Range { get; set; }
+    public List<CompletionItemDto> Items { get; set; } = new();
+    public string? ReasonCode { get; set; }
+    public string SnapshotId { get; set; } = "";
+}
+
+public sealed class CompletionResolveParams : WorkspaceParams
+{
+    public string ListId { get; set; } = "";
+    public int Index { get; set; }
+}
+
+public sealed class CompletionResolveResultDto
+{
+    public string? Detail { get; set; }
+    public string? Documentation { get; set; }
+    /// <summary>The text the item inserts over its range (when it differs from insertText, e.g. an override).</summary>
+    public TextEditDto? TextEdit { get; set; }
+    /// <summary>Edits elsewhere: a using directive for a type of a namespace not imported yet.</summary>
+    public List<TextEditDto> AdditionalTextEdits { get; set; } = new();
+}
+
 /// <summary>code/expressionCompletions (protocol 1.21): completions of the debugger's Immediate window at a stopped position.</summary>
 public sealed class ExpressionCompletionsParams : WorkspaceParams
 {

@@ -860,6 +860,23 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
     });
   }
 
+  /** Editor completion (protocol 1.22); null for an older host. */
+  completion(uri: string, position: Position, triggerCharacter: string | undefined, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').CompletionResult | null>> {
+    return this.semantic('code/completion', token, async (s, snapshotId, traceId) => {
+      if (s.protocolMinor < 22) return null;
+      const r = await s.transport.request('code/completion', { traceId, workspaceId: this.opts.workspaceId, snapshotId, uri, position, ...(triggerCharacter ? { triggerCharacter } : {}) }, token);
+      return { listId: String(r?.listId ?? ''), range: r?.range ?? null, items: Array.isArray(r?.items) ? r.items : [], reasonCode: r?.reasonCode ?? null, snapshotId: r?.snapshotId ?? snapshotId };
+    });
+  }
+
+  completionResolve(listId: string, index: number, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').CompletionResolveResult | null>> {
+    return this.semantic('code/completionResolve', token, async (s, _snapshotId, traceId) => {
+      if (s.protocolMinor < 22) return null;
+      const r = await s.transport.request('code/completionResolve', { traceId, workspaceId: this.opts.workspaceId, listId, index }, token);
+      return { detail: r?.detail ?? null, documentation: r?.documentation ?? null, textEdit: r?.textEdit ?? null, additionalTextEdits: Array.isArray(r?.additionalTextEdits) ? r.additionalTextEdits : [] };
+    });
+  }
+
   /** Immediate window completions (protocol 1.21); null for an older host. */
   expressionCompletions(uri: string, position: Position, text: string, caret: number, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').ExpressionCompletionsResult | null>> {
     return this.semantic('code/expressionCompletions', token, async (s, snapshotId, traceId) => {

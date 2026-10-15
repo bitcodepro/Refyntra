@@ -10,5 +10,7 @@
   <ItemGroup>
     <!-- Go to metadata / decompiled sources (docs/adr/ADR-010-decompiler-and-source-policy.md). -->
     <PackageReference Include="ICSharpCode.Decompiler" />
+    <!-- Editor services of Roslyn (completion, quick info) for a self-sufficient C# editor. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Features" />
   </ItemGroup>
 </Project>

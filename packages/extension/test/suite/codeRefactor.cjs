@@ -456,5 +456,31 @@ exports.cases = ({ api, csharp, waitFor }) => {
         assert.ok(impl.some((l) => (l.targetRange ?? l.range).start.line === lineOf('public class Greeter')), JSON.stringify(impl));
       },
     ],
+    [
+      'Completion: after "Pricing." the members come from Roslyn (methods, constants, no private ones); resolving shows the signature',
+      async () => {
+        await api();
+        const uri = lib('EditActions/InlineAcrossCallers.cs');
+        const doc = await vscode.workspace.openTextDocument(uri);
+        const editor = await vscode.window.showTextDocument(doc);
+        const at = doc.positionAt(doc.getText().indexOf('Pricing.Doubled(a)'));
+        await editor.edit((e) => e.insert(at, 'Pricing.'));
+        try {
+          const pos = at.translate(0, 'Pricing.'.length);
+          const list = await waitFor(async () => {
+            const l = await vscode.commands.executeCommand('vscode.executeCompletionItemProvider', uri, pos, '.', 50);
+            return l.items.some((i) => (typeof i.label === 'string' ? i.label : i.label.label) === 'WithTax') ? l : undefined;
+          }, 'WithTax in the completion list', 60000);
+          const labelOf = (i) => (typeof i.label === 'string' ? i.label : i.label.label);
+          const withTax = list.items.find((i) => labelOf(i) === 'WithTax');
+          assert.equal(withTax.kind, vscode.CompletionItemKind.Method);
+          assert.ok(list.items.some((i) => labelOf(i) === 'Rate' && i.kind === vscode.CompletionItemKind.Constant));
+          assert.ok(!list.items.some((i) => labelOf(i) === 'Secret'), 'private members are not offered');
+          assert.match(withTax.detail ?? '', /WithTax\(decimal net\)/);
+        } finally {
+          await vscode.commands.executeCommand('workbench.action.files.revert');
+        }
+      },
+    ],
   ];
 };
