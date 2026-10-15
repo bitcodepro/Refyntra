@@ -330,6 +330,14 @@ const scenarios = visual
       },
       // Safe Delete, Extract Method, Change Signature on a temp copy of the Refactorings fixture: apply, file deletion
       // with host resync, Undo (restore), a delete refused when the file changed in the last moment.
+      // Blazor / Razor on a temp copy of the Blazor fixture: a C# rename updates .razor and .cshtml markup; references.
+      {
+        name: 'razor',
+        fixtureCopy: ['Blazor', 'Blazor.sln'],
+        trusted: true,
+        settings: { 'refyntra.rename.apply': true, 'files.autoSave': 'off' },
+        env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' },
+      },
       {
         name: 'code-refactor',
         fixtureCopy: ['Refactorings', 'Refactorings.sln'],

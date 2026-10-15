@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.FindSymbols;
 using Microsoft.CodeAnalysis.Rename;
 using Microsoft.CodeAnalysis.Text;
 using Refyntra.Semantics;
@@ -146,6 +147,15 @@ public static class RenamePlanner
             return RenameOutcome.Unavailable("RenameRejected", "Roslyn rejected the rename: " + ex.GetType().Name);
         }
 
+        // Razor (.razor / .cshtml): Roslyn finds the uses in the code the Razor generator produced; they are renamed in
+        // the markup at the #line-mapped spans (each must read exactly the old name), and the generator re-runs on the new markup.
+        var razor = await RazorEditsAsync(solution, symbol, bareNew, ct).ConfigureAwait(false);
+        if (razor.Refusal is { } razorRefusal) return RenameOutcome.Unavailable(razorRefusal.reason, razorRefusal.message);
+        foreach (var (path, newText) in razor.NewTexts)
+            foreach (var project in solution.Projects)
+                foreach (var additional in project.AdditionalDocuments.Where(d => d.FilePath != null && UriPaths.PathComparer.Equals(d.FilePath, path)))
+                    renamed = renamed.WithAdditionalDocumentText(additional.Id, newText);
+
         var changes = renamed.GetChanges(solution);
         var projectChanges = changes.GetProjectChanges().ToList();
 
@@ -176,7 +186,8 @@ public static class RenamePlanner
         }
         if (changes.GetAddedProjects().Any() || changes.GetRemovedProjects().Any()
             || projectChanges.Any(p => p.GetAddedDocuments().Any() || p.GetRemovedDocuments().Any() || p.GetAddedAdditionalDocuments().Any()
-                || p.GetRemovedAdditionalDocuments().Any() || p.GetChangedAdditionalDocuments().Any() || p.GetChangedAnalyzerConfigDocuments().Any()))
+                || p.GetRemovedAdditionalDocuments().Any() || p.GetChangedAnalyzerConfigDocuments().Any()
+                || p.GetChangedAdditionalDocuments().Any(id => solution.GetAdditionalDocument(id)?.FilePath is not { } ap || !razor.NewTexts.ContainsKey(ap))))
             return RenameOutcome.Unavailable("ResourceOperation", "The rename would add, remove or change non-source files; only text edits are supported.");
 
         // Text changes, grouped by file path (linked documents in several contexts must agree).
@@ -215,6 +226,15 @@ public static class RenamePlanner
                 continue;
             }
             byPath[oldDoc.FilePath] = change;
+        }
+        foreach (var (path, edits) in razor.Edits)
+        {
+            if (IsReadOnly(path)) return RenameOutcome.Unavailable("ReadOnlyFile", "The rename would edit a read-only file: " + Path.GetFileName(path));
+            var oldText = razor.OldTexts[path];
+            if (TargetGuard(session, path, oldText) is { } razorGuard) return razorGuard;
+            byPath[path] = new PlannedFileChange(path, Hashing.Sha256Text(oldText.ToString()), Hashing.Sha256Text(razor.NewTexts[path].ToString()), edits);
+            foreach (var project in solution.Projects)
+                if (project.AdditionalDocuments.Any(d => d.FilePath != null && UriPaths.PathComparer.Equals(d.FilePath, path))) affectedProjects.Add(project.Id);
         }
         if (byPath.Count == 0) return RenameOutcome.Unavailable("NoChanges", "The rename produces no text changes.");
 
@@ -335,6 +355,65 @@ public static class RenamePlanner
             EfMigrations = efPaths.Count > 0 ? new EfMigrationOffer(efMode, efPaths.ToList()) : null,
         };
         return new RenameOutcome(plan, null, null);
+    }
+
+    private sealed record RazorRename(
+        Dictionary<string, SourceText> OldTexts,
+        Dictionary<string, SourceText> NewTexts,
+        Dictionary<string, List<PlannedEdit>> Edits,
+        (string reason, string message)? Refusal);
+
+    /// <summary>
+    /// The markup edits of a rename in .razor / .cshtml files: every reference in Razor-generated code maps (#line) to a
+    /// span of the markup that reads the old name exactly; anything else refuses the rename.
+    /// </summary>
+    private static async Task<RazorRename> RazorEditsAsync(Solution solution, ISymbol symbol, string newName, CancellationToken ct)
+    {
+        var oldTexts = new Dictionary<string, SourceText>(UriPaths.PathComparer);
+        var spans = new Dictionary<string, SortedSet<(int start, int end)>>(UriPaths.PathComparer);
+        var refs = await SymbolFinder.FindReferencesAsync(symbol, solution, ct).ConfigureAwait(false);
+        foreach (var loc in refs.SelectMany(r => r.Locations).Select(l => l.Location))
+        {
+            if (loc.SourceTree == null || solution.GetDocument(loc.SourceTree) is not SourceGeneratedDocument) continue;
+            var mapped = Semantics.RazorMapping.Map(loc);
+            if (mapped == null)
+            {
+                if (Semantics.RazorMapping.IsRazorPath(loc.GetMappedLineSpan().Path) || loc.SourceTree.FilePath.Contains("Razor", StringComparison.OrdinalIgnoreCase))
+                    return new RazorRename(oldTexts, new(), new(), ("RazorMapping", $"{symbol.Name} is used in Razor code that cannot be mapped back to the markup."));
+                continue;
+            }
+            var (path, span) = mapped.Value;
+            if (!oldTexts.TryGetValue(path, out var text))
+            {
+                var doc = solution.Projects.SelectMany(p => p.AdditionalDocuments).FirstOrDefault(d => d.FilePath != null && UriPaths.PathComparer.Equals(d.FilePath, path));
+                if (doc == null || !File.Exists(path))
+                    return new RazorRename(oldTexts, new(), new(), ("RazorMapping", $"{Path.GetFileName(path)} is not a file of the loaded projects."));
+                text = await doc.GetTextAsync(ct).ConfigureAwait(false);
+                oldTexts[path] = text;
+            }
+            if (span.Start.Line >= text.Lines.Count || span.End.Line >= text.Lines.Count)
+                return new RazorRename(oldTexts, new(), new(), ("RazorMapping", $"A use of {symbol.Name} in {Path.GetFileName(path)} maps outside the file."));
+            var tspan = text.Lines.GetTextSpan(span);
+            var written = text.ToString(tspan);
+            var bare = written.StartsWith('@') ? written.Substring(1) : written;
+            if (bare != symbol.Name)
+                return new RazorRename(oldTexts, new(), new(), ("RazorMapping", $"A use of {symbol.Name} in {Path.GetFileName(path)}:{span.Start.Line + 1} does not read '{symbol.Name}' in the markup ('{written}')."));
+            if (written.StartsWith('@')) tspan = new TextSpan(tspan.Start + 1, tspan.Length - 1);
+            if (!spans.TryGetValue(path, out var set)) spans[path] = set = new();
+            set.Add((tspan.Start, tspan.End));
+        }
+        var newTexts = new Dictionary<string, SourceText>(UriPaths.PathComparer);
+        var edits = new Dictionary<string, List<PlannedEdit>>(UriPaths.PathComparer);
+        foreach (var (path, set) in spans)
+        {
+            var text = oldTexts[path];
+            var list = set.ToList();
+            for (var i = 1; i < list.Count; i++)
+                if (list[i].start < list[i - 1].end) return new RazorRename(oldTexts, new(), new(), ("OverlappingEdits", $"Overlapping uses in {Path.GetFileName(path)}."));
+            newTexts[path] = text.WithChanges(list.Select(x => new TextChange(TextSpan.FromBounds(x.start, x.end), newName)));
+            edits[path] = list.Select(x => new PlannedEdit(text.Lines.GetLinePositionSpan(TextSpan.FromBounds(x.start, x.end)), newName)).ToList();
+        }
+        return new RazorRename(oldTexts, newTexts, edits, null);
     }
 
     /// <summary>

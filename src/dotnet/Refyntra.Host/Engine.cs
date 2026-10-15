@@ -932,7 +932,7 @@ public sealed partial class Engine : IRpcHandler, IDisposable
             Subject = mapper.Symbol(symbol),
             Items = model.Items.Select(u => new UsageItemDto
             {
-                Uri = UriPaths.ToUri(u.Location.SourceTree!.FilePath), Range = Mapper.Range(u.Span), Kind = u.Kind,
+                Uri = UriPaths.ToUri(u.FilePath ?? u.Location.SourceTree!.FilePath), Range = Mapper.Range(u.Span), Kind = u.Kind,
                 ContainingMember = u.ContainingMember, ContainingType = u.ContainingType, ProjectName = u.Project.Name, IsTest = u.IsTest, LineText = u.LineText,
             }).ToList(),
             Total = model.Total,

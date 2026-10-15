@@ -1,0 +1,12 @@
+@page "/counter"
+@rendermode InteractiveServer
+@inject CounterService Service
+
+<h1>@Title</h1>
+<p>Count: @Service.Count</p>
+<p>@Service.Describe(1)</p>
+<button @onclick="Service.Increment">Add</button>
+
+@code {
+    private string Title { get; set; } = "Counter";
+}

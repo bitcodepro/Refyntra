@@ -18,7 +18,8 @@ public static class UsageKinds
 }
 
 /// <summary>One classified usage of a symbol.</summary>
-public sealed record UsageHit(Location Location, Project Project, string Kind, string? ContainingMember, string? ContainingType, bool IsTest, string LineText, LinePositionSpan Span);
+/// <summary>A classified usage; <paramref name="FilePath"/> is the markup file (.razor / .cshtml) of a use in Razor-generated code.</summary>
+public sealed record UsageHit(Location Location, Project Project, string Kind, string? ContainingMember, string? ContainingType, bool IsTest, string LineText, LinePositionSpan Span, string? FilePath = null);
 
 public sealed record UsagesModel(List<UsageHit> Items, int Total, bool Truncated, string Completeness);
 
@@ -61,6 +62,7 @@ public static class UsageClassifier
         var ordered = locations.OrderBy(l => l.loc.SourceTree?.FilePath, StringComparer.Ordinal).ThenBy(l => l.loc.SourceSpan.Start).ToList();
         var testProjects = new Dictionary<ProjectId, bool>();
         var items = new List<UsageHit>();
+        var markup = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
         foreach (var group in ordered.Take(limit).GroupBy(l => l.doc.Id))
         {
             var doc = group.First().doc;
@@ -78,12 +80,42 @@ public static class UsageClassifier
                 var (member, type) = Containing(semantic, loc.SourceSpan.Start, ct);
                 var isTest = testProject || (member is IMethodSymbol m && TestNavigation.TestFramework(m) != null) || (type != null && TestNavigation.IsTestClass(type));
                 var lineSpan = loc.GetLineSpan().Span;
-                var line = text.Lines[lineSpan.Start.Line].ToString();
+                string? markupPath = null;
+                string line;
+                // Razor-generated code: the use is shown where it is written, in the .razor / .cshtml markup.
+                if (RazorMapping.Map(loc) is { } razor && ReadLines(markup, razor.Path) is { } lines && razor.Span.Start.Line < lines.Length)
+                {
+                    markupPath = razor.Path;
+                    lineSpan = razor.Span;
+                    line = lines[lineSpan.Start.Line];
+                    type = null;
+                    member = null;
+                }
+                else line = text.Lines[lineSpan.Start.Line].ToString();
                 if (line.Length > MaxLineLength) line = line.Substring(0, MaxLineLength);
-                items.Add(new UsageHit(loc, doc.Project, kind, MemberName(member), type?.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat), isTest, line, lineSpan));
+                items.Add(new UsageHit(loc, doc.Project, kind, MemberName(member), type?.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat), isTest, line, lineSpan, markupPath));
             }
         }
         return new UsagesModel(items, ordered.Count, ordered.Count > limit, "complete");
+    }
+
+    private static string[]? ReadLines(Dictionary<string, string[]> cache, string path)
+    {
+        if (cache.TryGetValue(path, out var lines)) return lines;
+        try
+        {
+            lines = File.ReadAllText(path).Replace("\r\n", "\n").Split('\n');
+        }
+        catch (IOException)
+        {
+            lines = null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            lines = null;
+        }
+        if (lines != null) cache[path] = lines;
+        return lines;
     }
 
     /// <summary>A project that references a known test framework assembly (xUnit, NUnit, MSTest).</summary>
