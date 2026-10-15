@@ -167,6 +167,7 @@ DAP: ${dap.join(' | ')}`);
           const ev = await stop.session.customRequest('evaluate', { expression: 'a + b', frameId: top.id, context: 'watch' });
           assert.equal(ev.result, '5');
           assert.ok(a.testing.state().lastDebugProcessId > 0);
+          assert.equal(a.testing.state().lastServerCases, 1, 'debugged through vstest.console');
           await stop.session.customRequest('continue', { threadId: stop.body.threadId });
           await done;
           done = undefined;
@@ -174,8 +175,41 @@ DAP: ${dap.join(' | ')}`);
         } finally {
           if (done) {
             a.testing.cancelAll();
-            await done.catch(() => undefined);
+            await Promise.race([done.catch(() => undefined), new Promise((r) => setTimeout(r, 30000))]);
           }
+          tracker.dispose();
+          vscode.debug.removeBreakpoints([bp]);
+          if (vscode.debug.activeDebugSession) await Promise.race([vscode.debug.stopDebugging(), new Promise((r) => setTimeout(r, 15000))]);
+        }
+      },
+    ],
+    [
+      'tests: debug one theory row → only that row runs under the debugger (vstest.console server), one stop',
+      async () => {
+        const a = await ready();
+        const rel = 'Calc/Calculator.cs';
+        const line = lineOf(rel, 'var sum = a + b;');
+        const bp = new vscode.SourceBreakpoint(new vscode.Location(vscode.Uri.file(file(rel)), new vscode.Position(line, 0)));
+        vscode.debug.addBreakpoints([bp]);
+        const stops = [];
+        const tracker = vscode.debug.registerDebugAdapterTrackerFactory('refyntra-dotnet', {
+          createDebugAdapterTracker: (session) => ({
+            onDidSendMessage: (m) => {
+              if (m.type === 'event' && m.event === 'stopped') {
+                stops.push(m.body);
+                void session.customRequest('continue', { threadId: m.body.threadId });
+              }
+            },
+          }),
+        });
+        try {
+          const id = idOf(a, 'AddTheory|(2, 2, 4)');
+          await a.testing.runIds([id], true);
+          const st = a.testing.state();
+          assert.equal(st.lastServerCases, 1, `one case went to vstest.console (${st.debugTrace.join(' | ')})`);
+          assert.equal(stops.length, 1, `one stop: ${JSON.stringify(stops)}`);
+          assert.equal(st.results[id].outcome, 'passed');
+        } finally {
           tracker.dispose();
           vscode.debug.removeBreakpoints([bp]);
           if (vscode.debug.activeDebugSession) await vscode.debug.stopDebugging();

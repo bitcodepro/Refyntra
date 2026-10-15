@@ -52,7 +52,7 @@ export class VsTestSession {
       server.once('error', reject);
       server.listen(0, '127.0.0.1', () => {
         const port = (server.address() as net.AddressInfo).port;
-        const child = spawn('dotnet', [consoleDll, `--port:${port}`, `--parentprocessid:${process.pid}`], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, DOTNET_NOLOGO: '1', DOTNET_CLI_TELEMETRY_OPTOUT: '1' } });
+        const child = spawn('dotnet', [consoleDll, `--port:${port}`, `--parentprocessid:${process.pid}`], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, DOTNET_NOLOGO: '1', DOTNET_CLI_TELEMETRY_OPTOUT: '1', VSTEST_DEBUG_NOBP: '1' } });
         this.child = child;
         child.stderr?.on('data', (d: Buffer) => this.log(d.toString()));
         child.on('exit', () => this.reset(new Error('vstest.console exited')));
@@ -141,11 +141,15 @@ export class VsTestSession {
           else if (m.MessageType === 'TestExecution.Completed') {
             for (const r of (m.Payload as { LastRunTests?: { NewTestResults?: VsTestResult[] } })?.LastRunTests?.NewTestResults ?? []) onResult(r);
             this.listener = undefined;
-            resolve();
+            const error = (m.Payload as { TestRunCompleteArgs?: { Error?: { Message?: string; ClassName?: string } } })?.TestRunCompleteArgs?.Error;
+            if (error) {
+              reject(new Error(`vstest.console aborted the run: ${error.ClassName ?? ''} ${error.Message ?? ''}`.trim()));
+            } else resolve();
           } else if (m.MessageType === 'TestSession.Message') onMessage?.((m.Payload as { Message?: string })?.Message ?? '');
           else if (m.MessageType === 'Refyntra.Error') reject(new Error(String(m.Payload)));
         };
-        this.send({ MessageType: 'TestExecution.RunAllWithDefaultHost', Version: VSTEST_PROTOCOL_VERSION, Payload: { Sources: [...new Set(cases.map((c) => c.Source))], TestCases: cases, RunSettings: EMPTY_RUN_SETTINGS, KeepAlive: false, DebuggingEnabled: false } });
+        // TestCases only: with Sources as well, vstest.console runs every test of those assemblies.
+        this.send({ MessageType: 'TestExecution.RunAllWithDefaultHost', Version: VSTEST_PROTOCOL_VERSION, Payload: { TestCases: cases, RunSettings: EMPTY_RUN_SETTINGS, KeepAlive: false, DebuggingEnabled: false } });
       });
     });
   }
@@ -191,7 +195,7 @@ export class VsTestSession {
         this.send({
           MessageType: 'TestExecution.GetTestRunnerProcessStartInfoForRunSelected',
           Version: VSTEST_PROTOCOL_VERSION,
-          Payload: { Sources: [...new Set(cases.map((c) => c.Source))], TestCases: cases, RunSettings: EMPTY_RUN_SETTINGS, KeepAlive: false, DebuggingEnabled: true },
+          Payload: { TestCases: cases, RunSettings: EMPTY_RUN_SETTINGS, KeepAlive: false, DebuggingEnabled: true },
         });
       });
     });

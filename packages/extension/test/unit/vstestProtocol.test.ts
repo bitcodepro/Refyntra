@@ -35,4 +35,9 @@ describe('vstest.console design-mode protocol', () => {
     expect(splitCommandLine('exec --runtimeconfig "/a b/x.json" --port 123 C:\\dir\\x.dll')).toEqual(['exec', '--runtimeconfig', '/a b/x.json', '--port', '123', 'C:\\dir\\x.dll']);
     expect(splitCommandLine('  a  ""  b ')).toEqual(['a', '', 'b']);
   });
+
+  it('writes Version first (vstest.console reads it before the payload)', () => {
+    const bytes = encodeMessage({ MessageType: 'X', Version: 7, Payload: { a: 1 } });
+    expect(bytes.subarray(1).toString('utf8').startsWith('{"Version":7,"MessageType":"X"')).toBe(true);
+  });
 });

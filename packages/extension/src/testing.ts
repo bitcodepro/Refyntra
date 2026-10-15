@@ -75,6 +75,8 @@ export interface TestingState {
   debugTrace: string[];
   /** Test cases the last .NET run sent to vstest.console (undefined: it ran through `dotnet test`). */
   lastServerCases?: number;
+  /** Results the server reported for the last .NET run (one per case run). */
+  lastServerResults?: number;
 }
 
 const EXCLUDE = '**/{node_modules,bin,obj,.git,target,__pycache__,.venv,venv,dist,out}/**';
@@ -118,8 +120,8 @@ function dotnetRoot(): string | undefined {
 
 /** How long a debug run through vstest.console may wait for its debug session before it goes the `dotnet test` way. */
 const SERVER_DEBUG_TIMEOUT_MS = 90000;
-/** Debugging through vstest.console (custom test host launch) is not finished: the host does not continue after the attach yet. */
-const DEBUG_THROUGH_SERVER = false;
+/** Debugging a selection through vstest.console (editor-attached netcoredbg): one data row alone too. */
+const DEBUG_THROUGH_SERVER = true;
 
 export class TestingService implements vscode.Disposable {
   readonly controller = vscode.tests.createTestController(TEST_CONTROLLER_ID, 'Refyntra Tests');
@@ -389,6 +391,7 @@ export class TestingService implements vscode.Disposable {
       ...(this.lastDebugPid !== undefined ? { lastDebugProcessId: this.lastDebugPid } : {}),
       debugTrace: [...this.debugTrace],
       ...(this.lastServerCases !== undefined ? { lastServerCases: this.lastServerCases } : {}),
+      ...(this.lastServerResults !== undefined ? { lastServerResults: this.lastServerResults } : {}),
     };
   }
 
@@ -591,6 +594,7 @@ export class TestingService implements vscode.Disposable {
 
   private vstest: VsTestSession | undefined;
   private lastServerCases: number | undefined;
+  private lastServerResults: number | undefined;
   private readonly discovered = new Map<string, { stamp: number; cases: VsTestCase[] }>();
 
   private dotnetMethods(project: string): Map<string, TestNode> {
@@ -626,6 +630,7 @@ export class TestingService implements vscode.Disposable {
     debug?: { launch: (info: VsTestProcessStartInfo) => Promise<number>; attach: (pid: number) => Promise<boolean> },
   ): Promise<TrxResult[] | undefined> {
     this.lastServerCases = undefined;
+    this.lastServerResults = undefined;
     if (!debug) {
       // Debugging builds before (a task, like F5).
       const build = await this.spawnForRun(run, 'dotnet', ['build', project, '-c', 'Debug', '--nologo', '-v', 'q'], cwd, {}, token);
@@ -651,6 +656,7 @@ export class TestingService implements vscode.Disposable {
       const results: TrxResult[] = [];
       if (debug) await this.vstest.debug(chosen, debug.launch, debug.attach, (r) => results.push(toTrxResult(r)), (m) => run.appendOutput(crlf(`${m}\n`)), token);
       else await this.vstest.run(chosen, (r) => results.push(toTrxResult(r)), (m) => run.appendOutput(crlf(`${m}\n`)), token);
+      this.lastServerResults = results.length;
       return results.length > 0 ? results : undefined;
     } catch (e) {
       run.appendOutput(crlf(`[Refyntra] vstest.console server unavailable (${e instanceof Error ? e.message : String(e)}); using dotnet test\n`));
@@ -722,6 +728,7 @@ export class TestingService implements vscode.Disposable {
           const r = await runMtpServer(target, cwd, (nodes) => nodes.filter((n) => this.isWanted(mtpNodeAsResult(n), methods, wanted)), (l) => run.appendOutput(crlf(l)), token);
           if (r.chosen.length > 0) {
             this.lastServerCases = r.chosen.length;
+            this.lastServerResults = r.results.length;
             run.appendOutput(crlf(`[Refyntra] ran ${r.chosen.length} test(s) through the test application's server mode\n`));
             return { code: 0, output: '', results: r.results.map(mtpNodeAsResult) };
           }
@@ -777,6 +784,8 @@ export class TestingService implements vscode.Disposable {
       if (kind.runner === 'mtp') {
         // Microsoft Testing Platform: build, then run (or debug) the test application itself.
         this.lastServerCases = undefined;
+        this.lastServerResults = undefined;
+    this.lastServerResults = undefined;
         const r = await this.runMtp(run, project, kind.report, filter, resultsDirectory, cwd, folder, leaves, token, debug, coverage, items);
         if (!r) return;
         if (r.results) serverResults = r.results;

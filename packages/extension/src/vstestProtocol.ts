@@ -37,7 +37,10 @@ export interface VsTestResult {
 }
 
 export function encodeMessage(m: VsTestMessage): Buffer {
-  const body = Buffer.from(JSON.stringify(m), 'utf8');
+  // Version first: vstest.console reads the envelope's Version before the payload and otherwise deserializes the
+  // payload with the version 1 serializer (test cases then lose their Source and the run aborts).
+  const ordered = m.Version !== undefined ? { Version: m.Version, MessageType: m.MessageType, Payload: m.Payload } : { MessageType: m.MessageType, Payload: m.Payload };
+  const body = Buffer.from(JSON.stringify(ordered), 'utf8');
   const len: number[] = [];
   let n = body.length;
   do {

@@ -57,6 +57,7 @@ exports.cases = ({ api, csharp, waitFor }) => {
         await a.testing.runIds([row]);
         const st = a.testing.state();
         assert.equal(st.lastServerCases, 1, `exactly one case went to the server (${st.lastServerCases})`);
+        assert.equal(st.lastServerResults, 1, `the server ran that case only (${st.lastServerResults} results)`);
         assert.deepEqual(st.lastRun, [row]);
         assert.equal(st.results[row].outcome, 'failed');
         assert.match(st.results[row].message ?? '', /5/);
