@@ -1985,19 +1985,26 @@
     "views": {
       "refyntra": [
         {
+          "id": "refyntra.solutionView",
+          "name": "Solution",
+          "contextualTitle": "Refyntra",
+          "icon": "media/refyntra.svg",
+          "when": "config.refyntra.solutionExplorer.enabled"
+        },
+        {
           "id": "refyntra.runView",
-          "name": "Refyntra Run",
+          "name": "Run",
           "contextualTitle": "Refyntra",
           "when": "refyntra.run.viewVisible"
         },
         {
           "id": "refyntra.relatedView",
-          "name": "Refyntra Related",
+          "name": "Related",
           "contextualTitle": "Refyntra"
         },
         {
           "id": "refyntra.usagesView",
-          "name": "Refyntra Usages",
+          "name": "Usages",
           "contextualTitle": "Refyntra",
           "when": "refyntra.usagesViewVisible"
         },
@@ -2008,27 +2015,22 @@
           "when": "refyntra.structuralResultsVisible"
         },
         {
-          "id": "refyntra.stackTraceView",
-          "name": "Refyntra Stack Trace",
-          "contextualTitle": "Refyntra"
-        },
-        {
           "id": "refyntra.taskContextView",
-          "name": "Refyntra Task Context",
-          "contextualTitle": "Refyntra"
+          "name": "Task Context",
+          "contextualTitle": "Refyntra",
+          "visibility": "collapsed"
         },
         {
           "id": "refyntra.efCoreView",
-          "name": "Refyntra EF Core",
+          "name": "EF Core",
           "contextualTitle": "Refyntra",
           "when": "refyntra.efCore.available"
         },
         {
-          "id": "refyntra.solutionView",
-          "name": "Refyntra Solution",
+          "id": "refyntra.stackTraceView",
+          "name": "Stack Trace",
           "contextualTitle": "Refyntra",
-          "icon": "media/refyntra.svg",
-          "when": "config.refyntra.solutionExplorer.enabled"
+          "visibility": "collapsed"
         }
       ],
       "refyntraImmediate": [
@@ -2044,46 +2046,46 @@
       {
         "view": "refyntra.stackTraceView",
         "when": "!refyntra.stackTraceLoaded",
-        "contents": "Paste a stack trace to open its frames in your code: .NET (including async, lambdas, Mono and Unity), JavaScript/TypeScript, Python and Rust. Files are matched by path; .NET frames without a usable file are looked up by symbol. Nothing is run.\n[Open Stack Trace](command:refyntra.openStackTrace)"
+        "contents": "Paste a stack trace to jump to its frames.\n[Paste Stack Trace](command:refyntra.openStackTrace)"
       },
       {
         "view": "refyntra.relatedView",
         "when": "refyntra.welcome == ready || !refyntra.welcome",
-        "contents": "Refyntra helps you write, analyse and navigate code: find anything, see how code is connected (callers, implementations, tests, request handlers, endpoints, DI registrations), get focused diagnostics and rename safely with a preview.\nTo start, open a C# file and put the cursor on a class, interface or method, then choose Related. TypeScript and JavaScript files work too.\n[Related](command:refyntra.related)\n[Find](command:refyntra.find)\n[Actions](command:refyntra.actions)\n[Rename](command:refyntra.rename)\n[Health](command:refyntra.showHealth)\n[Keyboard shortcuts](command:refyntra.keyboardShortcuts)\n[Get started](command:refyntra.getStarted)"
+        "contents": "Put the cursor on a symbol to see its callers, implementations, tests and endpoints.\n[Show Related](command:refyntra.related)\n[Find](command:refyntra.find)"
       },
       {
         "view": "refyntra.relatedView",
         "when": "refyntra.welcome == untrusted",
-        "contents": "This workspace is in Restricted Mode. Refyntra does not start its C# backend (no MSBuild, restore or build) until you trust the workspace, so Find, Related, Actions and Rename are unavailable for C#.\n[Manage Workspace Trust](command:workbench.trust.manage)\n[Health](command:refyntra.showHealth)\n[Get started](command:refyntra.getStarted)"
+        "contents": "Trust this workspace to use C# features.\n[Manage Workspace Trust](command:workbench.trust.manage)"
       },
       {
         "view": "refyntra.relatedView",
         "when": "refyntra.welcome == noSolution",
-        "contents": "No C# solution or project was found in this workspace. Open a folder with a .sln, .slnx or .csproj file, or choose one. TypeScript and JavaScript files still work: put the cursor on a symbol and choose Related.\n[Select Solution](command:refyntra.selectSolution)\n[Related](command:refyntra.related)\n[Find](command:refyntra.find)\n[Get started](command:refyntra.getStarted)"
+        "contents": "No .sln, .slnx or .csproj found.\n[Select Solution](command:refyntra.selectSolution)"
       },
       {
         "view": "refyntra.relatedView",
         "when": "refyntra.welcome == hostFailed",
-        "contents": "The Refyntra C# backend could not start, so C# features are unavailable. The Health page shows the reason and how to fix it (for example a missing .NET SDK).\n[Health](command:refyntra.showHealth)\n[Restart Backend](command:refyntra.restartBackend)\n[Export Debug Bundle](command:refyntra.exportDebugBundle)\n[Get started](command:refyntra.getStarted)"
+        "contents": "The C# backend could not start.\n[Show Health](command:refyntra.showHealth)\n[Restart Backend](command:refyntra.restartBackend)"
       },
       {
         "view": "refyntra.taskContextView",
         "when": "!refyntra.taskContextActive",
-        "contents": "Collect the symbols, files, endpoints and relations you work on for a task. Items are stored locally for this workspace and found again after code changes (resolved, moved, ambiguous or missing).\n[New Task Context](command:refyntra.taskContext.new)\n[Add Symbol at Cursor](command:refyntra.taskContext.addSymbol)\n[Import from File](command:refyntra.taskContext.import)"
+        "contents": "Keep the symbols and files of your current task together.\n[New Task Context](command:refyntra.taskContext.new)"
       },
       {
         "view": "refyntra.runView",
         "when": "isWorkspaceTrusted && !refyntra.run.available",
-        "contents": "Refyntra runs and debugs .NET projects (console, web, worker; Windows Forms and WPF on Windows), package.json scripts, Python files and Cargo binaries without other extensions. Open a folder with a solution or project; runnable projects appear here once it has loaded.\n[Select What to Run](command:refyntra.selectRunTarget)\n[Generate launch.json](command:refyntra.generateLaunchJson)\n[Health](command:refyntra.showHealth)"
+        "contents": "Runnable projects appear here once the solution has loaded.\n[Select What to Run](command:refyntra.selectRunTarget)"
       },
       {
         "view": "refyntra.runView",
         "when": "!isWorkspaceTrusted",
-        "contents": "Restricted Mode: building and running execute code from this workspace, so Refyntra does not run or debug anything until you trust it.\n[Manage Workspace Trust](command:workbench.trust.manage)"
+        "contents": "Trust this workspace to run and debug.\n[Manage Workspace Trust](command:workbench.trust.manage)"
       },
       {
         "view": "refyntra.solutionView",
-        "contents": "Refyntra shows the loaded .sln, .slnx or .csproj here: solution folders, projects, dependencies and files as MSBuild sees them.\n[Select Solution](command:refyntra.selectSolution)\n[Show Health](command:refyntra.showHealth)",
+        "contents": "No solution is loaded yet.\n[Select Solution](command:refyntra.selectSolution)",
         "when": "config.refyntra.solutionExplorer.enabled"
       }
     ],
@@ -2510,8 +2512,14 @@
         },
         "refyntra.run.hotReload.rudeEdit": {
           "type": "string",
-          "enum": ["restart", "ask"],
-          "enumDescriptions": ["`dotnet watch --non-interactive`: the app restarts by itself when a change cannot be hot reloaded.", "Refyntra asks in a notification and restarts the watch run when you agree."],
+          "enum": [
+            "restart",
+            "ask"
+          ],
+          "enumDescriptions": [
+            "`dotnet watch --non-interactive`: the app restarts by itself when a change cannot be hot reloaded.",
+            "Refyntra asks in a notification and restarts the watch run when you agree."
+          ],
           "default": "restart",
           "markdownDescription": "**Run with Hot Reload** (`dotnet watch`): what happens on a rude edit (a change Hot Reload cannot apply). Refyntra's terminal is not a console, so `dotnet watch` cannot read the y/n answer of its own prompt."
         },
