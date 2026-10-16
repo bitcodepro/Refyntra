@@ -9,8 +9,8 @@ There is no VS Code Marketplace publishing and no additional credential is neede
 ## Versions
 
 The first release uses `packages/extension/package.json`'s version (initially 0.1.0).
-Later releases increment the highest stable `vX.Y.Z` tag's patch number. As in
-QueueLoom, the **first line of the tested commit message** controls the bump:
+Later releases increment the highest stable `vX.Y.Z` tag's patch number. The
+**first line of the tested commit message** controls the bump:
 
 - `[major]` or `#major`: increment major, reset minor and patch
 - `[minor]` or `#minor`: increment minor, reset patch
