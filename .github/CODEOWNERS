@@ -1,0 +1,6 @@
+# Require the repository owner's review for all changes.
+# Enforced when the main branch ruleset requires code owner approval.
+* @bitcodepro
+
+# Keep ownership changes under the same review policy.
+/.github/CODEOWNERS @bitcodepro
