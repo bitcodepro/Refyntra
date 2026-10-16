@@ -436,8 +436,9 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
           if (r.result.state === 'Loading') this.dotnetNote = 'Loading the solution…';
         } else if (r.reasonCode !== 'NoSolution') this.dotnetNote = r.message;
         // Several projects or solutions in one folder: every project file is a target, not only the loaded solution's
-        // (the others are classified from their files), grouped by the solution that lists them.
-        await this.addOtherProjects(out);
+        // (the others are classified from their files), grouped by the solution that lists them. Not while the solution
+        // loads: the host answers only after loading, and the list refreshes once it is ready.
+        if (r.kind === 'projects' ? r.result.state !== 'Loading' : r.reasonCode === 'NoSolution') await this.addOtherProjects(out);
       }
       // Node: package.json scripts.
       for (const uri of await vscode.workspace.findFiles('**/package.json', EXCLUDE, 50)) {
