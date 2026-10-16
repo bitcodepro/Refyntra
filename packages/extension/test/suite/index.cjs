@@ -1642,6 +1642,32 @@ scenarios.navigation.push(...require('./metadata.cjs').cases({ api, csharp, wait
 // Visual (screenshot) scenarios, Docker/Xvfb only (test/suite/visual.cjs, scripts/test/linux-visual.sh).
 // Run and Debug on a temp copy of the Runnable fixture (bundled netcoredbg and debugpy; test/suite/runDebug.cjs).
 scenarios['run-debug'] = require('./runDebug.cjs').cases({ api, csharp, waitFor });
+
+scenarios['run-multi-solution'] = [
+  [
+    'several solutions, none selected: no solution is loaded, Run still lists every project grouped by solution and runs one',
+    async () => {
+      const a = await api();
+      await waitFor(() => csharp(a.health())?.reasonCode === 'SolutionNotSelected', 'the host waits for a solution choice', 60000);
+      const spawnsBefore = a.hostSpawnCount();
+      const targets = await a.run.refresh();
+      const byName = Object.fromEntries(targets.filter((t) => t.language === 'dotnet').map((t) => [t.label, t]));
+      for (const n of ['ConsoleApp', 'WebApp', 'WorkerApp', 'MultiApp', 'BlazorClient']) assert.ok(byName[n]?.runnable, `${n} is runnable: ${Object.keys(byName).join(', ')}`);
+      assert.equal(byName.AppTests?.runnable, false, 'the test project is not runnable');
+      assert.equal(byName.MauiApp?.runnable, false, 'MAUI is not offered');
+      assert.equal(byName.ConsoleApp.group, 'Runnable.sln');
+      assert.equal(byName.BlazorClient.group, 'Tools.slnx');
+      // The classification ran in a short-lived host: no solution got loaded, the C# route still waits for a choice.
+      assert.ok(a.hostSpawnCount() > spawnsBefore, 'a short-lived host classified the files');
+      assert.equal(csharp(a.health()).reasonCode, 'SolutionNotSelected');
+      const groups = a.run.getChildren().map((g) => g.label);
+      assert.ok(groups.includes('.NET · Runnable.sln') && groups.includes('.NET · Tools.slnx'), groups.join(' | '));
+      const session = await a.run.run(byName.ConsoleApp.id);
+      const code = await Promise.race([session.done, new Promise((_, rej) => setTimeout(() => rej(new Error('run did not finish')), 240000))]);
+      assert.equal(code, 7);
+    },
+  ],
+];
 // Test runner on the Testing API (test/suite/testing.cjs).
 scenarios.tests = require('./testing.cjs').cases({ api, csharp, waitFor });
 scenarios['test-matrix'] = require('./testMatrix.cjs').cases({ api, csharp, waitFor });

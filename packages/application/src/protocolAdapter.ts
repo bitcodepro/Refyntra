@@ -1071,9 +1071,29 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
 
   /** Run kinds of project files outside the loaded solution (protocol 1.28); null for an older host. */
   async classifyProjects(projectUris: string[], token?: CancellationToken): Promise<import('@refyntra/contracts').RunnableProjectsResult | null> {
+    if (this.state === 'TrustRequired') return null;
+    // No solution loaded (several to choose from, or none at all): a short-lived host reads the project files. It opens
+    // no workspace and evaluates no MSBuild; it ends with the request.
+    if (this.state === 'NotStarted' && !this.startPromise) return this.classifyWithTemporaryHost(projectUris, token);
     const session = await this.whenReady(token);
     if (session.protocolMinor < 28) return null;
     const r = await session.transport.request('workspace/classifyProjects', { traceId: this.traceIds.next(), workspaceId: this.opts.workspaceId, projectUris }, token);
+    return this.classifiedProjects(r);
+  }
+
+  private async classifyWithTemporaryHost(projectUris: string[], token?: CancellationToken): Promise<import('@refyntra/contracts').RunnableProjectsResult | null> {
+    const transport = await this.opts.transportFactory({ providerRouteId: this.descriptor.providerRouteId, attempt: 0 });
+    try {
+      const init = await transport.request('initialize', { traceId: this.traceIds.next(), protocolMajor: PROTOCOL_MAJOR, protocolMinor: PROTOCOL_MINOR, clientName: this.opts.client.name, clientVersion: this.opts.client.version }, token);
+      if (!init || init.protocolMajor !== PROTOCOL_MAJOR || (init.protocolMinor ?? 0) < 28) return null;
+      const r = await transport.request('workspace/classifyProjects', { traceId: this.traceIds.next(), workspaceId: this.opts.workspaceId, projectUris }, token);
+      return this.classifiedProjects(r);
+    } finally {
+      await transport.dispose();
+    }
+  }
+
+  private classifiedProjects(r: import('@refyntra/contracts').RunnableProjectsResult | null | undefined): import('@refyntra/contracts').RunnableProjectsResult {
     const projects = Array.isArray(r?.projects)
       ? r.projects
           .filter((p) => p && typeof p.name === 'string' && typeof p.projectUri === 'string' && typeof p.kind === 'string')
