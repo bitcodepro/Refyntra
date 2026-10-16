@@ -447,11 +447,12 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
         if (r.kind === 'projects') {
           out.push(...dotnetTargets(r.result.projects, (u) => vscode.Uri.parse(u).fsPath, (p) => this.profilesOf(p.launchSettingsUri), process.platform));
           if (r.result.state === 'Loading') this.dotnetNote = 'Loading the solution…';
-        } else if (r.reasonCode !== 'NoSolution') this.dotnetNote = r.message;
+        } else if (r.reasonCode === 'SolutionNotSelected') this.dotnetNote = 'Several solutions: all projects are listed; Refyntra: Select Solution picks the one for C# navigation.';
+        else if (r.reasonCode !== 'NoSolutionFound') this.dotnetNote = r.message;
         // Several projects or solutions in one folder: every project file is a target, not only the loaded solution's
         // (the others are classified from their files), grouped by the solution that lists them. Not while the solution
         // loads: the host answers only after loading, and the list refreshes once it is ready.
-        if (r.kind === 'projects' ? r.result.state !== 'Loading' : r.reasonCode === 'NoSolution') await this.addOtherProjects(out);
+        if (r.kind === 'projects' ? r.result.state !== 'Loading' : r.reasonCode === 'SolutionNotSelected' || r.reasonCode === 'NoSolutionFound') await this.addOtherProjects(out);
       }
       // Node: package.json scripts.
       for (const uri of await vscode.workspace.findFiles('**/package.json', EXCLUDE, 50)) {
