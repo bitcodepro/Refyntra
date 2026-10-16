@@ -804,7 +804,7 @@ scenarios['restore-recovery'] = [
       await vscode.commands.executeCommand('refyntra.restartBackend');
       await waitFor(() => collectRestoreActions(csharp(a.health())).length > 0, 'restore action offered again', 240000).catch((e) => {
         const h = csharp(a.health());
-        throw new Error(`${e.message} | state ${h?.state} ${h?.reasonCode ?? ''} | obj: ${['Shop.Contracts', 'Shop.Api'].map((p) => fs.existsSync(nodePath.join(root, p, 'obj', 'project.assets.json'))).join(',')} | projects ${JSON.stringify(h?.projects?.map((p) => [p.name, p.state, p.diagnostics.map((d) => d.code ?? d.message).slice(0, 2)]))}`);
+        throw new Error(`${e.message} | state ${h?.state} ${h?.reasonCode ?? ''} | obj: ${['Shop.Contracts', 'Shop.Api'].map((p) => fs.existsSync(nodePath.join(root, p, 'obj', 'project.assets.json'))).join(',')} | projects ${JSON.stringify(h?.projects?.map((p) => [p.name, p.state, p.diagnostics.map((d) => d.code ?? d.message).slice(0, 2)]))}\n--- log tail ---\n${a.logTail(60).join('\n')}`);
       });
       const action = collectRestoreActions(csharp(a.health()))[0];
       const started = [];

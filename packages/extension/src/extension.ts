@@ -102,6 +102,8 @@ export interface RefyntraTestApi {
   lspLaunches(): { command: string; args: string[] }[];
   /** Number of host processes spawned in this extension host session. */
   hostSpawnCount(): number;
+  /** Tests: the last lines of the Refyntra output channel (host log included), for failure messages. */
+  logTail(lines: number): string[];
   /** Inject the host path (e2e against the real host); takes effect on the next (re)start. */
   setHostPath(path: string | undefined): void;
   hostLaunches(): ProcessLaunch[];
@@ -522,6 +524,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     statusBarText: () => statusBar.text(),
     isTrusted,
     hostSpawnCount: () => launches.length,
+    logTail: (lines: number) => logRing.snapshot().slice(-lines),
     lspLaunches: () => lspLaunches.map((l) => ({ command: l.command, args: [...l.args] })),
     setHostPath: (p) => hostLocator.setOverride(p),
     hostLaunches: () => [...launches],

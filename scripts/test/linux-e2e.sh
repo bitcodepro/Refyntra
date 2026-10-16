@@ -61,7 +61,7 @@ DOCKERFILE
   mapfile -t vnc_args < <(vnc_docker_args)
   vnc_note
   # --init: a real init reaps orphans (see linux.sh).
-  exec docker run --rm --init ${vnc_args[@]+"${vnc_args[@]}"} -v "$repo:/src:ro" -v "${REFYNTRA_DOCKER_VOLUME_PREFIX:-refyntra}-vscode-test:/cache/vscode-test" -v "${REFYNTRA_DOCKER_VOLUME_PREFIX:-refyntra}-nuget:/root/.nuget/packages" \
+  exec docker run --rm --init ${REFYNTRA_DOCKER_CPUS:+--cpus=$REFYNTRA_DOCKER_CPUS} ${vnc_args[@]+"${vnc_args[@]}"} -v "$repo:/src:ro" -v "${REFYNTRA_DOCKER_VOLUME_PREFIX:-refyntra}-vscode-test:/cache/vscode-test" -v "${REFYNTRA_DOCKER_VOLUME_PREFIX:-refyntra}-nuget:/root/.nuget/packages" \
     -v "${REFYNTRA_DOCKER_VOLUME_PREFIX:-refyntra}-pnpm-store:/cache/pnpm-store" \
     -e DOTNET_CLI_TELEMETRY_OPTOUT=1 -e DOTNET_NOLOGO=1 -e REFYNTRA_TEST_VSCODE_VERSION="${REFYNTRA_TEST_VSCODE_VERSION:-1.90.2}" \
     -e REFYNTRA_E2E_QUICK="${REFYNTRA_E2E_QUICK:-0}" -e REFYNTRA_TEST_ONLY="${REFYNTRA_E2E_ONLY:-}" \
