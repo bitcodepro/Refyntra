@@ -48,8 +48,9 @@ public sealed partial class Engine : IRpcHandler, IDisposable
     /// 1.25: code/format (Roslyn's formatter with the document's .editorconfig options; a range or the whole document).
     /// 1.26: code/affectedTests (the tests that reference what changed files declare; static references, not coverage).
     /// 1.27: code/changeImpact (what a change reaches: handlers, endpoints, registrations, implementations, uses, tests).
+    /// 1.28: workspace/classifyProjects (run kinds of project files outside the loaded solution, read from the files).
     /// </summary>
-    public const int ProtocolMinor = 27;
+    public const int ProtocolMinor = 28;
     /// <summary>How long workspace/snapshotBarrier waits for a missing document sequence (tests shorten it).</summary>
     public TimeSpan BarrierTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
@@ -171,6 +172,8 @@ public sealed partial class Engine : IRpcHandler, IDisposable
                 return await ExpressionCompletionsAsync(Params<ExpressionCompletionsParams>(p), ct).ConfigureAwait(false);
             case "code/stepIntoTargets":
                 return await StepIntoTargetsAsync(Params<StepIntoTargetsParams>(p), ct).ConfigureAwait(false);
+            case "workspace/classifyProjects":
+                return ClassifyProjects(Params<ClassifyProjectsParams>(p));
             case "workspace/runnableProjects":
                 return RunnableProjects(Params<WorkspaceParams>(p));
             case "solution/structure":
@@ -655,6 +658,34 @@ public sealed partial class Engine : IRpcHandler, IDisposable
     }
 
     /// <summary>workspace/runnableProjects (protocol 1.8): the loaded projects classified for Run and Debug.</summary>
+    /// <summary>Project files of the workspace folder that the loaded solution does not contain: classified from their files.</summary>
+    private RunnableProjectsResultDto ClassifyProjects(ClassifyProjectsParams p)
+    {
+        var list = new List<RunnableProjectDto>();
+        foreach (var uri in p.ProjectUris.Take(500))
+        {
+            string path;
+            try { path = PathOf(uri); }
+            catch (ArgumentException) { continue; }
+            if (!File.Exists(path) || !path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)) continue;
+            var r = RunnableProjectDetector.Classify(RunnableProjectDetector.FromProjectFile(path));
+            list.Add(new RunnableProjectDto
+            {
+                Name = r.Name,
+                ProjectUri = UriPaths.ToUri(r.ProjectPath),
+                Kind = r.Kind,
+                Runnable = r.Runnable,
+                Reason = r.Reason,
+                WindowsOnly = r.WindowsOnly,
+                TargetFrameworks = r.TargetFrameworks.ToList(),
+                Outputs = new(),
+                AssemblyName = r.AssemblyName,
+                LaunchSettingsUri = r.LaunchSettingsPath == null ? null : UriPaths.ToUri(r.LaunchSettingsPath),
+            });
+        }
+        return new RunnableProjectsResultDto { Projects = list, State = "Ready" };
+    }
+
     private RunnableProjectsResultDto RunnableProjects(WorkspaceParams p)
     {
         var session = RequireSession(p.WorkspaceId);

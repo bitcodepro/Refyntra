@@ -71,6 +71,8 @@ export interface RunTarget {
   note?: string;
   /** .NET: the project as the host reported it. */
   dotnet?: { project: RunnableProjectInfo; projectPath: string; profiles: LaunchProfile[]; outputs: Record<string, string> };
+  /** The solution (or folder) the target belongs to: groups the Run view when the workspace has several. */
+  group?: string;
   /** Node: package manager and script. */
   node?: { packageManager: 'npm' | 'pnpm' | 'yarn'; script: string; command: string; devServerUrl?: string };
   /** Python: the file to run, or a module. */
@@ -226,6 +228,80 @@ function frameworkVersion(tfm: string): number {
   const m = /^net(?:coreapp)?(\d+)(?:\.(\d+))?/i.exec(tfm);
   if (!m) return 0;
   return Number(m[1]) * 100 + Number(m[2] ?? 0);
+}
+
+/**
+ * The project files a solution lists, as absolute paths: .sln `Project(...) = "Name", "path.csproj"` lines, .slnx
+ * `<Project Path="path.csproj" />` elements; relative paths resolve against the solution's folder.
+ */
+export function solutionProjectPaths(solutionPath: string, text: string): string[] {
+  const dir = dirOf(solutionPath);
+  const sep = sepOf(solutionPath);
+  const rel: string[] = [];
+  if (/\.slnx$/i.test(solutionPath)) for (const m of text.matchAll(/<Project\s+[^>]*Path\s*=\s*"([^"]+\.csproj)"/gi)) rel.push(m[1]!);
+  else for (const m of text.matchAll(/^Project\("[^"]*"\)\s*=\s*"[^"]*"\s*,\s*"([^"]+\.csproj)"/gim)) rel.push(m[1]!);
+  return rel.map((r) => normalizePath(joinPath(sep, dir, r.replace(/[\\/]/g, sep)), sep));
+}
+
+/** "a/b/../c" → "a/c" (no file system access). */
+function normalizePath(p: string, sep: string): string {
+  const parts: string[] = [];
+  for (const part of p.split(/[\\/]/)) {
+    if (part === '..') parts.pop();
+    else if (part !== '.') parts.push(part);
+  }
+  return parts.join(sep);
+}
+
+/**
+ * The group of each .NET target: the name of the solution that lists its project (solutions in the given order; the
+ * loaded one first), else "Other projects". Keys and paths compare without case on Windows.
+ */
+export function groupBySolution(projectPaths: readonly string[], solutions: readonly { name: string; projects: readonly string[] }[], ignoreCase: boolean): Map<string, string> {
+  const norm = (p: string) => (ignoreCase ? p.toLowerCase() : p).replace(/\\/g, '/');
+  const owner = new Map<string, string>();
+  for (const s of solutions) for (const p of s.projects) if (!owner.has(norm(p))) owner.set(norm(p), s.name);
+  return new Map(projectPaths.map((p) => [p, owner.get(norm(p)) ?? 'Other projects'] as const));
+}
+
+/** A run group (refyntra.run.groups): several targets started together, in order. */
+export interface RunGroup {
+  name: string;
+  /** Target labels (project or script names), in start order. */
+  targets: string[];
+  /** Wait for a web target to listen before starting the next one (default true). */
+  waitForReady?: boolean;
+}
+
+/** The run groups of the setting, cleaned up (no name or no targets: left out; duplicate names: the first one). */
+export function parseRunGroups(value: unknown): RunGroup[] {
+  if (!Array.isArray(value)) return [];
+  const out: RunGroup[] = [];
+  const names = new Set<string>();
+  for (const v of value) {
+    const g = v as { name?: unknown; targets?: unknown; waitForReady?: unknown };
+    if (typeof g?.name !== 'string' || !g.name.trim() || names.has(g.name.trim()) || !Array.isArray(g.targets)) continue;
+    const targets = g.targets.filter((t): t is string => typeof t === 'string' && t.trim().length > 0);
+    if (!targets.length) continue;
+    names.add(g.name.trim());
+    out.push({ name: g.name.trim(), targets, ...(typeof g.waitForReady === 'boolean' ? { waitForReady: g.waitForReady } : {}) });
+  }
+  return out;
+}
+
+/** The host and port a web target listens on (its launch profile's first URL), for the readiness check. */
+export function readinessEndpoint(applicationUrl: string | undefined): { host: string; port: number } | undefined {
+  const url = firstUrl(applicationUrl);
+  if (!url) return undefined;
+  const m = /^(https?):\/\/([^/:]+)(?::(\d+))?/i.exec(url);
+  if (!m) return undefined;
+  const host = /^(\+|\*|0\.0\.0\.0|\[::\])$/.test(m[2]!) ? 'localhost' : m[2]!;
+  return { host, port: m[3] ? Number(m[3]) : m[1]!.toLowerCase() === 'https' ? 443 : 80 };
+}
+
+/** The name of a debug session of a group member: "Group › Project", so the Call Stack shows whose debugger it is. */
+export function groupSessionName(group: string, target: string): string {
+  return `${group} › ${target}`;
 }
 
 /** Path helpers that work on both separators (pure; the extension passes native paths). */

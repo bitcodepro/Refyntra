@@ -334,6 +334,7 @@ export interface EngineClient {
   /** Find Usages grouped (owned route, protocol 1.12): classified usages of the symbol at the position, at most `limit`. */
   usages(target: DocumentTarget, limit: number, token?: CancellationToken): Promise<UsagesOutcome>;
   /** Run and Debug (protocol 1.8): the C# projects of the loaded workspace classified for running and debugging. */
+  classifyProjects?(projectUris: string[], token?: CancellationToken): Promise<import('@refyntra/contracts').RunnableProjectInfo[]>;
   runnableProjects?(token?: CancellationToken): Promise<RunnableProjectsOutcome>;
   /** Solution Explorer (protocol 1.20): solution folders, projects, dependencies and items of the loaded workspace. */
   solutionStructure?(token?: CancellationToken): Promise<SolutionStructureOutcome>;
@@ -1150,6 +1151,18 @@ export class RefyntraEngine implements EngineClient {
     } catch (e) {
       if (e instanceof CancelledError) throw e;
       return this.toUnavailable(adapter, e);
+    }
+  }
+
+  /** Run kinds of C# project files outside the loaded solution (protocol 1.28); [] when not available. */
+  async classifyProjects(projectUris: string[], token?: CancellationToken): Promise<import('@refyntra/contracts').RunnableProjectInfo[]> {
+    const adapter = this.o.registry.languageAdapters().find((a) => a.descriptor.ownership === 'owned-semantic' && typeof a.classifyProjects === 'function');
+    if (!adapter || projectUris.length === 0) return [];
+    try {
+      return (await adapter.classifyProjects!(projectUris, token))?.projects ?? [];
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      return [];
     }
   }
 

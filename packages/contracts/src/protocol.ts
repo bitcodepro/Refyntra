@@ -37,8 +37,9 @@ export const PROTOCOL_MAJOR = 1;
  * 1.25: Formatting (`code/format`: Roslyn's formatter with the .editorconfig options; a range or the document).
  * 1.26: Affected tests (`code/affectedTests`: tests that reference what changed files declare; not coverage).
  * 1.27: Change Impact (`code/changeImpact`: handlers, endpoints, registrations, implementations, uses and tests a change reaches).
+ * 1.28: Project files outside the loaded solution (`workspace/classifyProjects`: run kinds read from the files).
  */
-export const PROTOCOL_MINOR = 27;
+export const PROTOCOL_MINOR = 28;
 
 /** Zero-based line, UTF-16 code unit character. */
 export interface Position {
@@ -594,6 +595,11 @@ export interface FileStructureResult {
   reasonCode?: string | null;
   completeness: 'complete' | 'partial' | 'unknown';
   snapshotId: string;
+}
+
+/** workspace/classifyProjects (protocol 1.28): run kinds of project files outside the loaded solution. */
+export interface ClassifyProjectsParams extends WorkspaceParams {
+  projectUris: string[];
 }
 
 /** code/changeImpact (protocol 1.27): what a change of some files (or of the symbol at a position) reaches. */
@@ -1506,6 +1512,8 @@ export interface MethodMap {
   'solution/structure': [WorkspaceParams, SolutionStructureResult];
   /** Protocol 1.21. */
   'code/expressionCompletions': [ExpressionCompletionsParams, ExpressionCompletionsResult];
+  /** Protocol 1.28. */
+  'workspace/classifyProjects': [ClassifyProjectsParams, RunnableProjectsResult];
   /** Protocol 1.27. */
   'code/changeImpact': [ChangeImpactParams, ChangeImpactResult];
   /** Protocol 1.26. */

@@ -1023,6 +1023,12 @@ public sealed class ConstructorActionsResultDto
     public string SnapshotId { get; set; } = "";
 }
 
+/// <summary>workspace/classifyProjects (protocol 1.28): run kinds of project files outside the loaded solution (read from the files).</summary>
+public sealed class ClassifyProjectsParams : WorkspaceParams
+{
+    public List<string> ProjectUris { get; set; } = new();
+}
+
 /// <summary>code/changeImpact (protocol 1.27): what a change of some files (or of the symbol at a position) reaches.</summary>
 public sealed class ChangeImpactParams : WorkspaceParams
 {

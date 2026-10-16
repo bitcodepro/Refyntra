@@ -1069,6 +1069,19 @@ export class ProtocolLanguageAdapter implements LanguageAdapter {
     return { projects, state: typeof r?.state === 'string' ? r.state : 'unknown', snapshotId: r?.snapshotId ?? null };
   }
 
+  /** Run kinds of project files outside the loaded solution (protocol 1.28); null for an older host. */
+  async classifyProjects(projectUris: string[], token?: CancellationToken): Promise<import('@refyntra/contracts').RunnableProjectsResult | null> {
+    const session = await this.whenReady(token);
+    if (session.protocolMinor < 28) return null;
+    const r = await session.transport.request('workspace/classifyProjects', { traceId: this.traceIds.next(), workspaceId: this.opts.workspaceId, projectUris }, token);
+    const projects = Array.isArray(r?.projects)
+      ? r.projects
+          .filter((p) => p && typeof p.name === 'string' && typeof p.projectUri === 'string' && typeof p.kind === 'string')
+          .map((p) => ({ ...p, runnable: !!p.runnable, windowsOnly: !!p.windowsOnly, targetFrameworks: Array.isArray(p.targetFrameworks) ? p.targetFrameworks.filter((t) => typeof t === 'string') : [], outputs: [] }))
+      : [];
+    return { projects, state: 'Ready', snapshotId: null };
+  }
+
   /** Solution Explorer (protocol 1.20): the solution model of the loaded workspace; null for an older host. */
   async solutionStructure(token?: CancellationToken): Promise<import('@refyntra/contracts').SolutionStructureResult | null> {
     const session = await this.whenReady(token);

@@ -1,5 +1,6 @@
 import { type ChildProcess, execFile, spawn } from 'node:child_process';
 import * as fs from 'node:fs';
+import * as net from 'node:net';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { EngineClient } from '@refyntra/application';
@@ -37,6 +38,12 @@ import {
   runnableFrameworks,
   rustEntryLine,
   rustTargets,
+  groupBySolution,
+  groupSessionName,
+  parseRunGroups,
+  readinessEndpoint,
+  type RunGroup,
+  solutionProjectPaths,
   statusText,
   stripJsonComments,
   targetForFile,
@@ -158,6 +165,34 @@ export interface RunSession {
   readonly done: Promise<number | null>;
 }
 
+/** The group name of a command argument: a name, or the Run view's group node. */
+function groupNameOf(arg: unknown): string | undefined {
+  if (typeof arg === 'string') return arg;
+  return (arg as { group?: { name?: string } } | undefined)?.group?.name;
+}
+
+/** Resolves true once a TCP connection to host:port succeeds (polled every 500 ms), false after the timeout. */
+function waitForPort(host: string, port: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  return new Promise((resolve) => {
+    const attempt = () => {
+      const socket = net.connect({ host, port });
+      const retry = () => {
+        socket.destroy();
+        if (Date.now() > deadline) resolve(false);
+        else setTimeout(attempt, 500);
+      };
+      socket.once('connect', () => {
+        socket.destroy();
+        resolve(true);
+      });
+      socket.once('error', retry);
+      socket.setTimeout(2000, retry);
+    };
+    attempt();
+  });
+}
+
 /** Kills a process and its children (taskkill /T on Windows, the process group elsewhere). */
 export function killTree(child: ChildProcess): void {
   if (child.pid === undefined || child.exitCode !== null) return;
@@ -276,12 +311,22 @@ class ProcessTerminal implements vscode.Pseudoterminal {
 
 // ------------------------------------------------------------------------------------------------ the service
 
-type TreeNode = { kind: 'group'; label: string; targets: RunTarget[] } | { kind: 'target'; target: RunTarget } | { kind: 'profile'; target: RunTarget; profile: LaunchProfile } | { kind: 'message'; text: string };
+type TreeNode =
+  | { kind: 'group'; label: string; targets: RunTarget[] }
+  | { kind: 'launchGroup'; group: RunGroup }
+  | { kind: 'target'; target: RunTarget; inGroup?: string }
+  | { kind: 'profile'; target: RunTarget; profile: LaunchProfile }
+  | { kind: 'message'; text: string };
 
 /** Test seams (e2e): replace pickers and record what would be opened in a browser. */
 export interface RunTestHooks {
   pick?: <T extends vscode.QuickPickItem>(items: T[], title: string) => Promise<T | undefined>;
   openedUrls: string[];
+  /** Run groups: whether each waited-for web target became ready. */
+  groupReadiness: { target: string; ready: boolean }[];
+  /** Tests: the targets and the name Create Run Group takes (no pickers). */
+  pickMany?: <T extends vscode.QuickPickItem>(items: T[]) => Promise<T[] | undefined>;
+  groupName?: string;
   /** Blazor WebAssembly: the browser debug configurations started (tests: no browser in CI). */
   browserDebugConfigurations: Record<string, unknown>[];
   debugExitCodes: Map<string, number>;
@@ -300,7 +345,7 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
   private refreshTimer: NodeJS.Timeout | undefined;
   readonly sessions = new Map<string, RunSession>();
   private readonly terminals = new Map<string, ProcessTerminal>();
-  readonly hooks: RunTestHooks = { openedUrls: [], browserDebugConfigurations: [], debugExitCodes: new Map() };
+  readonly hooks: RunTestHooks = { openedUrls: [], browserDebugConfigurations: [], groupReadiness: [], debugExitCodes: new Map() };
   readonly debuggers: DebuggerLocator;
 
   constructor(
@@ -352,6 +397,30 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
     this.refreshTimer = setTimeout(() => void this.refresh(), 300);
   }
 
+  /** Project files outside the loaded solution (classified by the host from their files) and the solution groups. */
+  private async addOtherProjects(out: RunTarget[]): Promise<void> {
+    const ignoreCase = process.platform === 'win32';
+    const key = (p: string) => (ignoreCase ? p.toLowerCase() : p);
+    const known = new Set(out.filter((t) => t.dotnet).map((t) => key(t.dotnet!.projectPath)));
+    const files = (await vscode.workspace.findFiles('**/*.csproj', EXCLUDE, 300)).map((u) => u.fsPath);
+    const missing = files.filter((f) => !known.has(key(f)));
+    if (missing.length && this.engine.classifyProjects) {
+      const projects = await this.engine.classifyProjects(missing.map((f) => vscode.Uri.file(f).toString())).catch(() => []);
+      out.push(...dotnetTargets(projects, (u) => vscode.Uri.parse(u).fsPath, (p) => this.profilesOf(p.launchSettingsUri), process.platform));
+    }
+    const solutions: { name: string; projects: string[] }[] = [];
+    for (const u of await vscode.workspace.findFiles('**/*.{sln,slnx}', EXCLUDE, 50)) {
+      try {
+        solutions.push({ name: path.basename(u.fsPath), projects: solutionProjectPaths(u.fsPath, fs.readFileSync(u.fsPath, 'utf8')) });
+      } catch {
+        // An unreadable solution file groups nothing.
+      }
+    }
+    const dotnet = out.filter((t) => t.dotnet);
+    const groups = groupBySolution(dotnet.map((t) => t.dotnet!.projectPath), solutions, ignoreCase);
+    for (const t of dotnet) t.group = groups.get(t.dotnet!.projectPath);
+  }
+
   /** Collects every run target of the workspace (the C# part from the host's project model). */
   refresh(): Promise<RunTarget[]> {
     const run = (async () => {
@@ -366,6 +435,9 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
           out.push(...dotnetTargets(r.result.projects, (u) => vscode.Uri.parse(u).fsPath, (p) => this.profilesOf(p.launchSettingsUri), process.platform));
           if (r.result.state === 'Loading') this.dotnetNote = 'Loading the solution…';
         } else if (r.reasonCode !== 'NoSolution') this.dotnetNote = r.message;
+        // Several projects or solutions in one folder: every project file is a target, not only the loaded solution's
+        // (the others are classified from their files), grouped by the solution that lists them.
+        await this.addOtherProjects(out);
       }
       // Node: package.json scripts.
       for (const uri of await vscode.workspace.findFiles('**/package.json', EXCLUDE, 50)) {
@@ -700,13 +772,14 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
   private readonly debugSessions = new Map<string, vscode.DebugSession>();
 
   /** Debug (F5 without launch.json, the Run view, CodeLens, the editor title): VS Code's own debugging with our configuration. */
-  async debug(arg?: unknown): Promise<boolean> {
+  async debug(arg?: unknown, sessionName?: string): Promise<boolean> {
     if (!this.requireTrust('build or debug projects')) return false;
     const r = await this.resolveTarget(arg);
     if (!r) return false;
     if (r.target.dotnet?.project.kind === 'blazor-wasm') return this.debugBlazorWasm(r.target, r.choice);
     const cfg = this.debugConfiguration(r.target, r.choice);
     if (!cfg) return false;
+    if (sessionName) cfg.name = sessionName;
     const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(r.target.cwd)) ?? vscode.workspace.workspaceFolders?.[0];
     return vscode.debug.startDebugging(folder, cfg);
   }
@@ -803,6 +876,113 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
     return file;
   }
 
+  // ---- run groups (refyntra.run.groups): several targets started together
+
+  groups(): RunGroup[] {
+    return parseRunGroups(vscode.workspace.getConfiguration('refyntra').get('run.groups'));
+  }
+
+  private groupTargets(g: RunGroup): { found: RunTarget[]; missing: string[] } {
+    const found: RunTarget[] = [];
+    const missing: string[] = [];
+    for (const label of g.targets) {
+      const t = this.targetsCache.find((x) => x.runnable && (x.label === label || x.id === label));
+      if (t) found.push(t);
+      else missing.push(label);
+    }
+    return { found, missing };
+  }
+
+  isRunning(t: RunTarget): 'run' | 'debug' | undefined {
+    if ([...this.debugSessions.values()].some((d) => d.configuration.__refyntraTarget === t.id)) return 'debug';
+    return this.sessions.has(t.id) ? 'run' : undefined;
+  }
+
+  /** Starts the group's targets in order; a web target is waited for (its port accepts connections) before the next. */
+  async startGroup(name?: string, debug = false): Promise<boolean> {
+    const g = name ? this.groups().find((x) => x.name === name) : await this.pickGroup(debug ? 'Debug group' : 'Run group');
+    if (!g) return false;
+    if (!this.targetsCache.length) await this.refresh();
+    const { found, missing } = this.groupTargets(g);
+    if (missing.length) void vscode.window.showWarningMessage(`Refyntra: ${g.name}: ${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} not a runnable target here; the others start.`);
+    for (let i = 0; i < found.length; i++) {
+      const t = found[i]!;
+      if (this.isRunning(t)) continue;
+      const ok = debug ? await this.debug(t.id, groupSessionName(g.name, t.label)) : !!(await this.run(t.id));
+      if (!ok) return false;
+      const profile = (this.selection().target?.id === t.id ? t.dotnet?.profiles.find((p) => p.name === this.selection().choice.profile) : undefined) ?? t.dotnet?.profiles[0];
+      const endpoint = isWebKind(t.dotnet?.project.kind) ? readinessEndpoint(profile?.applicationUrl) : undefined;
+      if (endpoint && g.waitForReady !== false && i < found.length - 1) {
+        const ready = await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: `Refyntra: waiting for ${t.label} (${endpoint.host}:${endpoint.port})` }, () => waitForPort(endpoint.host, endpoint.port, 120000));
+        this.hooks.groupReadiness.push({ target: t.label, ready });
+        if (!ready) void vscode.window.showWarningMessage(`Refyntra: ${t.label} did not listen on ${endpoint.host}:${endpoint.port} within 2 minutes; the next ones start anyway.`);
+      }
+    }
+    this.changed.fire(undefined);
+    return true;
+  }
+
+  async stopGroup(name?: string): Promise<void> {
+    const g = name ? this.groups().find((x) => x.name === name) : await this.pickGroup('Stop group');
+    if (!g) return;
+    for (const t of this.groupTargets(g).found) {
+      this.stop(t.id);
+      for (const d of [...this.debugSessions.values()].filter((s) => s.configuration.__refyntraTarget === t.id)) await vscode.debug.stopDebugging(d);
+    }
+    this.changed.fire(undefined);
+  }
+
+  /** Create Run Group: pick targets (in start order) and a name; saved in the workspace settings (shareable). */
+  async createGroup(): Promise<RunGroup | undefined> {
+    if (!this.targetsCache.length) await this.refresh();
+    const items = this.targetsCache.filter((t) => t.runnable).map((t) => ({ label: t.label, description: `${t.kindLabel}${t.group ? ` · ${t.group}` : ''}`, target: t }));
+    const picked = this.hooks.pickMany ? await this.hooks.pickMany(items) : await vscode.window.showQuickPick(items, { canPickMany: true, title: 'Refyntra: Create Run Group', placeHolder: 'The targets that start together (they start in this order)' });
+    if (!picked?.length) return undefined;
+    const name = this.hooks.groupName ?? (await vscode.window.showInputBox({ title: 'Refyntra: Create Run Group', prompt: 'Name of the group', value: picked.map((p) => p.label).join(' + ') }));
+    if (!name?.trim()) return undefined;
+    const group: RunGroup = { name: name.trim(), targets: picked.map((p) => p.target.label) };
+    const cfg = vscode.workspace.getConfiguration('refyntra');
+    const groups = this.groups().filter((g) => g.name !== group.name);
+    await cfg.update('run.groups', [...groups, group], vscode.ConfigurationTarget.Workspace);
+    this.changed.fire(undefined);
+    return group;
+  }
+
+  async deleteGroup(name?: string): Promise<void> {
+    const g = name ? this.groups().find((x) => x.name === name) : await this.pickGroup('Delete group');
+    if (!g) return;
+    await vscode.workspace.getConfiguration('refyntra').update('run.groups', this.groups().filter((x) => x.name !== g.name), vscode.ConfigurationTarget.Workspace);
+    this.changed.fire(undefined);
+  }
+
+  private async pickGroup(title: string): Promise<RunGroup | undefined> {
+    const groups = this.groups();
+    if (groups.length === 0) {
+      const pick = await vscode.window.showInformationMessage('Refyntra: no run group yet. A run group starts several projects together (for example a backend and a frontend).', 'Create Run Group');
+      if (pick) await this.createGroup();
+      return undefined;
+    }
+    if (groups.length === 1) return groups[0];
+    const pick = await vscode.window.showQuickPick(groups.map((g) => ({ label: g.name, description: g.targets.join(' → '), g })), { title: `Refyntra: ${title}` });
+    return pick?.g;
+  }
+
+  /** Shows what a running target runs in: its debug session (Call Stack) or its terminal. */
+  async focus(arg?: unknown): Promise<void> {
+    const id = typeof arg === 'string' ? arg : (arg as { target?: RunTarget } | undefined)?.target?.id;
+    const debugSession = [...this.debugSessions.values()].find((d) => d.configuration.__refyntraTarget === id);
+    if (debugSession) {
+      await vscode.commands.executeCommand('workbench.view.debug');
+      await vscode.commands.executeCommand('workbench.debug.action.focusCallStackView');
+      return;
+    }
+    const s = id ? this.sessions.get(id) : undefined;
+    if (s?.execution) {
+      const term = vscode.window.terminals.find((t) => t.name.includes(s.target.label));
+      term?.show();
+    }
+  }
+
   // ---- tree
 
   getTreeItem(n: TreeNode): vscode.TreeItem {
@@ -816,8 +996,20 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
       item.contextValue = 'refyntra.runGroup';
       return item;
     }
+    if (n.kind === 'launchGroup') {
+      const { found } = this.groupTargets(n.group);
+      const running = found.filter((t) => this.isRunning(t)).length;
+      const item = new vscode.TreeItem(n.group.name, vscode.TreeItemCollapsibleState.Expanded);
+      item.id = `launchGroup:${n.group.name}`;
+      item.iconPath = new vscode.ThemeIcon(running ? 'layers-active' : 'layers');
+      item.description = running ? `${running} of ${found.length} running` : n.group.targets.join(' → ');
+      item.contextValue = running ? 'refyntra.launchGroup.running' : 'refyntra.launchGroup';
+      item.tooltip = `Run group: ${n.group.targets.join(' → ')}${n.group.waitForReady === false ? '' : '\nWeb projects are waited for (their port) before the next one starts.'}`;
+      return item;
+    }
     const t = n.target;
-    const running = this.sessions.has(t.id) || [...this.debugSessions.values()].some((d) => d.configuration.__refyntraTarget === t.id);
+    const state = this.isRunning(t);
+    const running = !!state;
     if (n.kind === 'profile') {
       const item = new vscode.TreeItem(n.profile.name);
       item.description = n.profile.applicationUrl ?? '';
@@ -828,26 +1020,32 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
     }
     const selected = this.selection().target?.id === t.id;
     const item = new vscode.TreeItem(t.label, t.dotnet && t.dotnet.profiles.length > 1 ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None);
-    item.id = t.id;
-    item.description = `${t.kindLabel}${running ? ' · running' : ''}${selected ? ' · selected' : ''}`;
+    item.id = n.kind === 'target' && n.inGroup ? `${n.inGroup}/${t.id}` : t.id;
+    item.description = `${t.kindLabel}${state === 'debug' ? ' · debugging' : state === 'run' ? ' · running' : ''}${selected ? ' · selected' : ''}`;
     item.tooltip = new vscode.MarkdownString(`**${t.label}** (${t.kindLabel})\n\n${t.cwd}${t.note ? `\n\n${t.note}` : ''}`);
     item.contextValue = !t.runnable ? 'refyntra.runTarget.unsupported' : running ? 'refyntra.runTarget.running' : 'refyntra.runTarget';
-    item.iconPath = new vscode.ThemeIcon(!t.runnable ? 'circle-slash' : running ? 'debug-stop' : t.language === 'dotnet' ? (isWebKind(t.dotnet?.project.kind) ? 'globe' : 'terminal') : t.language === 'node' ? 'json' : t.language === 'python' ? 'symbol-misc' : 'package');
+    item.iconPath = new vscode.ThemeIcon(!t.runnable ? 'circle-slash' : state === 'debug' ? 'debug-alt' : running ? 'debug-stop' : t.language === 'dotnet' ? (isWebKind(t.dotnet?.project.kind) ? 'globe' : 'terminal') : t.language === 'node' ? 'json' : t.language === 'python' ? 'symbol-misc' : 'package');
     item.accessibilityInformation = { label: `${t.label}, ${t.kindLabel}${running ? ', running' : ''}${!t.runnable ? `, not runnable: ${t.note ?? ''}` : ''}` };
-    if (t.runnable) item.command = { command: 'refyntra.selectRunTargetById', title: 'Select', arguments: [t.id] };
+    // A running target opens what it runs in (its debug session or its terminal); otherwise a click selects it.
+    if (running) item.command = { command: 'refyntra.run.focus', title: 'Show', arguments: [t.id] };
+    else if (t.runnable) item.command = { command: 'refyntra.selectRunTargetById', title: 'Select', arguments: [t.id] };
     return item;
   }
 
   getChildren(n?: TreeNode): TreeNode[] {
     if (!n) {
       if (!this.isTrusted()) return [{ kind: 'message', text: 'Restricted Mode: Refyntra does not build or run projects until you trust the workspace.' }];
-      const groups: TreeNode[] = [];
+      const groups: TreeNode[] = this.groups().map((group) => ({ kind: 'launchGroup', group }));
       const add = (label: string, lang: RunTarget['language']) => {
         // Only what can start here: test projects (Test Explorer), libraries and apps of another OS are left out.
         const ts = this.targetsCache.filter((t) => t.language === lang && t.runnable);
         if (ts.length) groups.push({ kind: 'group', label, targets: ts });
       };
-      add('.NET', 'dotnet');
+      // .NET: one group per solution when the workspace has several (Backend.sln, Tools.sln, Other projects).
+      const dotnet = this.targetsCache.filter((t) => t.language === 'dotnet' && t.runnable);
+      const solutions = [...new Set(dotnet.map((t) => t.group ?? ''))];
+      if (solutions.length > 1) for (const s of solutions) groups.push({ kind: 'group', label: `.NET · ${s || 'Other projects'}`, targets: dotnet.filter((t) => (t.group ?? '') === s) });
+      else add('.NET', 'dotnet');
       add('Node.js', 'node');
       add('Python', 'python');
       add('Rust', 'rust');
@@ -855,6 +1053,7 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
       return groups;
     }
     if (n.kind === 'group') return n.targets.map((target) => ({ kind: 'target', target }));
+    if (n.kind === 'launchGroup') return this.groupTargets(n.group).found.map((target) => ({ kind: 'target', target, inGroup: n.group.name }));
     if (n.kind === 'target' && n.target.dotnet && n.target.dotnet.profiles.length > 1) return n.target.dotnet.profiles.map((profile) => ({ kind: 'profile', target: n.target, profile }));
     return [];
   }
@@ -1147,6 +1346,12 @@ export function registerRun(context: vscode.ExtensionContext, engine: EngineClie
     vscode.commands.registerCommand('refyntra.showWatchTerminal', () => [...service.sessions.values()].find((s) => s.watch)?.watch?.reveal()),
     vscode.commands.registerCommand('refyntra.debug', (arg?: unknown) => service.debug(arg)),
     vscode.commands.registerCommand('refyntra.stop', (arg?: unknown) => service.stop(arg)),
+    vscode.commands.registerCommand('refyntra.run.createGroup', () => service.createGroup()),
+    vscode.commands.registerCommand('refyntra.run.runGroup', (arg?: unknown) => service.startGroup(groupNameOf(arg), false)),
+    vscode.commands.registerCommand('refyntra.run.debugGroup', (arg?: unknown) => service.startGroup(groupNameOf(arg), true)),
+    vscode.commands.registerCommand('refyntra.run.stopGroup', (arg?: unknown) => service.stopGroup(groupNameOf(arg))),
+    vscode.commands.registerCommand('refyntra.run.deleteGroup', (arg?: unknown) => service.deleteGroup(groupNameOf(arg))),
+    vscode.commands.registerCommand('refyntra.run.focus', (arg?: unknown) => service.focus(arg)),
     vscode.commands.registerCommand('refyntra.restart', (arg?: unknown) => service.restart(arg)),
     vscode.commands.registerCommand('refyntra.selectRunTarget', () => service.chooseTarget()),
     vscode.commands.registerCommand('refyntra.selectRunTargetById', async (id: string) => {

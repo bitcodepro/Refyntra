@@ -440,6 +440,44 @@
         "category": "Refyntra"
       },
       {
+        "command": "refyntra.run.createGroup",
+        "title": "Create Run Group",
+        "category": "Refyntra",
+        "icon": "$(add)"
+      },
+      {
+        "command": "refyntra.run.runGroup",
+        "title": "Run Group",
+        "category": "Refyntra",
+        "icon": "$(run-all)",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "refyntra.run.debugGroup",
+        "title": "Debug Group",
+        "category": "Refyntra",
+        "icon": "$(debug-alt)",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "refyntra.run.stopGroup",
+        "title": "Stop Group",
+        "category": "Refyntra",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "refyntra.run.deleteGroup",
+        "title": "Delete Run Group",
+        "category": "Refyntra",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "refyntra.run.focus",
+        "title": "Show Running Target",
+        "category": "Refyntra",
+        "icon": "$(eye)"
+      },
+      {
         "command": "refyntra.run.refresh",
         "title": "Refresh Run Targets",
         "category": "Refyntra",
@@ -1365,6 +1403,11 @@
           "group": "navigation@2"
         },
         {
+          "command": "refyntra.run.createGroup",
+          "when": "view == refyntra.runView",
+          "group": "1_run@0"
+        },
+        {
           "command": "refyntra.generateLaunchJson",
           "when": "view == refyntra.runView",
           "group": "1_run@1"
@@ -1576,6 +1619,26 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "refyntra.run.runGroup",
+          "when": "view == refyntra.runView && viewItem == refyntra.launchGroup",
+          "group": "inline@1"
+        },
+        {
+          "command": "refyntra.run.debugGroup",
+          "when": "view == refyntra.runView && viewItem == refyntra.launchGroup",
+          "group": "inline@2"
+        },
+        {
+          "command": "refyntra.run.stopGroup",
+          "when": "view == refyntra.runView && viewItem == refyntra.launchGroup.running",
+          "group": "inline@3"
+        },
+        {
+          "command": "refyntra.run.deleteGroup",
+          "when": "view == refyntra.runView && viewItem =~ /^refyntra\\.launchGroup/",
+          "group": "9_delete@1"
+        },
         {
           "command": "refyntra.stackTrace.related",
           "when": "view == refyntra.stackTraceView && viewItem == refyntra.stackFrame",
@@ -2559,6 +2622,21 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Show **Run** and **Debug** buttons in the editor title of C#, Python and Rust files."
+        },
+        "refyntra.run.groups": {
+          "type": "array",
+          "default": [],
+          "scope": "resource",
+          "markdownDescription": "Run groups: several projects or scripts that start together, in order (for example an API and a worker). A web project is waited for (its launch profile's port) before the next one starts. Debug sessions of a group are named `Group › Project`. Create one with **Refyntra: Create Run Group**.",
+          "items": {
+            "type": "object",
+            "required": ["name", "targets"],
+            "properties": {
+              "name": { "type": "string", "description": "Name of the group." },
+              "targets": { "type": "array", "items": { "type": "string" }, "description": "Project or script names as the Run view shows them, in start order." },
+              "waitForReady": { "type": "boolean", "default": true, "description": "Wait for a web project to listen before starting the next one." }
+            }
+          }
         },
         "refyntra.run.view": {
           "type": "boolean",

@@ -108,7 +108,11 @@ exports.cases = ({ api, csharp, waitFor }) => {
         const a = await ready();
         const ts = a.run.targets().filter((t) => t.language === 'dotnet');
         const byName = Object.fromEntries(ts.map((t) => [t.label, t]));
-        assert.deepEqual(Object.keys(byName).sort(), ['AppTests', 'ConsoleApp', 'MultiApp', 'WebApp', 'WorkerApp']);
+        // The solution's projects, plus the project files of the folder that it does not list (Desktop/*).
+        assert.deepEqual(Object.keys(byName).sort(), ['AppTests', 'BlazorClient', 'ConsoleApp', 'MauiApp', 'MultiApp', 'WebApp', 'WinFormsApp', 'WorkerApp', 'WpfApp']);
+        assert.equal(byName.ConsoleApp.group, 'Runnable.sln');
+        assert.equal(byName.BlazorClient.group, 'Other projects');
+        for (const n of ['MauiApp', 'WinFormsApp', 'WpfApp']) assert.equal(byName[n].runnable, false, `${n} cannot run here`);
         assert.equal(byName.WebApp.kindLabel, 'web app');
         assert.equal(byName.WorkerApp.kindLabel, 'worker service');
         assert.equal(byName.AppTests.runnable, false);
@@ -118,9 +122,11 @@ exports.cases = ({ api, csharp, waitFor }) => {
         assert.ok(a.run.targets().some((t) => t.language === 'python' && t.label === 'main.py'), 'the Python entry file is a target');
         // The Run view lists them under .NET / Python.
         const groups = a.run.getChildren();
-        assert.deepEqual(groups.map((g) => g.label), ['.NET', 'Python']);
-        // Only runnable targets are listed: the test project is not.
+        assert.deepEqual(groups.map((g) => g.label), ['.NET · Runnable.sln', '.NET · Other projects', 'Python']);
+        // Only runnable targets are listed: not the test project, MAUI, WPF or WinForms.
         const dotnet = a.run.getChildren(groups[0]).map((n) => n.target.label);
+        const others = a.run.getChildren(groups[1]).map((n) => n.target.label);
+        assert.deepEqual(others, ['BlazorClient']);
         assert.ok(!dotnet.includes('AppTests'), dotnet.join(', '));
         assert.ok(dotnet.includes('ConsoleApp'), dotnet.join(', '));
         assert.match(a.run.statusBarText(), /^\$\(play\) /);
@@ -252,6 +258,39 @@ exports.cases = ({ api, csharp, waitFor }) => {
         await Promise.race([session.done, new Promise((_, rej) => setTimeout(() => rej(new Error('run did not stop')), 30000))]);
         assert.equal(a.run.sessions.has(web.id), false, 'session removed after Stop');
         await assert.rejects(get('http://localhost:5187/'), 'nothing listens after Stop');
+      },
+    ],
+    [
+      'run group: the web app starts first and is waited for, then the console app; the group node counts them; Stop Group ends them',
+      async () => {
+        const a = await ready();
+        const cfg = vscode.workspace.getConfiguration('refyntra');
+        await cfg.update('run.groups', [{ name: 'Backend', targets: ['WebApp', 'ConsoleApp', 'NoSuchApp'] }], vscode.ConfigurationTarget.Workspace);
+        const web = target(a, 'WebApp');
+        await a.run.select(web, { profile: 'http', configuration: 'Debug' });
+        a.run.hooks.groupReadiness.length = 0;
+        try {
+          assert.deepEqual(a.run.groups().map((g) => g.name), ['Backend']);
+          assert.equal(await a.run.startGroup('Backend'), true);
+          assert.deepEqual(a.run.hooks.groupReadiness, [{ target: 'WebApp', ready: true }], 'the web app listened before the console app started');
+          assert.equal(a.run.isRunning(web), 'run');
+          const r = await get('http://localhost:5187/');
+          assert.equal(r.status, 200);
+          const roots = await a.run.getChildren(undefined);
+          const node = roots.find((n) => n.kind === 'launchGroup');
+          assert.ok(node, 'the group is a node of the Run view');
+          const item = a.run.getTreeItem(node);
+          assert.match(String(item.description), /[12] of 2 running/);
+          assert.equal(item.contextValue, 'refyntra.launchGroup.running');
+          const kids = await a.run.getChildren(node);
+          assert.deepEqual(kids.map((k) => k.target.label), ['WebApp', 'ConsoleApp']);
+          await a.run.stopGroup('Backend');
+          await waitFor(() => !a.run.sessions.has(web.id), 'the web app stopped', 30000);
+          await assert.rejects(get('http://localhost:5187/'), 'nothing listens after Stop Group');
+        } finally {
+          await a.run.stopGroup('Backend');
+          await cfg.update('run.groups', undefined, vscode.ConfigurationTarget.Workspace);
+        }
       },
     ],
     [

@@ -213,6 +213,8 @@ export interface LanguageAdapter {
    * (barrier first; null for an older host).
    */
   editActions?(uri: string, range: import('@refyntra/contracts').Range, actionId: string | undefined, token?: CancellationToken): Promise<RouteResult<import('@refyntra/contracts').EditActionsResult | null>>;
+  /** Run kinds of project files outside the loaded solution (protocol 1.28); null for an older host. */
+  classifyProjects?(projectUris: string[], token?: CancellationToken): Promise<import('@refyntra/contracts').RunnableProjectsResult | null>;
   runnableProjects?(token?: CancellationToken): Promise<import('@refyntra/contracts').RunnableProjectsResult | null>;
   /** Optional (protocol 1.20): the Solution Explorer model (solution/structure, no barrier); null when the host is older. */
   solutionStructure?(token?: CancellationToken): Promise<import('@refyntra/contracts').SolutionStructureResult | null>;
