@@ -35,8 +35,9 @@ export const PROTOCOL_MAJOR = 1;
  * 1.23: Hover (`code/hover`, Roslyn's QuickInfoService) and signature help (`code/signatureHelp`).
  * 1.24: Compiler diagnostics of a document (`code/diagnostics`).
  * 1.25: Formatting (`code/format`: Roslyn's formatter with the .editorconfig options; a range or the document).
+ * 1.26: Affected tests (`code/affectedTests`: tests that reference what changed files declare; not coverage).
  */
-export const PROTOCOL_MINOR = 25;
+export const PROTOCOL_MINOR = 26;
 
 /** Zero-based line, UTF-16 code unit character. */
 export interface Position {
@@ -591,6 +592,18 @@ export interface FileStructureResult {
   /** "DocumentNotFound" when the document is not part of the loaded solution. */
   reasonCode?: string | null;
   completeness: 'complete' | 'partial' | 'unknown';
+  snapshotId: string;
+}
+
+/** code/affectedTests (protocol 1.26): the tests that reference what the given C# files declare. */
+export interface AffectedTestsParams extends WorkspaceParams {
+  snapshotId: string;
+  uris: string[];
+}
+
+export interface AffectedTestsResult {
+  tests: { fullyQualifiedName: string; reason: string }[];
+  truncated: boolean;
   snapshotId: string;
 }
 
@@ -1476,6 +1489,8 @@ export interface MethodMap {
   'solution/structure': [WorkspaceParams, SolutionStructureResult];
   /** Protocol 1.21. */
   'code/expressionCompletions': [ExpressionCompletionsParams, ExpressionCompletionsResult];
+  /** Protocol 1.26. */
+  'code/affectedTests': [AffectedTestsParams, AffectedTestsResult];
   /** Protocol 1.25. */
   'code/format': [FormatParams, FormatResult];
   /** Protocol 1.24. */

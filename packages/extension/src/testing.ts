@@ -73,6 +73,8 @@ export interface TestingState {
   lastDebugProcessId?: number;
   /** Steps of the last debugged test run (process id, attach, session start and end). */
   debugTrace: string[];
+  /** The last continuous run after a save: the test ids it ran and why. */
+  lastContinuous?: { tests: string[]; notes: string[] };
   /** Test cases the last .NET run sent to vstest.console (undefined: it ran through `dotnet test`). */
   lastServerCases?: number;
   /** Results the server reported for the last .NET run (one per case run). */
@@ -122,6 +124,9 @@ function dotnetRoot(): string | undefined {
 const SERVER_DEBUG_TIMEOUT_MS = 90000;
 /** Debugging a selection through vstest.console (editor-attached netcoredbg): one data row alone too. */
 const DEBUG_THROUGH_SERVER = true;
+
+/** Saves of C# files within this time are combined into one continuous run. */
+const CONTINUOUS_DEBOUNCE_MS = 1500;
 
 export class TestingService implements vscode.Disposable {
   readonly controller = vscode.tests.createTestController(TEST_CONTROLLER_ID, 'Refyntra Tests');
@@ -391,6 +396,7 @@ export class TestingService implements vscode.Disposable {
       ...(this.lastDebugPid !== undefined ? { lastDebugProcessId: this.lastDebugPid } : {}),
       debugTrace: [...this.debugTrace],
       ...(this.lastServerCases !== undefined ? { lastServerCases: this.lastServerCases } : {}),
+      ...(this.lastContinuous ? { lastContinuous: this.lastContinuous } : {}),
       ...(this.lastServerResults !== undefined ? { lastServerResults: this.lastServerResults } : {}),
     };
   }
@@ -435,18 +441,74 @@ export class TestingService implements vscode.Disposable {
     return next;
   }
 
-  /** Continuous run: on save, the test classes of the saved file (or every requested test after a change elsewhere). */
+  /** The next continuous run while it waits in the queue: later saves add their tests to it instead of queuing another. */
+  private continuousNext: { items: Map<string, vscode.TestItem>; notes: string[] } | undefined;
+  private readonly runNotes = new WeakMap<vscode.TestRunRequest, string[]>();
+  private lastContinuous: { tests: string[]; notes: string[] } | undefined;
+
+  /**
+   * Continuous run. A saved test file runs its test classes. A saved C# production file runs only the tests that
+   * reference what it declares (code/affectedTests; static references, not coverage), with the reason in the run
+   * output; saves within a moment are combined, and a queued run takes the later saves' tests. When the affected tests
+   * are not known (older host, a search cut at its limit), every requested test runs and the output says why.
+   */
   private watch(request: vscode.TestRunRequest, token: vscode.CancellationToken): void {
+    const scope = () => request.include ?? this.roots();
+    const inScope = (item: vscode.TestItem): boolean => {
+      for (let p: vscode.TestItem | undefined = item; p; p = p.parent) if (scope().some((s) => s.id === p!.id)) return true;
+      return false;
+    };
+    const pending = new Set<string>();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const queue = (items: readonly vscode.TestItem[], notes: string[]) => {
+      if (token.isCancellationRequested || items.length === 0) return;
+      this.lastContinuous = { tests: items.map((i) => i.id), notes };
+      if (this.continuousNext) {
+        for (const i of items) this.continuousNext.items.set(i.id, i);
+        this.continuousNext.notes.push(...notes);
+        return;
+      }
+      const next = { items: new Map(items.map((i) => [i.id, i] as const)), notes: [...notes] };
+      this.continuousNext = next;
+      const run = this.queue.then(() => {
+        if (this.continuousNext === next) this.continuousNext = undefined;
+        const req = new vscode.TestRunRequest([...next.items.values()], request.exclude, request.profile);
+        this.runNotes.set(req, next.notes);
+        return this.execute(req, token, false);
+      });
+      this.queue = run.catch(() => undefined);
+    };
+    const flush = async () => {
+      timer = undefined;
+      const uris = [...pending];
+      pending.clear();
+      const r = this.engine.affectedTests ? await this.engine.affectedTests(uris).catch(() => undefined) : undefined;
+      const changed = uris.map((u) => path.basename(vscode.Uri.parse(u).fsPath)).join(', ');
+      if (!r || r.truncated) {
+        queue(scope(), [`[Refyntra] ${changed} changed; ${r ? 'the search for affected tests stopped at its limit' : 'the affected tests are not known'}: every requested test runs.`]);
+        return;
+      }
+      const byKey = new Map<string, vscode.TestItem>();
+      for (const [id, n] of this.nodes) if (n.kind === 'method' && n.language === 'dotnet' && this.items.get(id)) byKey.set(n.key, this.items.get(id)!);
+      const items: vscode.TestItem[] = [];
+      const notes = [`[Refyntra] ${changed} changed: running the tests that reference it (static references in the code, not runtime coverage).`];
+      for (const t of r.tests) {
+        const item = byKey.get(t.fullyQualifiedName);
+        if (!item || !inScope(item)) continue;
+        items.push(item);
+        notes.push(`  ${item.label}: ${t.reason}`);
+      }
+      if (items.length === 0) {
+        this.lastContinuous = { tests: [], notes: [`[Refyntra] ${changed} changed: no test references it.`] };
+        return;
+      }
+      queue(items, notes);
+    };
     const sub = vscode.workspace.onDidSaveTextDocument((doc) => {
       if (token.isCancellationRequested) return;
       const lang = doc.languageId;
       if (!['csharp', 'python', 'rust'].includes(lang)) return;
-      const scope = request.include ?? this.roots();
       const uri = fileKey(doc.uri.toString());
-      const inScope = (item: vscode.TestItem): boolean => {
-        for (let p: vscode.TestItem | undefined = item; p; p = p.parent) if (scope.some((s) => s.id === p!.id)) return true;
-        return false;
-      };
       const classes = new Map<string, vscode.TestItem>();
       for (const [id, n] of this.nodes) {
         if (!n.uri || fileKey(n.uri) !== uri || (n.kind !== 'method' && n.kind !== 'case')) continue;
@@ -454,10 +516,22 @@ export class TestingService implements vscode.Disposable {
         const cls = item?.parent && this.nodes.get(item.parent.id)?.kind !== 'method' ? item.parent : item?.parent?.parent;
         if (cls && inScope(cls)) classes.set(cls.id, cls);
       }
-      const include = classes.size ? [...classes.values()] : scope;
-      void this.enqueue(new vscode.TestRunRequest(include, request.exclude, request.profile), token, false);
+      if (classes.size) {
+        queue([...classes.values()], [`[Refyntra] ${path.basename(doc.uri.fsPath)} changed: running its test classes.`]);
+        return;
+      }
+      if (lang !== 'csharp') {
+        queue(scope(), [`[Refyntra] ${path.basename(doc.uri.fsPath)} changed: every requested test runs.`]);
+        return;
+      }
+      pending.add(doc.uri.toString());
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => void flush(), CONTINUOUS_DEBOUNCE_MS);
     });
-    token.onCancellationRequested(() => sub.dispose());
+    token.onCancellationRequested(() => {
+      sub.dispose();
+      if (timer) clearTimeout(timer);
+    });
     this.subs.push(sub);
   }
 
@@ -471,6 +545,7 @@ export class TestingService implements vscode.Disposable {
 
   private async execute(request: vscode.TestRunRequest, token: vscode.CancellationToken, debug: boolean): Promise<void> {
     const run = this.controller.createTestRun(request, undefined, true);
+    for (const note of this.runNotes.get(request) ?? []) run.appendOutput(crlf(`${note}\n`));
     this.runs++;
     this.running++;
     try {

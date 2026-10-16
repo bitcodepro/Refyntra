@@ -308,6 +308,8 @@ export interface EngineClient {
   expressionCompletions?(uri: string, position: Position, text: string, caret: number, token?: CancellationToken): Promise<string[]>;
   /** Go to Definition: the symbol at the position (with its declaration) and, on request, its implementations. Cheap: no Related. */
   definition?(target: DocumentTarget, withImplementations: boolean, token?: CancellationToken): Promise<{ subject: import('@refyntra/contracts').SymbolRef; implementations: import('@refyntra/contracts').Location[] } | undefined>;
+  /** Tests that reference what the C# files declare (protocol 1.26); undefined when not known (older host, no C# route). */
+  affectedTests?(uris: string[], token?: CancellationToken): Promise<import('@refyntra/contracts').AffectedTestsResult | undefined>;
   /** Formatting edits of a C# document or a range of it (protocol 1.25); undefined when not provided here. */
   format?(uri: string, range?: import('@refyntra/contracts').Range, token?: CancellationToken): Promise<import('@refyntra/contracts').TextEditDto[] | undefined>;
   /** The compiler's diagnostics of a C# document (protocol 1.24); undefined when not provided here. */
@@ -845,6 +847,17 @@ export class RefyntraEngine implements EngineClient {
     } catch (e) {
       if (e instanceof CancelledError) throw e;
       return this.toUnavailable(adapter, e);
+    }
+  }
+
+  async affectedTests(uris: string[], token?: CancellationToken): Promise<import('@refyntra/contracts').AffectedTestsResult | undefined> {
+    const adapter = uris[0] ? this.o.registry.routeFor(uris[0]) : undefined;
+    if (!adapter || adapter.descriptor.ownership !== 'owned-semantic' || typeof adapter.affectedTests !== 'function') return undefined;
+    try {
+      return (await this.withStaleRetry(() => adapter.affectedTests!(uris, token), token)).value ?? undefined;
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      return undefined;
     }
   }
 

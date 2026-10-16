@@ -49,7 +49,7 @@ public static class TestNavigation
         _ => false,
     };
 
-    private static IMethodSymbol? EnclosingTestMethod(SemanticModel model, SyntaxNode node, CancellationToken ct)
+    internal static IMethodSymbol? EnclosingTestMethod(SemanticModel model, SyntaxNode node, CancellationToken ct)
     {
         var decl = node.AncestorsAndSelf().OfType<MethodDeclarationSyntax>().FirstOrDefault();
         if (decl == null) return null;

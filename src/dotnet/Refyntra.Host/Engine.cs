@@ -46,8 +46,9 @@ public sealed partial class Engine : IRpcHandler, IDisposable
     /// 1.23: code/hover (Roslyn's QuickInfoService) and code/signatureHelp (overloads and the active argument).
     /// 1.24: code/diagnostics (the compiler's errors and warnings of a document).
     /// 1.25: code/format (Roslyn's formatter with the document's .editorconfig options; a range or the whole document).
+    /// 1.26: code/affectedTests (the tests that reference what changed files declare; static references, not coverage).
     /// </summary>
-    public const int ProtocolMinor = 25;
+    public const int ProtocolMinor = 26;
     /// <summary>How long workspace/snapshotBarrier waits for a missing document sequence (tests shorten it).</summary>
     public TimeSpan BarrierTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
@@ -149,6 +150,8 @@ public sealed partial class Engine : IRpcHandler, IDisposable
                 return await GenerateAsync(Params<GenerateParams>(p), ct).ConfigureAwait(false);
             case "code/constructorActions":
                 return await ConstructorActionsAsync(Params<ConstructorActionsParams>(p), ct).ConfigureAwait(false);
+            case "code/affectedTests":
+                return await AffectedTestsAsync(Params<AffectedTestsParams>(p), ct).ConfigureAwait(false);
             case "code/format":
                 return await FormatAsync(Params<FormatParams>(p), ct).ConfigureAwait(false);
             case "code/diagnostics":
@@ -781,6 +784,19 @@ public sealed partial class Engine : IRpcHandler, IDisposable
         }
         if (RazorMapping.IsRazorPath(path) && await RazorMapping.ToGeneratedAsync(snap.Solution, path, at.Line, at.Character, ct).ConfigureAwait(false) is { } g) return (g.Document, g.Position, true);
         return null;
+    }
+
+    private async Task<AffectedTestsResultDto> AffectedTestsAsync(AffectedTestsParams p, CancellationToken ct)
+    {
+        var snap = RequireSnapshot(p.WorkspaceId, p.SnapshotId);
+        var docs = p.Uris.SelectMany(u => snap.Session.DocumentIdsForPath(PathOf(u))).Select(snap.Solution.GetDocument).OfType<Microsoft.CodeAnalysis.Document>().ToList();
+        var (tests, truncated) = await AffectedTests.ForDocumentsAsync(snap, docs, ct).ConfigureAwait(false);
+        return new AffectedTestsResultDto
+        {
+            Tests = tests.Select(t => new AffectedTestDto { FullyQualifiedName = t.FullyQualifiedName, Reason = t.Reason }).ToList(),
+            Truncated = truncated,
+            SnapshotId = snap.Id,
+        };
     }
 
     private async Task<FormatResultDto> FormatAsync(FormatParams p, CancellationToken ct)

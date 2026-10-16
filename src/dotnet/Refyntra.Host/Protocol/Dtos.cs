@@ -1023,6 +1023,29 @@ public sealed class ConstructorActionsResultDto
     public string SnapshotId { get; set; } = "";
 }
 
+/// <summary>code/affectedTests (protocol 1.26): the tests that reference what the given C# files declare.</summary>
+public sealed class AffectedTestsParams : WorkspaceParams
+{
+    public string SnapshotId { get; set; } = "";
+    public List<string> Uris { get; set; } = new();
+}
+
+public sealed class AffectedTestDto
+{
+    /// <summary>"Ns.Outer+Inner.Method", as test adapters report it.</summary>
+    public string FullyQualifiedName { get; set; } = "";
+    /// <summary>Why: "references OrderService.Find (OrderServiceTests.cs:14)".</summary>
+    public string Reason { get; set; } = "";
+}
+
+public sealed class AffectedTestsResultDto
+{
+    public List<AffectedTestDto> Tests { get; set; } = new();
+    /// <summary>The search stopped at a limit: run more than these when in doubt.</summary>
+    public bool Truncated { get; set; }
+    public string SnapshotId { get; set; } = "";
+}
+
 /// <summary>code/format (protocol 1.25): the formatting edits of a C# document (a range of it, or all).</summary>
 public sealed class FormatParams : WorkspaceParams
 {

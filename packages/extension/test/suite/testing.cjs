@@ -300,6 +300,45 @@ DAP: ${dap.join(' | ')}`);
       },
     ],
     [
+      'tests: Continuous Run after saving production code runs only the tests that reference it, with the reason; two quick saves make one run',
+      async () => {
+        const a = await ready();
+        const cts = new vscode.CancellationTokenSource();
+        const projects = a.testing.state().ids.filter((i) => i.startsWith('dotnet:proj:')).map((i) => a.testing.item(i));
+        const profile = a.testing.runProfile;
+        await profile.runHandler(new vscode.TestRunRequest(projects, undefined, profile, true), cts.token);
+        const uri = vscode.Uri.file(file('Calc/Calculator.cs'));
+        const doc = await vscode.workspace.openTextDocument(uri);
+        await vscode.window.showTextDocument(doc);
+        const original = doc.getText();
+        const before = a.testing.state().runs;
+        try {
+          for (let i = 0; i < 2; i++) {
+            const edit = new vscode.WorkspaceEdit();
+            edit.insert(uri, new vscode.Position(doc.lineCount, 0), '\n');
+            assert.ok(await vscode.workspace.applyEdit(edit));
+            assert.ok(await doc.save());
+          }
+          await waitFor(() => a.testing.state().runs > before && !a.testing.state().running, 'the continuous run after the saves', LONG);
+          assert.equal(a.testing.state().runs, before + 1, 'the two saves made one run');
+          const st = a.testing.state();
+          const ran = st.lastContinuous.tests;
+          assert.ok(ran.some((i) => i.endsWith('XUnitTests.CalculatorTests.AddsTwoNumbers')), JSON.stringify(ran));
+          assert.ok(!ran.some((i) => i.endsWith('SkippedOnPurpose') || /proj:/.test(i)), 'only the tests that reference the calculator');
+          assert.match(st.lastContinuous.notes.join('\n'), /AddsTwoNumbers: references Calculator\.Add/);
+          assert.match(st.lastContinuous.notes[0], /not runtime coverage/);
+        } finally {
+          cts.cancel();
+          cts.dispose();
+          const edit = new vscode.WorkspaceEdit();
+          edit.replace(uri, new vscode.Range(0, 0, doc.lineCount, 0), original);
+          await vscode.workspace.applyEdit(edit);
+          await doc.save();
+          await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+        }
+      },
+    ],
+    [
       'tests: Coverage profile: line coverage with coverlet.collector when the project references it, else skipped with a reason',
       async () => {
         const a = await ready();
