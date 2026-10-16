@@ -12,7 +12,7 @@ MSBuild (ADR-001) and has a run model (ADR-008) and a test runner (ADR-009). No 
 
 Constraints:
 
-- Local processing (README, "Privacy and local processing"). Network access only when the user asks for something that
+- Local processing (docs/guide.md, "Privacy and local processing"). Network access only when the user asks for something that
   needs it, and only to the NuGet sources the user configured.
 - Workspace Trust (ADR-005): nothing in this ADR runs in Restricted Mode (MSBuild evaluation, the dotnet CLI, NuGet).
 - Refyntra handles no credentials.

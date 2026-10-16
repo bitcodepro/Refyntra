@@ -2,7 +2,7 @@ import type { Position, Range } from '@refyntra/contracts';
 import type { DynamicUse, ModuleImport, ModuleMemberUse, NameUse, ScriptFacts, StyleImport } from './model';
 
 // Class/id uses and stylesheet imports in TypeScript/JavaScript (TS, TSX, JS, JSX) source. Pattern based on
-// comment-masked text (no TypeScript engine, nothing evaluated). Recognised forms (README "HTML and CSS"):
+// comment-masked text (no TypeScript engine, nothing evaluated). Recognised forms (docs/guide.md "HTML and CSS"):
 //   CSS Modules: import s from './x.module.css' | import * as s from … | const s = require('…')
 //                s.foo, s?.foo, s['foo'] (static) — s[expr] is dynamic (unknown)
 //   global classes: className="a b", className={'a b'}, class="a b" (JSX), el.className = 'a b',

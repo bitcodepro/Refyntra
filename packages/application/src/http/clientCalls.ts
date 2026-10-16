@@ -2,7 +2,7 @@ import type { Range } from '@refyntra/contracts';
 
 // Heuristic HTTP client call detection in TypeScript/JavaScript source (no TypeScript engine, no evaluation).
 // A small tokenizer that understands comments, strings, template literals and regular expressions, then a pattern
-// matcher over the tokens. Recognised forms (see README "Frontend ↔ backend (heuristic)"):
+// matcher over the tokens. Recognised forms (see docs/guide.md "Frontend ↔ backend (heuristic)"):
 //   fetch(url[, { method }]), window/globalThis/self.fetch(...)
 //   axios.get/post/put/delete/patch/head/options(url), axios(url[, { method }]), axios({ url, method }),
 //   axios.request({ url, method }), instances from a same-file axios.create({ baseURL })

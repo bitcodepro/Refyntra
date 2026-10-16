@@ -13,7 +13,7 @@ through Refyntra's own entry points.
 
 Constraints:
 
-- Local processing only (README, "Privacy and local processing"): no network access by default, and nothing a user
+- Local processing only (docs/guide.md, "Privacy and local processing"): no network access by default, and nothing a user
   has not asked for leaves the machine.
 - One bundled host, licences compatible with MIT and listed in THIRD_PARTY_NOTICES.md (ADR-005).
 - No files written into the workspace or next to the assemblies; nothing locked that a build may want to overwrite.
