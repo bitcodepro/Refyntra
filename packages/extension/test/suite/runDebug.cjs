@@ -112,7 +112,9 @@ exports.cases = ({ api, csharp, waitFor }) => {
         assert.deepEqual(Object.keys(byName).sort(), ['AppTests', 'BlazorClient', 'ConsoleApp', 'MauiApp', 'MultiApp', 'WebApp', 'WinFormsApp', 'WorkerApp', 'WpfApp']);
         assert.equal(byName.ConsoleApp.group, 'Runnable.sln');
         assert.equal(byName.BlazorClient.group, 'Other projects');
-        for (const n of ['MauiApp', 'WinFormsApp', 'WpfApp']) assert.equal(byName[n].runnable, false, `${n} cannot run here`);
+        // MAUI is never offered; WinForms and WPF run on Windows only.
+        assert.equal(byName.MauiApp.runnable, false, 'MAUI is not offered');
+        for (const n of ['WinFormsApp', 'WpfApp']) assert.equal(byName[n].runnable, process.platform === 'win32', `${n} runs on Windows only`);
         assert.equal(byName.WebApp.kindLabel, 'web app');
         assert.equal(byName.WorkerApp.kindLabel, 'worker service');
         assert.equal(byName.AppTests.runnable, false);
@@ -126,7 +128,7 @@ exports.cases = ({ api, csharp, waitFor }) => {
         // Only runnable targets are listed: not the test project, MAUI, WPF or WinForms.
         const dotnet = a.run.getChildren(groups[0]).map((n) => n.target.label);
         const others = a.run.getChildren(groups[1]).map((n) => n.target.label);
-        assert.deepEqual(others, ['BlazorClient']);
+        assert.deepEqual(others, process.platform === 'win32' ? ['BlazorClient', 'WinFormsApp', 'WpfApp'] : ['BlazorClient']);
         assert.ok(!dotnet.includes('AppTests'), dotnet.join(', '));
         assert.ok(dotnet.includes('ConsoleApp'), dotnet.join(', '));
         assert.match(a.run.statusBarText(), /^\$\(play\) /);
@@ -287,7 +289,8 @@ exports.cases = ({ api, csharp, waitFor }) => {
           // A click on the running web app shows its own terminal (the one opened for this start).
           await a.run.focus(web.id);
           assert.equal(a.run.hooks.focused.at(-1), 'terminal');
-          assert.equal(vscode.window.activeTerminal, a.run.sessions.get(web.id).terminal);
+          assert.match(a.run.sessions.get(web.id).terminal?.name ?? '', /WebApp/, 'the session knows its own terminal');
+          await waitFor(() => vscode.window.activeTerminal === a.run.sessions.get(web.id).terminal, 'the web app terminal shown', 10000);
           await a.run.stopGroup('Backend');
           await waitFor(() => !a.run.sessions.has(web.id), 'the web app stopped', 30000);
           await assert.rejects(get('http://localhost:5187/'), 'nothing listens after Stop Group');
