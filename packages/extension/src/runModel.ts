@@ -299,6 +299,28 @@ export function readinessEndpoint(applicationUrl: string | undefined): { host: s
   return { host, port: m[3] ? Number(m[3]) : m[1]!.toLowerCase() === 'https' ? 443 : 80 };
 }
 
+/**
+ * The target a run group entry names: a project path relative to the workspace folder ("backend/Api/Api.csproj", any
+ * separator, no case on Windows), else a target id, else a label. A label that two targets share names none of them
+ * ("ambiguous"): the group then needs the path.
+ */
+export function resolveGroupEntry<T extends { id: string; label: string; relativePath?: string }>(entry: string, targets: readonly T[], ignoreCase: boolean): T | 'ambiguous' | undefined {
+  const norm = (p: string) => (ignoreCase ? p.toLowerCase() : p).replace(/\\/g, '/').replace(/^\.\//, '');
+  const byPath = targets.find((t) => t.relativePath !== undefined && norm(t.relativePath) === norm(entry));
+  if (byPath) return byPath;
+  const byId = targets.find((t) => t.id === entry);
+  if (byId) return byId;
+  const byLabel = targets.filter((t) => t.label === entry);
+  if (byLabel.length > 1) return 'ambiguous';
+  return byLabel[0];
+}
+
+/** How Create Run Group saves a target: its label, or its relative project path when another target has that label. */
+export function groupEntryOf<T extends { label: string; relativePath?: string }>(t: T, targets: readonly T[]): string {
+  const shared = targets.filter((x) => x.label === t.label).length > 1;
+  return shared && t.relativePath ? t.relativePath.replace(/\\/g, '/') : t.label;
+}
+
 /** The name of a debug session of a group member: "Group › Project", so the Call Stack shows whose debugger it is. */
 export function groupSessionName(group: string, target: string): string {
   return `${group} › ${target}`;

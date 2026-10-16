@@ -30,3 +30,24 @@ describe('run groups', async () => {
     expect(groupSessionName('Backend', 'Api')).toBe('Backend › Api');
   });
 });
+
+describe('run group entries', async () => {
+  const { resolveGroupEntry, groupEntryOf } = await import('../../src/runModel');
+  const ts = [
+    { id: 'a', label: 'Api', relativePath: 'backend/Api/Api.csproj' },
+    { id: 'b', label: 'Api', relativePath: 'tools/Api/Api.csproj' },
+    { id: 'w', label: 'Worker', relativePath: 'backend/Worker/Worker.csproj' },
+  ];
+  it('a repeated name needs the path; paths match with either separator and, on Windows, any case', () => {
+    expect(resolveGroupEntry('Api', ts, false)).toBe('ambiguous');
+    expect(resolveGroupEntry('tools\\Api\\Api.csproj', ts, false)?.toString()).toBe(ts[1]!.toString());
+    expect((resolveGroupEntry('Tools/API/api.csproj', ts, true) as { id: string }).id).toBe('b');
+    expect(resolveGroupEntry('Tools/API/api.csproj', ts, false)).toBeUndefined();
+    expect((resolveGroupEntry('Worker', ts, false) as { id: string }).id).toBe('w');
+    expect(resolveGroupEntry('Nope', ts, false)).toBeUndefined();
+  });
+  it('Create Run Group saves the path only when the name repeats', () => {
+    expect(groupEntryOf(ts[0]!, ts)).toBe('backend/Api/Api.csproj');
+    expect(groupEntryOf(ts[2]!, ts)).toBe('Worker');
+  });
+});

@@ -39,7 +39,9 @@ import {
   rustEntryLine,
   rustTargets,
   groupBySolution,
+  groupEntryOf,
   groupSessionName,
+  resolveGroupEntry,
   parseRunGroups,
   readinessEndpoint,
   type RunGroup,
@@ -159,6 +161,8 @@ export interface RunSession {
   exitCode?: number | null;
   output: string;
   execution?: vscode.TaskExecution;
+  /** The terminal VS Code opened for this run (the one a click on the running target shows). */
+  terminal?: vscode.Terminal;
   /** Run with Hot Reload: the dotnet watch status bar indicator. */
   watch?: WatchIndicator;
   stop(): void;
@@ -324,6 +328,8 @@ export interface RunTestHooks {
   openedUrls: string[];
   /** Run groups: whether each waited-for web target became ready. */
   groupReadiness: { target: string; ready: boolean }[];
+  /** What refyntra.run.focus showed: the debug session, the target's own terminal or nothing. */
+  focused: ('debug' | 'terminal' | 'none')[];
   /** Tests: the targets and the name Create Run Group takes (no pickers). */
   pickMany?: <T extends vscode.QuickPickItem>(items: T[]) => Promise<T[] | undefined>;
   groupName?: string;
@@ -345,7 +351,7 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
   private refreshTimer: NodeJS.Timeout | undefined;
   readonly sessions = new Map<string, RunSession>();
   private readonly terminals = new Map<string, ProcessTerminal>();
-  readonly hooks: RunTestHooks = { openedUrls: [], browserDebugConfigurations: [], groupReadiness: [], debugExitCodes: new Map() };
+  readonly hooks: RunTestHooks = { openedUrls: [], browserDebugConfigurations: [], groupReadiness: [], focused: [], debugExitCodes: new Map() };
   readonly debuggers: DebuggerLocator;
 
   constructor(
@@ -402,10 +408,17 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
     const ignoreCase = process.platform === 'win32';
     const key = (p: string) => (ignoreCase ? p.toLowerCase() : p);
     const known = new Set(out.filter((t) => t.dotnet).map((t) => key(t.dotnet!.projectPath)));
-    const files = (await vscode.workspace.findFiles('**/*.csproj', EXCLUDE, 300)).map((u) => u.fsPath);
+    const limit = vscode.workspace.getConfiguration('refyntra').get<number>('run.maxProjects', 2000);
+    const files = (await vscode.workspace.findFiles('**/*.csproj', EXCLUDE, limit + 1)).map((u) => u.fsPath);
+    if (files.length > limit) {
+      files.length = limit;
+      this.dotnetNote = `More than ${limit} project files: the first ${limit} are listed (setting refyntra.run.maxProjects).`;
+    }
     const missing = files.filter((f) => !known.has(key(f)));
     if (missing.length && this.engine.classifyProjects) {
-      const projects = await this.engine.classifyProjects(missing.map((f) => vscode.Uri.file(f).toString())).catch(() => []);
+      const projects: import('@refyntra/contracts').RunnableProjectInfo[] = [];
+      // In batches: the host reads each project file (a few ms), so a large monorepo is not one long request.
+      for (let i = 0; i < missing.length; i += 250) projects.push(...(await this.engine.classifyProjects(missing.slice(i, i + 250).map((f) => vscode.Uri.file(f).toString())).catch(() => [])));
       out.push(...dotnetTargets(projects, (u) => vscode.Uri.parse(u).fsPath, (p) => this.profilesOf(p.launchSettingsUri), process.platform));
     }
     const solutions: { name: string; projects: string[] }[] = [];
@@ -734,6 +747,15 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
     this.sessions.set(target.id, session);
     this.updateContext();
     this.changed.fire(undefined);
+    // The terminal of this start: the first one VS Code opens for a task of this name after executeTask (starts are
+    // sequential, so it is not another target's).
+    const terminalOpened = vscode.window.onDidOpenTerminal((term) => {
+      if (term.name.includes(name)) {
+        session.terminal = term;
+        terminalOpened.dispose();
+      }
+    });
+    setTimeout(() => terminalOpened.dispose(), 30000);
     session.execution = await vscode.tasks.executeTask(task);
     void done.then(() => {
       indicator?.ended();
@@ -777,7 +799,7 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
     if (!this.requireTrust('build or debug projects')) return false;
     const r = await this.resolveTarget(arg);
     if (!r) return false;
-    if (r.target.dotnet?.project.kind === 'blazor-wasm') return this.debugBlazorWasm(r.target, r.choice);
+    if (r.target.dotnet?.project.kind === 'blazor-wasm') return this.debugBlazorWasm(r.target, r.choice, sessionName);
     const cfg = this.debugConfiguration(r.target, r.choice);
     if (!cfg) return false;
     if (sessionName) cfg.name = sessionName;
@@ -790,15 +812,16 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
    * Run (`dotnet run`); when it listens, VS Code's built-in JavaScript debugger opens the app in Edge / Chrome and
    * debugs its C# through the app's debugging proxy (inspectUri). Stopping the browser session leaves the server running.
    */
-  async debugBlazorWasm(t: RunTarget, choice: RunChoice): Promise<boolean> {
+  async debugBlazorWasm(t: RunTarget, choice: RunChoice, sessionName?: string): Promise<boolean> {
     const profile = t.dotnet!.profiles.find((p) => p.name === choice.profile) ?? t.dotnet!.profiles[0];
     const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(t.cwd)) ?? vscode.workspace.workspaceFolders?.[0];
     const projectDir = t.dotnet!.projectPath.replace(/[\\/][^\\/]+$/, '');
     let started = false;
-    await this.startSession(t, this.runSteps(t, choice, false), `Debug: ${t.label}`, (url) => {
+    await this.startSession(t, this.runSteps(t, choice, false), sessionName ?? `Debug: ${t.label}`, (url) => {
       if (started) return;
       started = true;
       const cfg = blazorWasmBrowserConfiguration(browserUrl(profile, url) ?? url, profile, projectDir, process.platform);
+      if (sessionName) cfg.name = sessionName;
       this.hooks.browserDebugConfigurations.push(cfg);
       if (this.context.extensionMode === vscode.ExtensionMode.Test) return; // no browser in CI; tests read the configuration
       void vscode.debug.startDebugging(folder, cfg as vscode.DebugConfiguration);
@@ -883,13 +906,26 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
     return parseRunGroups(vscode.workspace.getConfiguration('refyntra').get('run.groups'));
   }
 
+  /** The runnable targets with their project path relative to their workspace folder (how a group names repeated labels). */
+  private groupCandidates(): (RunTarget & { relativePath?: string })[] {
+    return this.targetsCache
+      .filter((t) => t.runnable)
+      .map((t) => {
+        const file = t.dotnet?.projectPath;
+        const folder = file ? vscode.workspace.getWorkspaceFolder(vscode.Uri.file(file)) : undefined;
+        return file && folder ? { ...t, relativePath: path.relative(folder.uri.fsPath, file).split(path.sep).join('/') } : t;
+      });
+  }
+
   private groupTargets(g: RunGroup): { found: RunTarget[]; missing: string[] } {
     const found: RunTarget[] = [];
     const missing: string[] = [];
-    for (const label of g.targets) {
-      const t = this.targetsCache.find((x) => x.runnable && (x.label === label || x.id === label));
-      if (t) found.push(t);
-      else missing.push(label);
+    const candidates = this.groupCandidates();
+    for (const entry of g.targets) {
+      const t = resolveGroupEntry(entry, candidates, process.platform === 'win32');
+      if (t === 'ambiguous') missing.push(`${entry} (several projects have this name: use its path, e.g. ${candidates.find((c) => c.label === entry)?.relativePath ?? entry})`);
+      else if (t) found.push(this.targetsCache.find((x) => x.id === t.id) ?? t);
+      else missing.push(entry);
     }
     return { found, missing };
   }
@@ -941,7 +977,8 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
     if (!picked?.length) return undefined;
     const name = this.hooks.groupName ?? (await vscode.window.showInputBox({ title: 'Refyntra: Create Run Group', prompt: 'Name of the group', value: picked.map((p) => p.label).join(' + ') }));
     if (!name?.trim()) return undefined;
-    const group: RunGroup = { name: name.trim(), targets: picked.map((p) => p.target.label) };
+    const candidates = this.groupCandidates();
+    const group: RunGroup = { name: name.trim(), targets: picked.map((p) => groupEntryOf(candidates.find((c) => c.id === p.target.id) ?? p.target, candidates)) };
     const cfg = vscode.workspace.getConfiguration('refyntra');
     const groups = this.groups().filter((g) => g.name !== group.name);
     await cfg.update('run.groups', [...groups, group], vscode.ConfigurationTarget.Workspace);
@@ -978,10 +1015,8 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
       return;
     }
     const s = id ? this.sessions.get(id) : undefined;
-    if (s?.execution) {
-      const term = vscode.window.terminals.find((t) => t.name.includes(s.target.label));
-      term?.show();
-    }
+    if (s?.terminal && vscode.window.terminals.includes(s.terminal)) s.terminal.show();
+    this.hooks.focused.push(debugSession ? 'debug' : s?.terminal ? 'terminal' : 'none');
   }
 
   // ---- tree

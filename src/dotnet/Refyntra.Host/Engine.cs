@@ -662,7 +662,7 @@ public sealed partial class Engine : IRpcHandler, IDisposable
     private RunnableProjectsResultDto ClassifyProjects(ClassifyProjectsParams p)
     {
         var list = new List<RunnableProjectDto>();
-        foreach (var uri in p.ProjectUris.Take(500))
+        foreach (var uri in p.ProjectUris.Take(1000))
         {
             string path;
             try { path = PathOf(uri); }

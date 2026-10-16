@@ -2623,6 +2623,12 @@
           "default": true,
           "markdownDescription": "Show **Run** and **Debug** buttons in the editor title of C#, Python and Rust files."
         },
+        "refyntra.run.maxProjects": {
+          "type": "number",
+          "default": 2000,
+          "minimum": 1,
+          "markdownDescription": "The most project files the **Run** view lists (all project files of the folder, not only the loaded solution's). A larger monorepo lists the first ones and says so."
+        },
         "refyntra.run.groups": {
           "type": "array",
           "default": [],
@@ -2633,7 +2639,7 @@
             "required": ["name", "targets"],
             "properties": {
               "name": { "type": "string", "description": "Name of the group." },
-              "targets": { "type": "array", "items": { "type": "string" }, "description": "Project or script names as the Run view shows them, in start order." },
+              "targets": { "type": "array", "items": { "type": "string" }, "description": "Project or script names as the Run view shows them, in start order; a project path relative to the folder (backend/Api/Api.csproj) when two projects have the same name." },
               "waitForReady": { "type": "boolean", "default": true, "description": "Wait for a web project to listen before starting the next one." }
             }
           }

@@ -284,6 +284,10 @@ exports.cases = ({ api, csharp, waitFor }) => {
           assert.equal(item.contextValue, 'refyntra.launchGroup.running');
           const kids = await a.run.getChildren(node);
           assert.deepEqual(kids.map((k) => k.target.label), ['WebApp', 'ConsoleApp']);
+          // A click on the running web app shows its own terminal (the one opened for this start).
+          await a.run.focus(web.id);
+          assert.equal(a.run.hooks.focused.at(-1), 'terminal');
+          assert.equal(vscode.window.activeTerminal, a.run.sessions.get(web.id).terminal);
           await a.run.stopGroup('Backend');
           await waitFor(() => !a.run.sessions.has(web.id), 'the web app stopped', 30000);
           await assert.rejects(get('http://localhost:5187/'), 'nothing listens after Stop Group');
