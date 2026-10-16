@@ -62,6 +62,12 @@ Full documentation: **[docs/guide.md](docs/guide.md)**.
 `bash scripts/test/linux-e2e.sh` and `bash scripts/test/linux-visual.sh`. Details in [docs/guide.md](docs/guide.md#testing)
 and [CONTRIBUTING.md](CONTRIBUTING.md). Changes: [CHANGELOG.md](CHANGELOG.md).
 
+## Releases
+
+Successful main CI runs publish versioned VSIX packages to GitHub Releases. See
+[release versions, safeguards and recovery](docs/releases.md).
+
 ## License
 
 MIT, see [LICENSE](LICENSE). Third-party components: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
