@@ -20,6 +20,14 @@ public static class AffectedTests
 
     public static async Task<(List<AffectedTest> Tests, bool Truncated)> ForDocumentsAsync(Snapshot snapshot, IReadOnlyList<Document> documents, CancellationToken ct)
     {
+        var (symbols, truncated) = await DeclaredSymbolsAsync(documents, ct).ConfigureAwait(false);
+        var (tests, cut) = await ForSymbolsAsync(snapshot, symbols, ct).ConfigureAwait(false);
+        return (tests, truncated || cut);
+    }
+
+    /// <summary>The types and members the documents declare (test classes and their members left out), members first.</summary>
+    public static async Task<(List<ISymbol> Symbols, bool Truncated)> DeclaredSymbolsAsync(IReadOnlyList<Document> documents, CancellationToken ct)
+    {
         var symbols = new List<ISymbol>();
         foreach (var doc in documents)
         {
@@ -36,9 +44,14 @@ public static class AffectedTests
                 if (symbols.Count >= MaxSymbols) break;
             }
         }
-        var truncated = symbols.Count >= MaxSymbols;
         // Members first: the reason names the method or property a test uses rather than only its type.
-        symbols = symbols.OrderBy(x => x is INamedTypeSymbol ? 1 : 0).ToList();
+        return (symbols.OrderBy(x => x is INamedTypeSymbol ? 1 : 0).ToList(), symbols.Count >= MaxSymbols);
+    }
+
+    /// <summary>The test methods that reference any of the symbols, each with the first reference found.</summary>
+    public static async Task<(List<AffectedTest> Tests, bool Truncated)> ForSymbolsAsync(Snapshot snapshot, IReadOnlyList<ISymbol> symbols, CancellationToken ct)
+    {
+        var truncated = false;
         var found = new Dictionary<string, AffectedTest>(StringComparer.Ordinal);
         var testProjects = new Dictionary<ProjectId, bool>();
         foreach (var symbol in symbols)

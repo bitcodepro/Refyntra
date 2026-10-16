@@ -51,6 +51,7 @@ import { registerEditorCompletion } from './editorCompletion';
 import { registerEditorInfo } from './editorInfo';
 import { registerCompilerDiagnostics } from './compilerDiagnostics';
 import { registerEditorEdits } from './editorEdits';
+import { registerImpact } from './impact';
 import { type ImmediateViewProvider, registerImmediate } from './immediate';
 import { type DebugExtras, registerDebugExtras } from './debugExtras';
 import { type CSharpEvaluatableExpressionProvider, type CSharpInlineValuesProvider, registerInlineValues } from './inlineValues';
@@ -136,6 +137,7 @@ export interface RefyntraTestApi {
   stackTrace: StackTraceViewProvider;
   /** Task context view (e2e adds items, edits code and checks the resolution states). */
   taskContext: TaskContextViewProvider;
+  impact: import('./impact').ImpactView;
   /** React / Next.js / Angular web worker: status and process launches (e2e). */
   webFrameworks: { status(): ReturnType<import('@refyntra/web-frameworks').WebFrameworkService['status']>; launches(): { command: string; args: string[] }[] };
   /** CodeLens provider (e2e resolves lenses and reads scan times). */
@@ -347,6 +349,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
   context.subscriptions.push(run.disposable);
   const testing = registerTesting(engine, run.service.debuggers, isTrusted);
   context.subscriptions.push(testing.disposable);
+  // Change Impact: what a change reaches (protocol 1.27), with its tests run through the test runner.
+  const impact = registerImpact(engine, (names) => testing.service.runByNames(names));
+  context.subscriptions.push(impact.disposable);
   // Go to metadata / decompiled sources (protocol 1.17): refyntra-metadata: documents, F12 / hover inside them.
   const metadata = registerMetadata(engine);
   context.subscriptions.push(metadata.disposable);
@@ -536,6 +541,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     statusBarLabel: () => statusBar.accessibleLabel(),
     stackTrace,
     taskContext: taskContext.provider,
+    impact: impact.view,
     webFrameworks: { status: () => web.service.status(), launches: () => web.launches.map((l) => ({ command: l.command, args: [...l.args] })) },
     codeLens: codeLens.provider,
     changeSignatureDialog: () => ChangeSignatureDialog.current,

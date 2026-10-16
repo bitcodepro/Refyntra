@@ -1652,6 +1652,23 @@ scenarios['compat-sdk-missing'] = require('./compat.cjs').sdkMissing({ api, csha
 // Solution Explorer, project operations, NuGet, project file editing (test/suite/solution.cjs); the tree also on Shop.
 scenarios.solution = require('./solution.cjs').cases({ api, csharp, waitFor });
 scenarios.shop.push(...require('./solution.cjs').shop({ api, csharp, waitFor }));
+scenarios.shop.push([
+  'Change Impact of the current file: DI registration and the uses in the handlers, each with the changed symbol it comes from; the Impact view lists them',
+  async () => {
+    const a = await api();
+    await waitFor(() => csharp(a.health())?.state === 'Ready', 'C# Ready', 240000);
+    const uri = vscode.Uri.joinPath(vscode.workspace.workspaceFolders[0].uri, 'Shop.Api', 'Services', 'OrderServices.cs');
+    await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri));
+    const r = await a.impact.show('file');
+    assert.ok(r, 'a Change Impact result');
+    assert.ok(r.changed.some((c) => c.name === 'OrderService'), JSON.stringify(r.changed.map((c) => c.name)));
+    assert.ok(r.relations.some((x) => x.relation.group === 'registrations' && /AddScoped/.test(x.relation.target.label)), JSON.stringify(r.relations.map((x) => x.relation.group + ' ' + x.relation.target.label)));
+    assert.ok(r.relations.some((x) => x.relation.group === 'references' && x.relation.target.location?.uri.endsWith('OrderHandlers.cs') && x.via));
+    const groups = a.impact.getChildren().map((n) => n.group?.id ?? n.kind);
+    assert.ok(groups.includes('registrations') && groups.includes('references'), groups.join(', '));
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+  },
+]);
 
 scenarios['visual-dark'] = require('./visual.cjs').cases({ api, csharp, waitFor });
 scenarios['visual-light'] = require('./visual.cjs').cases({ api, csharp, waitFor });

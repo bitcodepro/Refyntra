@@ -36,8 +36,9 @@ export const PROTOCOL_MAJOR = 1;
  * 1.24: Compiler diagnostics of a document (`code/diagnostics`).
  * 1.25: Formatting (`code/format`: Roslyn's formatter with the .editorconfig options; a range or the document).
  * 1.26: Affected tests (`code/affectedTests`: tests that reference what changed files declare; not coverage).
+ * 1.27: Change Impact (`code/changeImpact`: handlers, endpoints, registrations, implementations, uses and tests a change reaches).
  */
-export const PROTOCOL_MINOR = 26;
+export const PROTOCOL_MINOR = 27;
 
 /** Zero-based line, UTF-16 code unit character. */
 export interface Position {
@@ -592,6 +593,22 @@ export interface FileStructureResult {
   /** "DocumentNotFound" when the document is not part of the loaded solution. */
   reasonCode?: string | null;
   completeness: 'complete' | 'partial' | 'unknown';
+  snapshotId: string;
+}
+
+/** code/changeImpact (protocol 1.27): what a change of some files (or of the symbol at a position) reaches. */
+export interface ChangeImpactParams extends WorkspaceParams {
+  snapshotId: string;
+  uris?: string[];
+  uri?: string;
+  position?: Position;
+}
+
+export interface ChangeImpactResult {
+  changed: SymbolRef[];
+  relations: { via: string; relation: Relation }[];
+  tests: { fullyQualifiedName: string; reason: string }[];
+  truncated: boolean;
   snapshotId: string;
 }
 
@@ -1489,6 +1506,8 @@ export interface MethodMap {
   'solution/structure': [WorkspaceParams, SolutionStructureResult];
   /** Protocol 1.21. */
   'code/expressionCompletions': [ExpressionCompletionsParams, ExpressionCompletionsResult];
+  /** Protocol 1.27. */
+  'code/changeImpact': [ChangeImpactParams, ChangeImpactResult];
   /** Protocol 1.26. */
   'code/affectedTests': [AffectedTestsParams, AffectedTestsResult];
   /** Protocol 1.25. */

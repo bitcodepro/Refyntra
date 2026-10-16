@@ -308,6 +308,8 @@ export interface EngineClient {
   expressionCompletions?(uri: string, position: Position, text: string, caret: number, token?: CancellationToken): Promise<string[]>;
   /** Go to Definition: the symbol at the position (with its declaration) and, on request, its implementations. Cheap: no Related. */
   definition?(target: DocumentTarget, withImplementations: boolean, token?: CancellationToken): Promise<{ subject: import('@refyntra/contracts').SymbolRef; implementations: import('@refyntra/contracts').Location[] } | undefined>;
+  /** What a change reaches (protocol 1.27): of C# files, or of the symbol at a position; undefined when not provided. */
+  changeImpact?(request: { uris?: string[]; uri?: string; position?: Position }, token?: CancellationToken): Promise<import('@refyntra/contracts').ChangeImpactResult | undefined>;
   /** Tests that reference what the C# files declare (protocol 1.26); undefined when not known (older host, no C# route). */
   affectedTests?(uris: string[], token?: CancellationToken): Promise<import('@refyntra/contracts').AffectedTestsResult | undefined>;
   /** Formatting edits of a C# document or a range of it (protocol 1.25); undefined when not provided here. */
@@ -847,6 +849,18 @@ export class RefyntraEngine implements EngineClient {
     } catch (e) {
       if (e instanceof CancelledError) throw e;
       return this.toUnavailable(adapter, e);
+    }
+  }
+
+  async changeImpact(request: { uris?: string[]; uri?: string; position?: Position }, token?: CancellationToken): Promise<import('@refyntra/contracts').ChangeImpactResult | undefined> {
+    const first = request.uri ?? request.uris?.[0];
+    const adapter = first ? this.o.registry.routeFor(first) : undefined;
+    if (!adapter || adapter.descriptor.ownership !== 'owned-semantic' || typeof adapter.changeImpact !== 'function') return undefined;
+    try {
+      return (await this.withStaleRetry(() => adapter.changeImpact!(request, token), token)).value ?? undefined;
+    } catch (e) {
+      if (e instanceof CancelledError) throw e;
+      return undefined;
     }
   }
 

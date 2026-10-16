@@ -69,6 +69,8 @@ export const MAIN_MENU: readonly MenuEntry[] = [
   { label: '$(location) Recent Locations', detail: 'Places where you edited or the cursor rested, with the member and the code line (Ctrl+Shift+E)', command: 'refyntra.recentLocations' },
   { label: '$(list-tree) File Structure', detail: 'Members of the current file grouped by type and #region, with filters and inherited members for C# (Ctrl+F12)', command: 'refyntra.fileStructure' },
   { label: '$(search-fuzzy) Structural Search…', detail: 'Find C# code by its shape with $placeholders$ (type, count, regex constraints) and replace it: preview first, compile-checked', command: 'refyntra.structuralSearch' },
+  { label: '$(pulse) Show Change Impact', detail: 'What a change reaches: handlers, endpoints, DI registrations, implementations, uses and tests (symbol, file or uncommitted changes)', command: 'refyntra.changeImpact' },
+  { label: '$(run-all) Run Affected Tests', detail: 'Run the tests the last Change Impact found (static references, not coverage)', command: 'refyntra.impact.runTests' },
   { label: '$(beaker) Run Tests for This Code', detail: 'Run the C# test at the cursor, or the tests that reference the symbol (Test Explorer shows the results)', command: 'refyntra.tests.runRelated' },
 ];
 

@@ -47,8 +47,9 @@ public sealed partial class Engine : IRpcHandler, IDisposable
     /// 1.24: code/diagnostics (the compiler's errors and warnings of a document).
     /// 1.25: code/format (Roslyn's formatter with the document's .editorconfig options; a range or the whole document).
     /// 1.26: code/affectedTests (the tests that reference what changed files declare; static references, not coverage).
+    /// 1.27: code/changeImpact (what a change reaches: handlers, endpoints, registrations, implementations, uses, tests).
     /// </summary>
-    public const int ProtocolMinor = 26;
+    public const int ProtocolMinor = 27;
     /// <summary>How long workspace/snapshotBarrier waits for a missing document sequence (tests shorten it).</summary>
     public TimeSpan BarrierTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
@@ -150,6 +151,8 @@ public sealed partial class Engine : IRpcHandler, IDisposable
                 return await GenerateAsync(Params<GenerateParams>(p), ct).ConfigureAwait(false);
             case "code/constructorActions":
                 return await ConstructorActionsAsync(Params<ConstructorActionsParams>(p), ct).ConfigureAwait(false);
+            case "code/changeImpact":
+                return await ChangeImpactAsync(Params<ChangeImpactParams>(p), ct).ConfigureAwait(false);
             case "code/affectedTests":
                 return await AffectedTestsAsync(Params<AffectedTestsParams>(p), ct).ConfigureAwait(false);
             case "code/format":
@@ -784,6 +787,61 @@ public sealed partial class Engine : IRpcHandler, IDisposable
         }
         if (RazorMapping.IsRazorPath(path) && await RazorMapping.ToGeneratedAsync(snap.Solution, path, at.Line, at.Character, ct).ConfigureAwait(false) is { } g) return (g.Document, g.Position, true);
         return null;
+    }
+
+    /// <summary>At most this many changed symbols get a Related search (the rest is reported as truncated).</summary>
+    private const int MaxImpactSymbols = 40;
+
+    private async Task<ChangeImpactResultDto> ChangeImpactAsync(ChangeImpactParams p, CancellationToken ct)
+    {
+        var snap = RequireSnapshot(p.WorkspaceId, p.SnapshotId);
+        var result = new ChangeImpactResultDto { SnapshotId = snap.Id };
+        var symbols = new List<Microsoft.CodeAnalysis.ISymbol>();
+        var changedPaths = new HashSet<string>(UriPaths.PathComparer);
+        if (p.Uri != null && p.Position != null)
+        {
+            var subject = await SubjectAsync(snap, null, p.Uri, p.Position, ct).ConfigureAwait(false);
+            if (subject != null) symbols.Add(subject.Value.symbol);
+        }
+        else
+        {
+            var docs = (p.Uris ?? new()).SelectMany(u => snap.Session.DocumentIdsForPath(PathOf(u))).Select(snap.Solution.GetDocument).OfType<Microsoft.CodeAnalysis.Document>().ToList();
+            foreach (var d in docs) if (d.FilePath != null) changedPaths.Add(d.FilePath);
+            var (declared, cut) = await AffectedTests.DeclaredSymbolsAsync(docs, ct).ConfigureAwait(false);
+            symbols.AddRange(declared);
+            result.Truncated = cut;
+        }
+        if (symbols.Count > MaxImpactSymbols)
+        {
+            symbols = symbols.Take(MaxImpactSymbols).ToList();
+            result.Truncated = true;
+        }
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var symbol in symbols)
+        {
+            ct.ThrowIfCancellationRequested();
+            var project = SymbolFacts.OwningProject(snap.Solution, symbol);
+            if (project == null) continue;
+            var mapper = new Mapper(snap, project, ct);
+            result.Changed.Add(mapper.Symbol(symbol));
+            var model = await SemanticService.RelatedAsync(snap, symbol, project, ct).ConfigureAwait(false);
+            var via = symbol is Microsoft.CodeAnalysis.INamedTypeSymbol ? symbol.Name : $"{symbol.ContainingType?.Name}.{symbol.Name}";
+            foreach (var r in model.Relations)
+            {
+                if (r.Group is "declarations" or "tests") continue;
+                var at = r.Target.Location ?? r.Evidence.Select(e => e.Location).FirstOrDefault(l => l != null);
+                // Uses inside the changed files themselves are part of the change, not its impact.
+                if (at?.SourceTree?.FilePath is { } f && changedPaths.Contains(f)) continue;
+                var dto = mapper.Relation(r);
+                var key = $"{dto.Group}|{dto.Target.Label}|{dto.Target.Location?.Uri}|{dto.Target.Location?.Range.Start.Line}";
+                if (!seen.Add(key)) continue;
+                result.Relations.Add(new ImpactRelationDto { Via = via, Relation = dto });
+            }
+        }
+        var (tests, testsCut) = await AffectedTests.ForSymbolsAsync(snap, symbols, ct).ConfigureAwait(false);
+        result.Tests = tests.Select(t => new AffectedTestDto { FullyQualifiedName = t.FullyQualifiedName, Reason = t.Reason }).ToList();
+        result.Truncated |= testsCut;
+        return result;
     }
 
     private async Task<AffectedTestsResultDto> AffectedTestsAsync(AffectedTestsParams p, CancellationToken ct)

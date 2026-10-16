@@ -917,6 +917,18 @@
         "command": "refyntra.projectFile.loadVersions",
         "title": "Load Package Versions from NuGet Sources",
         "category": "Refyntra"
+      },
+      {
+        "command": "refyntra.changeImpact",
+        "title": "Show Change Impact",
+        "category": "Refyntra",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "refyntra.impact.runTests",
+        "title": "Run Affected Tests",
+        "category": "Refyntra",
+        "icon": "$(run-all)"
       }
     ],
     "taskDefinitions": [
@@ -1551,6 +1563,16 @@
           "command": "refyntra.manageNuGet",
           "when": "view == refyntra.solutionView",
           "group": "2_nuget@1"
+        },
+        {
+          "command": "refyntra.impact.runTests",
+          "when": "view == refyntra.impactView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "refyntra.changeImpact",
+          "when": "view == refyntra.impactView",
+          "group": "navigation@2"
         }
       ],
       "view/item/context": [
@@ -1823,6 +1845,11 @@
           "command": "refyntra.solution.reloadProject",
           "when": "view == refyntra.solutionView && viewItem =~ /^refyntra\\.sol\\.project\\.unloaded/",
           "group": "5_load@2"
+        },
+        {
+          "command": "refyntra.impact.runTests",
+          "when": "view == refyntra.impactView && viewItem == refyntra.impactTests",
+          "group": "inline"
         }
       ],
       "terminal/context": [
@@ -2001,6 +2028,11 @@
           "id": "refyntra.relatedView",
           "name": "Related",
           "contextualTitle": "Refyntra"
+        },
+        {
+          "id": "refyntra.impactView",
+          "name": "Impact",
+          "when": "refyntra.impact.visible"
         },
         {
           "id": "refyntra.usagesView",

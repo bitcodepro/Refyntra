@@ -1023,6 +1023,35 @@ public sealed class ConstructorActionsResultDto
     public string SnapshotId { get; set; } = "";
 }
 
+/// <summary>code/changeImpact (protocol 1.27): what a change of some files (or of the symbol at a position) reaches.</summary>
+public sealed class ChangeImpactParams : WorkspaceParams
+{
+    public string SnapshotId { get; set; } = "";
+    /// <summary>The changed C# files (their declared types and members are the changed symbols).</summary>
+    public List<string>? Uris { get; set; }
+    /// <summary>Or one symbol: the one at this position.</summary>
+    public string? Uri { get; set; }
+    public PositionDto? Position { get; set; }
+}
+
+public sealed class ImpactRelationDto
+{
+    /// <summary>The changed symbol this relation was found from ("OrderService.Find").</summary>
+    public string Via { get; set; } = "";
+    public RelationDto Relation { get; set; } = new();
+}
+
+public sealed class ChangeImpactResultDto
+{
+    public List<SymbolRefDto> Changed { get; set; } = new();
+    /// <summary>Handlers, endpoints, registrations, implementations and uses outside the changed files.</summary>
+    public List<ImpactRelationDto> Relations { get; set; } = new();
+    public List<AffectedTestDto> Tests { get; set; } = new();
+    /// <summary>A limit cut the changed symbols or the tests: the impact may be larger.</summary>
+    public bool Truncated { get; set; }
+    public string SnapshotId { get; set; } = "";
+}
+
 /// <summary>code/affectedTests (protocol 1.26): the tests that reference what the given C# files declare.</summary>
 public sealed class AffectedTestsParams : WorkspaceParams
 {

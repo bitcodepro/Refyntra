@@ -423,6 +423,14 @@ export class TestingService implements vscode.Disposable {
   }
 
   /** Cancels the runs started with runIds (their processes are killed). */
+  /** Runs the .NET test methods with these fully qualified names ("Ns.C.M"); unknown names are skipped. */
+  async runByNames(fullyQualifiedNames: readonly string[]): Promise<void> {
+    const wanted = new Set(fullyQualifiedNames);
+    const ids: string[] = [];
+    for (const [id, n] of this.nodes) if (n.kind === 'method' && n.language === 'dotnet' && wanted.has(n.key)) ids.push(id);
+    if (ids.length) await this.runIds(ids, false);
+  }
+
   cancelAll(): void {
     for (const s of this.sources) s.cancel();
   }
