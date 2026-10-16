@@ -97,7 +97,7 @@ describe('debugger keybindings and commands', () => {
   };
   const keys = pkg.contributes.keybindings;
 
-  it('Smart Step Into: Alt+Shift+F11 (Visual Studio preset), Shift+F7 (ReSharper preset), only while a refyntra-dotnet session is stopped', () => {
+  it('Smart Step Into: Alt+Shift+F11 (Visual Studio preset), Shift+F7 (resharper preset), only while a refyntra-dotnet session is stopped', () => {
     const k = keys.filter((x) => x.command === 'refyntra.smartStepInto');
     expect(k.map((x) => [x.key, /preset == '(\w+)'/.exec(x.when)?.[1]])).toEqual([
       ['alt+shift+f11', 'visualStudio'],

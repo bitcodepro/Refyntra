@@ -73,7 +73,7 @@ describe('Generate (code/generate glue)', () => {
     expect(parseGenerateRequest(undefined)).toBeUndefined();
   });
 
-  it('is bound to Alt+Insert in the Visual Studio and ReSharper presets, C# editors only', () => {
+  it('is bound to Alt+Insert in the visualStudio and resharper presets, C# editors only', () => {
     const pkg = JSON.parse(readFileSync(resolve(__dirname, '../../package.json'), 'utf8')) as {
       contributes: { keybindings: { command: string; key: string; when: string }[]; commands: { command: string }[]; configuration: { properties: Record<string, { default: unknown }> } };
     };

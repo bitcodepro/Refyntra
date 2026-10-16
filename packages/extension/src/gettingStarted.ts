@@ -47,7 +47,7 @@ export const MAIN_MENU: readonly MenuEntry[] = [
   { label: '$(checklist) Task Context', detail: 'Switch or create the named list of symbols, files and relations for your current task', command: 'refyntra.taskContext.switch' },
   { label: '$(debug-stackframe) Open Stack Trace', detail: 'Paste a .NET, JavaScript/TypeScript, Python or Rust stack trace and open its frames in your code', command: 'refyntra.openStackTrace' },
   { label: '$(book) Get Started', detail: 'Open the Refyntra walkthrough', command: 'refyntra.getStarted' },
-  { label: '$(keyboard) Keyboard Shortcuts', detail: 'Choose a keybinding preset (Visual Studio or ReSharper style)', command: 'refyntra.keyboardShortcuts' },
+  { label: '$(keyboard) Keyboard Shortcuts', detail: 'Choose a keybinding preset (Visual Studio or alternative)', command: 'refyntra.keyboardShortcuts' },
   { label: '$(play) Run Without Debugging', detail: 'Build and run the selected project, script or file in a terminal (Ctrl+F5 without launch.json)', command: 'refyntra.run' },
   { label: '$(debug-alt) Start Debugging', detail: 'Debug the selected project with the bundled netcoredbg or debugpy (F5 without launch.json)', command: 'refyntra.debug' },
   { label: '$(flame) Run with Hot Reload', detail: 'dotnet watch for the selected .NET project', command: 'refyntra.runWatch' },

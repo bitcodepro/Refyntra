@@ -136,7 +136,7 @@ describe('Navigate To keybinding', () => {
     contributes: { keybindings: { command: string; key: string; mac?: string; when: string }[]; commands: { command: string; title: string }[] };
   };
 
-  it('is Alt+` in the Visual Studio and ReSharper presets, C# editors only; Ctrl+Alt+` on macOS', () => {
+  it('is Alt+` in the visualStudio and resharper presets, C# editors only; Ctrl+Alt+` on macOS', () => {
     const keys = pkg.contributes.keybindings.filter((k) => k.command === 'refyntra.navigateTo');
     expect(keys.map((k) => [k.key, k.mac])).toEqual([
       ['alt+`', 'ctrl+alt+`'],

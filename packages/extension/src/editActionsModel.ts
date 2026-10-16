@@ -128,7 +128,7 @@ export function canApply(expectedVersion: number, versionBefore: number, version
   return expectedVersion === versionBefore && versionBefore === versionAfter;
 }
 
-/** Keyboard commands (ReSharper preset): the action each runs at the current selection. */
+/** Keyboard commands (`resharper` preset): the action each runs at the current selection. */
 export const KEYBOARD_ACTIONS: Readonly<Record<string, { actionId: string; needsSelection: boolean; label: string }>> = {
   'refyntra.introduceVariable': { actionId: 'csharp.edit.introduceVariable', needsSelection: true, label: 'Introduce Variable' },
   'refyntra.inlineVariable': { actionId: 'csharp.edit.inlineVariable', needsSelection: false, label: 'Inline Variable' },

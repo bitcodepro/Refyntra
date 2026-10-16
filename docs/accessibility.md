@@ -19,7 +19,7 @@ checked, and what has **not** been checked by a person with assistive technology
   Rename, Find Handler, Find Endpoint, Find DI Registration, Show Health, Show Health (text), Select Solution, Restart
   Backend, Export Debug Bundle, Get Started and Keyboard Shortcuts. The Related view's Pin, Unpin and Refresh are in the
   palette and the view toolbar.
-- The Visual Studio preset is on by default; ReSharper-style or `none` can be chosen
+- The Visual Studio preset is on by default; the alternative `resharper` preset or `none` can be chosen
   (`refyntra.keybindings.preset`, **Refyntra: Keyboard Shortcuts Preset**).
 - Find, Actions, the status bar menu and the rename preview are QuickPicks: type, arrow keys, Enter, Esc.
 - Focus after each step:

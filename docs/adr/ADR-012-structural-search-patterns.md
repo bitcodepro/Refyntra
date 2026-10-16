@@ -4,7 +4,7 @@ Status: Accepted (alpha)
 
 ## Context
 
-Rider and ReSharper let a user describe code by its shape ("`$x$.Result` where `$x$` is a `Task`") instead of by its
+Structural search lets a user describe code by its shape ("`$x$.Result` where `$x$` is a `Task`") instead of by its
 text, find it in a scope, replace it with a template, and keep such patterns as custom inspections. Text search with
 regular expressions cannot do this: `Console.WriteLine(x)` is also written `System.Console.WriteLine(x)`, `C.WriteLine(x)`
 behind `using C = System.Console;` or `WriteLine(x)` behind `using static System.Console;`, and a `Count()` on a custom

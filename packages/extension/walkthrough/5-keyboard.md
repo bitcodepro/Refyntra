@@ -1,6 +1,6 @@
 # Keyboard presets
 
-Refyntra keeps VS Code's keys by default (its actions are in Ctrl+. and the editor context menu); the first start offers the Visual Studio or ReSharper preset. Change **refyntra.keybindings.preset** to switch, or to `none` to turn shortcuts off:
+Refyntra keeps VS Code's keys by default (its actions are in Ctrl+. and the editor context menu); the first start offers the Visual Studio or the alternative (`resharper`) preset. Change **refyntra.keybindings.preset** to switch, or to `none` to turn shortcuts off:
 
 | Preset | Find | Actions | Rename | Related | Navigate To (C#) | Recent Files | Recent Locations | File Structure |
 |---|---|---|---|---|---|---|---|---|
@@ -29,5 +29,5 @@ Find is Search Everywhere: Types, Symbols, Files, Commands and Settings in one l
 OrderService). Start the query with `#` for symbols only, `/` files, `>` commands or `@` settings.
 
 On macOS, Cmd replaces Ctrl (Navigate To: Ctrl+Alt+`; Recent Files / Locations: Cmd+Alt+E / Cmd+Alt+Shift+E). A preset overrides some VS Code defaults (for example Ctrl+T, Ctrl+., Ctrl+E, Ctrl+Shift+E, Ctrl+F12). If you use another
-keymap extension (Visual Studio Keymap, ReSharper/IntelliJ keymaps), the same keys may be bound twice; check
+keymap extension (for example a Visual Studio or IntelliJ keymap), the same keys may be bound twice; check
 **Preferences: Open Keyboard Shortcuts** and keep the one you want.

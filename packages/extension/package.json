@@ -2241,7 +2241,7 @@
           {
             "id": "keys",
             "title": "Keyboard presets",
-            "description": "Use Visual Studio or ReSharper style shortcuts for Find, Related, Actions and Rename.\n[Choose a preset](command:refyntra.keyboardShortcuts)",
+            "description": "Use Visual Studio or alternative shortcuts for Find, Related, Actions and Rename.\n[Choose a preset](command:refyntra.keyboardShortcuts)",
             "media": {
               "markdown": "walkthrough/5-keyboard.md"
             }
@@ -2273,10 +2273,10 @@
           "enumDescriptions": [
             "VS Code (default): VS Code's own keys stay as they are; Refyntra's actions are in Ctrl+. (Quick Fix), the editor context menu and the Command Palette.",
             "Visual Studio-like: Ctrl+, Find, Ctrl+. Actions, Ctrl+R Ctrl+R Rename, Ctrl+Shift+Alt+F12 Related.",
-            "ReSharper-like: Ctrl+T Find, Alt+Enter Actions, Ctrl+Shift+R Rename, Ctrl+Shift+G Related."
+            "Alternative: Ctrl+T Find, Alt+Enter Actions, Ctrl+Shift+R Rename, Ctrl+Shift+G Related."
           ],
           "default": "none",
-          "markdownDescription": "Keybinding preset for Find / Related / Actions / Rename. `none` (default) keeps VS Code's keys; the Visual Studio and ReSharper presets override some VS Code keys (e.g. Ctrl+, Ctrl+T, Ctrl+.) while active."
+          "markdownDescription": "Keybinding preset for Find / Related / Actions / Rename. `none` (default) keeps VS Code's keys; the `visualStudio` and `resharper` presets override some VS Code keys (e.g. Ctrl+, Ctrl+T, Ctrl+.) while active."
         },
         "refyntra.postfix.enabled": {
           "type": "boolean",

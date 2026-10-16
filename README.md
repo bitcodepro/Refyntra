@@ -99,7 +99,6 @@ The page updates by itself after a restore, a restart or a solution switch.
 
 ## What it is not
 
-- Not a ReSharper clone and not a feature-parity effort. ReSharper already exists for VS Code.
 - Not a compiler or general refactoring suite. Debugging uses bundled third-party debuggers (netcoredbg, debugpy) through VS Code's own debugging UI; Refyntra adds no debugger of its own.
 - No automatic fixes, file generation or code transformations in the alpha.
 - No promise of coverage for every C# project layout.
@@ -481,7 +480,7 @@ dependency, on the first Related or Find that needs it (see [ADR-007](docs/adr/A
 
 ## Navigation
 
-**Find (Search Everywhere).** Refyntra: Find (Ctrl+T in the ReSharper preset, Ctrl+, in the Visual Studio preset) is
+**Find (Search Everywhere).** Refyntra: Find (Ctrl+T in the `resharper` preset, Ctrl+, in the Visual Studio preset) is
 one list with sections Types, Symbols, Files, Commands (Refyntra and every installed extension's contributed commands,
 with their titles) and Settings (Refyntra settings). Matching understands camel humps (`OSvc` and `oSe` find
 `OrderService`); results are ranked exact > prefix > camel hump > substring, and items you picked recently in this
@@ -1007,7 +1006,7 @@ when lazy loading is not configured. The quick fix inserts `.Include(x => x.Nav)
 
 ### Structural Search and Replace (C#)
 
-*Refyntra: Structural Search…* finds C# code by its shape, Rider/ReSharper-style, on Roslyn (pattern language and
+*Refyntra: Structural Search…* finds C# code by its shape, on Roslyn (pattern language and
 matching rules: [ADR-012](docs/adr/ADR-012-structural-search-patterns.md)).
 
 - **Pattern**: C# code (an expression, statements or members) with placeholders `$name$`, e.g. `$x$.Result`,
