@@ -113,6 +113,14 @@ public sealed class WorkspaceSession : IDisposable
     public string? SolutionPath =>
         Path.EndsWith(".sln", StringComparison.OrdinalIgnoreCase) || Path.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase) ? Path : null;
 
+    /// <summary>
+    /// A project list (all projects of a folder with several solutions): one absolute .csproj path per line. Every
+    /// project is loaded into the one workspace, so navigation and refactoring see all of them together.
+    /// </summary>
+    public const string ProjectListExtension = ".refyntra-projects";
+
+    public static bool IsProjectList(string path) => path.EndsWith(ProjectListExtension, StringComparison.OrdinalIgnoreCase);
+
     /// <summary>Starts loading. The returned task completes when loading finished (successfully or not).</summary>
     public Task StartLoad(CancellationToken ct)
     {
@@ -249,6 +257,25 @@ public sealed class WorkspaceSession : IDisposable
         {
             if (SolutionPath != null)
                 solution = await workspace.OpenSolutionAsync(Path, cancellationToken: ct).ConfigureAwait(false);
+            else if (IsProjectList(Path))
+            {
+                // Each project with the projects it references; one that fails to load does not stop the others
+                // (MSBuildWorkspace records why in its diagnostics, shown in Health).
+                foreach (var projectPath in ExpectedProjects())
+                {
+                    ct.ThrowIfCancellationRequested();
+                    if (workspace.CurrentSolution.Projects.Any(x => x.FilePath != null && UriPaths.PathComparer.Equals(x.FilePath, projectPath))) continue;
+                    try
+                    {
+                        await workspace.OpenProjectAsync(projectPath, cancellationToken: ct).ConfigureAwait(false);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        Log.Warn("workspace", $"project not loaded: {System.IO.Path.GetFileName(projectPath)}: {ex.GetType().Name}");
+                    }
+                }
+                solution = workspace.CurrentSolution;
+            }
             else
             {
                 var project = await workspace.OpenProjectAsync(Path, cancellationToken: ct).ConfigureAwait(false);
@@ -420,6 +447,15 @@ public sealed class WorkspaceSession : IDisposable
             else if (Path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
             {
                 list.Add(Path);
+            }
+            else if (IsProjectList(Path))
+            {
+                foreach (var line in File.ReadLines(Path))
+                {
+                    var p = line.Trim();
+                    if (p.Length > 0 && p.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) && System.IO.Path.IsPathRooted(p))
+                        list.Add(System.IO.Path.GetFullPath(p));
+                }
             }
         }
         catch (Exception ex) when (ex is IOException or System.Xml.XmlException)

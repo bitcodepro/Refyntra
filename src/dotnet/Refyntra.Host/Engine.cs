@@ -324,8 +324,8 @@ public sealed partial class Engine : IRpcHandler, IDisposable
         if (string.IsNullOrWhiteSpace(p.WorkspaceId) || string.IsNullOrWhiteSpace(p.Path))
             throw new EngineException(ErrorCodes.InvalidParams, "InvalidParams", "workspaceId and path are required.");
         if (!(p.Path.EndsWith(".sln", StringComparison.OrdinalIgnoreCase) || p.Path.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase)
-            || p.Path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)))
-            throw new EngineException(ErrorCodes.InvalidParams, "UnsupportedPath", "path must be a .sln, .slnx or .csproj file.");
+            || p.Path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) || WorkspaceSession.IsProjectList(p.Path)))
+            throw new EngineException(ErrorCodes.InvalidParams, "UnsupportedPath", "path must be a .sln, .slnx, .csproj or project list file.");
         CloseWorkspace(p.WorkspaceId);
         var session = new WorkspaceSession(p.WorkspaceId, p.Path, Epoch);
         _sessions[p.WorkspaceId] = session;
