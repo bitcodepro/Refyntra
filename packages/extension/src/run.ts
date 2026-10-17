@@ -29,6 +29,7 @@ import {
   lldbEnv,
   netcoredbgLaunchArguments,
   nodeDebugConfigurations,
+  nodeScriptTarget,
   nodeTargets,
   parseLaunchSettings,
   pickFramework,
@@ -167,6 +168,19 @@ export interface RunSession {
   watch?: WatchIndicator;
   stop(): void;
   readonly done: Promise<number | null>;
+}
+
+const HIDDEN_KEY = 'refyntra.run.hidden';
+
+/** The targets of a command argument: a Run view row, several selected rows, or a target id. */
+function targetsOf(arg: unknown): RunTarget[] {
+  const one = (x: unknown): RunTarget | undefined => {
+    const n = x as { kind?: string; target?: RunTarget } | undefined;
+    return n && typeof n === 'object' && (n.kind === 'target' || n.kind === 'profile') ? n.target : undefined;
+  };
+  if (Array.isArray(arg)) return arg.map(one).filter((t): t is RunTarget => !!t);
+  const t = one(arg);
+  return t ? [t] : [];
 }
 
 /** The group name of a command argument: a name, or the Run view's group node. */
@@ -328,6 +342,8 @@ export interface RunTestHooks {
   openedUrls: string[];
   /** Run groups: whether each waited-for web target became ready. */
   groupReadiness: { target: string; ready: boolean }[];
+  /** Tests: the script Run Script… takes (no picker). */
+  pickScript?: string;
   /** What refyntra.run.focus showed: the debug session, the target's own terminal or nothing. */
   focused: ('debug' | 'terminal' | 'none')[];
   /** Tests: the targets and the name Create Run Group takes (no pickers). */
@@ -903,6 +919,49 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
 
   // ---- run groups (refyntra.run.groups): several targets started together
 
+  // ---- hidden targets (per workspace, not in any file): Hide from Run, Show Hidden
+
+  private hiddenIds(): Set<string> {
+    return new Set(this.context.workspaceState.get<string[]>(HIDDEN_KEY, []));
+  }
+
+  isHidden(t: RunTarget): boolean {
+    return this.hiddenIds().has(t.id);
+  }
+
+  async setHidden(targets: RunTarget[], hidden: boolean): Promise<void> {
+    const ids = this.hiddenIds();
+    for (const t of targets) {
+      if (hidden) ids.add(t.id);
+      else ids.delete(t.id);
+    }
+    await this.context.workspaceState.update(HIDDEN_KEY, [...ids]);
+    this.changed.fire(undefined);
+  }
+
+  showHidden = false;
+
+  toggleShowHidden(): void {
+    this.showHidden = !this.showHidden;
+    void vscode.commands.executeCommand('setContext', 'refyntra.run.showHidden', this.showHidden);
+    this.changed.fire(undefined);
+  }
+
+  /** Run Script…: another script of a package (build, test, storybook, …) in its own terminal. */
+  async runScript(arg?: unknown): Promise<RunSession | undefined> {
+    const t = targetsOf(arg)[0] ?? (await this.resolveTarget(arg))?.target;
+    const names = Object.keys(t?.node?.scripts ?? {});
+    if (!t?.node || names.length === 0) {
+      void vscode.window.showInformationMessage('Refyntra: this target has no other scripts.');
+      return undefined;
+    }
+    const script = this.hooks.pickScript ?? (await vscode.window.showQuickPick(names.map((n) => ({ label: n, description: t.node!.scripts![n] })), { title: `Refyntra: Run Script (${t.label})` }))?.label;
+    const variant = script ? nodeScriptTarget(t, script) : undefined;
+    if (!variant) return undefined;
+    if (!this.requireTrust('run scripts')) return undefined;
+    return this.startSession(variant, [{ command: variant.node!.packageManager, args: ['run', script!], cwd: variant.cwd, env: {} }], `Run: ${variant.label}`);
+  }
+
   groups(): RunGroup[] {
     return parseRunGroups(vscode.workspace.getConfiguration('refyntra').get('run.groups'));
   }
@@ -1061,6 +1120,11 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
     item.description = `${t.kindLabel}${state === 'debug' ? ' · debugging' : state === 'run' ? ' · running' : ''}${selected ? ' · selected' : ''}`;
     item.tooltip = new vscode.MarkdownString(`**${t.label}** (${t.kindLabel})\n\n${t.cwd}${t.note ? `\n\n${t.note}` : ''}`);
     item.contextValue = !t.runnable ? 'refyntra.runTarget.unsupported' : running ? 'refyntra.runTarget.running' : 'refyntra.runTarget';
+    if (this.isHidden(t)) {
+      item.contextValue += '.hidden';
+      item.description = `${String(item.description ?? '')} · hidden`;
+    }
+    if (t.node?.scripts) item.contextValue += '.scripts';
     item.iconPath = new vscode.ThemeIcon(!t.runnable ? 'circle-slash' : state === 'debug' ? 'debug-alt' : running ? 'debug-stop' : t.language === 'dotnet' ? (isWebKind(t.dotnet?.project.kind) ? 'globe' : 'terminal') : t.language === 'node' ? 'json' : t.language === 'python' ? 'symbol-misc' : 'package');
     item.accessibilityInformation = { label: `${t.label}, ${t.kindLabel}${running ? ', running' : ''}${!t.runnable ? `, not runnable: ${t.note ?? ''}` : ''}` };
     // A running target opens what it runs in (its debug session or its terminal); otherwise a click selects it.
@@ -1089,7 +1153,7 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
       if (this.dotnetNote && !this.targetsCache.some((t) => t.language === 'dotnet')) groups.unshift({ kind: 'message', text: `.NET: ${this.dotnetNote}` });
       return groups;
     }
-    if (n.kind === 'group') return n.targets.map((target) => ({ kind: 'target', target }));
+    if (n.kind === 'group') return n.targets.filter((t) => this.showHidden || !this.isHidden(t)).map((target) => ({ kind: 'target', target }));
     if (n.kind === 'launchGroup') return this.groupTargets(n.group).found.map((target) => ({ kind: 'target', target, inGroup: n.group.name }));
     if (n.kind === 'target' && n.target.dotnet && n.target.dotnet.profiles.length > 1) return n.target.dotnet.profiles.map((profile) => ({ kind: 'profile', target: n.target, profile }));
     return [];
@@ -1189,7 +1253,7 @@ export function looksDotnet(p: { name: string; commandLine: string }): boolean {
 
 export function registerRun(context: vscode.ExtensionContext, engine: EngineClient, isTrusted: () => boolean): { service: RunService; disposable: vscode.Disposable } {
   const service = new RunService(context, engine, isTrusted);
-  const view = vscode.window.createTreeView(RUN_VIEW, { treeDataProvider: service, showCollapseAll: false });
+  const view = vscode.window.createTreeView(RUN_VIEW, { treeDataProvider: service, showCollapseAll: false, canSelectMany: true });
   const subs: vscode.Disposable[] = [service, view];
 
   // ---- .NET: netcoredbg
@@ -1378,11 +1442,35 @@ export function registerRun(context: vscode.ExtensionContext, engine: EngineClie
   // ---- commands, CodeLens
   subs.push(
     vscode.languages.registerCodeLensProvider([{ language: 'csharp', scheme: 'file' }, { language: 'python', scheme: 'file' }, { language: 'rust', scheme: 'file' }], service),
-    vscode.commands.registerCommand('refyntra.run', (arg?: unknown) => service.run(arg)),
+    // Several rows selected in the Run view (Ctrl/Shift+click): Run, Debug, Stop and Hide act on each of them.
+    vscode.commands.registerCommand('refyntra.run', async (arg?: unknown, all?: unknown) => {
+      const many = targetsOf(all);
+      if (many.length > 1) {
+        for (const t of many) await service.run(t.id);
+        return undefined;
+      }
+      return service.run(arg);
+    }),
+    vscode.commands.registerCommand('refyntra.run.hide', (arg?: unknown, all?: unknown) => service.setHidden(targetsOf(all).length ? targetsOf(all) : targetsOf(arg), true)),
+    vscode.commands.registerCommand('refyntra.run.unhide', (arg?: unknown, all?: unknown) => service.setHidden(targetsOf(all).length ? targetsOf(all) : targetsOf(arg), false)),
+    vscode.commands.registerCommand('refyntra.run.showHidden', () => service.toggleShowHidden()),
+    vscode.commands.registerCommand('refyntra.run.hideShown', () => service.toggleShowHidden()),
+    vscode.commands.registerCommand('refyntra.run.runScript', (arg?: unknown) => service.runScript(arg)),
     vscode.commands.registerCommand('refyntra.runWatch', (arg?: unknown) => service.run(arg, true)),
     vscode.commands.registerCommand('refyntra.showWatchTerminal', () => [...service.sessions.values()].find((s) => s.watch)?.watch?.reveal()),
-    vscode.commands.registerCommand('refyntra.debug', (arg?: unknown) => service.debug(arg)),
-    vscode.commands.registerCommand('refyntra.stop', (arg?: unknown) => service.stop(arg)),
+    vscode.commands.registerCommand('refyntra.debug', async (arg?: unknown, all?: unknown) => {
+      const many = targetsOf(all);
+      if (many.length > 1) {
+        for (const t of many) await service.debug(t.id);
+        return true;
+      }
+      return service.debug(arg);
+    }),
+    vscode.commands.registerCommand('refyntra.stop', (arg?: unknown, all?: unknown) => {
+      const many = targetsOf(all);
+      if (many.length > 1) for (const t of many) service.stop(t.id);
+      else service.stop(arg);
+    }),
     vscode.commands.registerCommand('refyntra.run.createGroup', () => service.createGroup()),
     vscode.commands.registerCommand('refyntra.run.runGroup', (arg?: unknown) => service.startGroup(groupNameOf(arg), false)),
     vscode.commands.registerCommand('refyntra.run.debugGroup', (arg?: unknown) => service.startGroup(groupNameOf(arg), true)),

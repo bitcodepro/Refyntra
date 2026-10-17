@@ -74,7 +74,7 @@ export interface RunTarget {
   /** The solution (or folder) the target belongs to: groups the Run view when the workspace has several. */
   group?: string;
   /** Node: package manager and script. */
-  node?: { packageManager: 'npm' | 'pnpm' | 'yarn'; script: string; command: string; devServerUrl?: string };
+  node?: { packageManager: 'npm' | 'pnpm' | 'yarn'; script: string; command: string; devServerUrl?: string; /** The package's other scripts (Run Script…). */ scripts?: Record<string, string> };
   /** Python: the file to run, or a module. */
   python?: { program?: string; module?: string };
   /** Rust: Cargo manifest and binary name. */
@@ -509,7 +509,11 @@ function platformName(platform: string): string {
 
 // ---------------------------------------------------------------------------------------------------- Node
 
-const SCRIPT_ORDER = ['dev', 'start', 'serve', 'develop', 'preview'];
+/** The scripts that make a package an application (the first present is the one Run starts). */
+const APP_SCRIPTS = ['dev', 'start', 'serve', 'develop'];
+/** A library's "dev": its own build in watch mode (tsc -w, tsup --watch, vite build --watch, …), not an app. */
+const WATCH_BUILD = /\b(tsc|tsup|rollup|unbuild|babel|webpack|esbuild|vite build|ng build|ng-packagr|swc)\b[^&|;]*(\s-w\b|--watch\b)/;
+const NOT_RUNNABLE_SCRIPT = /^(lint|format|prettier|typecheck|clean|prepare|postinstall)(:|$)/;
 
 /** The package manager of a folder, from its lock file (or the packageManager field). */
 export function packageManagerOf(files: readonly string[], packageManagerField?: string): 'npm' | 'pnpm' | 'yarn' {
@@ -533,27 +537,57 @@ export function devServerUrl(command: string): string | undefined {
   return undefined;
 }
 
-/** Run targets of a package.json: its runnable scripts (dev/start/serve first). */
-export function nodeTargets(pkgPath: string, pkg: { name?: string; scripts?: Record<string, unknown>; packageManager?: string }, folderFiles: readonly string[]): RunTarget[] {
-  const scripts = Object.entries(pkg.scripts ?? {}).filter((e): e is [string, string] => typeof e[1] === 'string' && !/^(pre|post)/.test(e[0]));
+export interface PackageJsonLike {
+  name?: string;
+  scripts?: Record<string, unknown>;
+  packageManager?: string;
+  main?: unknown;
+  module?: unknown;
+  exports?: unknown;
+  types?: unknown;
+  typings?: unknown;
+}
+
+/**
+ * The run target of a package.json: one per application, started with its first app script (dev, start, serve,
+ * develop); its other scripts are offered by Run Script…. A package without an app script (a library: build, test) is
+ * not a target, nor a library whose "dev" only rebuilds it in watch mode.
+ */
+export function nodeTargets(pkgPath: string, pkg: PackageJsonLike, folderFiles: readonly string[]): RunTarget[] {
+  const all = Object.entries(pkg.scripts ?? {}).filter((e): e is [string, string] => typeof e[1] === 'string');
+  // npm's hooks (predev, postbuild) run with their script; "preview" or "postcss" are scripts of their own.
+  const names = new Set(all.map(([n]) => n));
+  const hook = (n: string) => (n.startsWith('pre') && names.has(n.slice(3))) || (n.startsWith('post') && names.has(n.slice(4)));
+  const scripts = Object.fromEntries(all.filter(([n]) => !hook(n)));
+  const main = APP_SCRIPTS.find((s) => s in scripts);
+  if (!main) return [];
+  const command = scripts[main]!;
+  const library = [pkg.main, pkg.module, pkg.exports, pkg.types, pkg.typings].some((f) => f !== undefined);
+  if (library && WATCH_BUILD.test(command)) return [];
   const pm = packageManagerOf(folderFiles, pkg.packageManager);
   const dir = dirOf(pkgPath);
-  const rank = (s: string) => (SCRIPT_ORDER.includes(s) ? SCRIPT_ORDER.indexOf(s) : 100);
-  return scripts
-    .filter(([s]) => !/^(lint|format|prettier|typecheck|clean|prepare|postinstall)(:|$)/.test(s))
-    .sort((a, b) => rank(a[0]) - rank(b[0]) || a[0].localeCompare(b[0]))
-    .map(([script, command]) => {
-      const url = devServerUrl(command);
-      return {
-        id: `node:${pkgPath}#${script}`,
-        language: 'node' as const,
-        label: `${pkg.name ?? baseName(dir)}: ${script}`,
-        kindLabel: `${pm} script`,
-        cwd: dir,
-        runnable: true,
-        node: { packageManager: pm, script, command, ...(url ? { devServerUrl: url } : {}) },
-      };
-    });
+  const others = Object.fromEntries(Object.entries(scripts).filter(([s]) => s !== main && !NOT_RUNNABLE_SCRIPT.test(s)).sort((a, b) => a[0].localeCompare(b[0])));
+  const url = devServerUrl(command);
+  return [
+    {
+      id: `node:${pkgPath}`,
+      language: 'node' as const,
+      label: pkg.name ?? baseName(dir),
+      kindLabel: `${pm} run ${main}`,
+      cwd: dir,
+      runnable: true,
+      node: { packageManager: pm, script: main, command, ...(url ? { devServerUrl: url } : {}), ...(Object.keys(others).length ? { scripts: others } : {}) },
+    },
+  ];
+}
+
+/** The same package started with another of its scripts (Run Script…). */
+export function nodeScriptTarget(t: RunTarget, script: string): RunTarget | undefined {
+  const command = t.node?.scripts?.[script];
+  if (!t.node || command === undefined) return undefined;
+  const url = devServerUrl(command);
+  const { devServerUrl: _old, ...rest } = t.node;
+  return { ...t, id: `${t.id}#${script}`, label: `${t.label}: ${script}`, kindLabel: `${t.node.packageManager} run ${script}`, node: { ...rest, script, command, ...(url ? { devServerUrl: url } : {}) } };
 }
 
 /** Debug configurations for a script, for VS Code's built-in JavaScript debugger (generated, not reimplemented). */

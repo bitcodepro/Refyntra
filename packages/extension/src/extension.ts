@@ -220,7 +220,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
   const forceRestricted = context.extensionMode === vscode.ExtensionMode.Test && process.env.REFYNTRA_TEST_FORCE_RESTRICTED === '1';
   const isTrusted = () => !forceRestricted && vscode.workspace.isTrusted;
 
-  const solutions = new SolutionService(context.workspaceState);
+  const solutions = new SolutionService(context.workspaceState, context.storageUri?.fsPath);
   initSearchEverywhere(context.workspaceState);
   context.subscriptions.push(solutions);
   const hostLocator = new HostLocator(context.extensionPath);
@@ -364,8 +364,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
   const solution = registerSolutionExplorer(context, engine, isTrusted, run.service, testing.service, editApplier);
   context.subscriptions.push(solution.disposable);
   const debugStatus = () => ({ ...run.service.debuggers.status(), tests: testing.service.healthText(), decompiler: metadata.service.healthText(), efTools: efCore.service.healthText() });
-  const health = new HealthDocument(engine, () => solutions.selected(), debugStatus);
-  const healthPage = new HealthPage(engine, () => solutions.selected(), isTrusted, debugStatus);
+  const health = new HealthDocument(engine, () => solutions.describeSelected(), debugStatus);
+  const healthPage = new HealthPage(engine, () => solutions.describeSelected(), isTrusted, debugStatus);
   const previews = new PreviewContentProvider();
   // Structural Search and Replace (protocol 1.19, ADR-012); its saved inspections feed the rule diagnostics below.
   const structural = registerStructuralSearch(context, engine, previews, editApplier);

@@ -17,6 +17,7 @@ import {
   lldbEnv,
   netcoredbgLaunchArguments,
   nodeDebugConfigurations,
+  nodeScriptTarget,
   nodeTargets,
   packageManagerOf,
   parseLaunchSettings,
@@ -172,13 +173,30 @@ describe('.NET targets and configurations', () => {
 describe('Node, Python and Rust', () => {
   it('turns package.json scripts into targets for the right package manager', () => {
     const t = nodeTargets('/w/web/package.json', { name: 'web', scripts: { lint: 'eslint .', build: 'vite build', dev: 'vite --port 5174', start: 'node server.js', predev: 'x' } }, ['pnpm-lock.yaml']);
-    expect(t.map((x) => x.node!.script)).toEqual(['dev', 'start', 'build']);
-    expect(t[0]!.node).toMatchObject({ packageManager: 'pnpm', devServerUrl: 'http://localhost:5174' });
+    // One target per application, started with its first app script; the other scripts are for Run Script….
+    expect(t.map((x) => [x.label, x.node!.script, x.kindLabel])).toEqual([['web', 'dev', 'pnpm run dev']]);
+    expect(t[0]!.node).toMatchObject({ packageManager: 'pnpm', devServerUrl: 'http://localhost:5174', scripts: { build: 'vite build', start: 'node server.js' } });
     expect(packageManagerOf([], 'yarn@4.1.0')).toBe('yarn');
     expect(packageManagerOf(['package-lock.json'])).toBe('npm');
     expect(devServerUrl('next dev')).toBe('http://localhost:3000');
     expect(devServerUrl('ng serve')).toBe('http://localhost:4200');
     expect(devServerUrl('node server.js')).toBeUndefined();
+  });
+
+  it('leaves libraries out: no app script, or a dev script that only rebuilds the library in watch mode', () => {
+    expect(nodeTargets('/w/ui/package.json', { name: '@acme/ui', main: 'dist/index.js', scripts: { build: 'tsup', test: 'vitest', storybook: 'storybook dev' } }, [])).toEqual([]);
+    expect(nodeTargets('/w/core/package.json', { name: '@acme/core', types: 'dist/index.d.ts', scripts: { dev: 'tsc -w -p .' } }, [])).toEqual([]);
+    expect(nodeTargets('/w/kit/package.json', { name: '@acme/kit', exports: './dist/index.js', scripts: { dev: 'vite build --watch' } }, [])).toEqual([]);
+    // An app that also exports (main) but serves: still an app. A watch build without library fields: an app too.
+    expect(nodeTargets('/w/api/package.json', { name: 'api', main: 'server.js', scripts: { start: 'node server.js' } }, [])).toHaveLength(1);
+    expect(nodeTargets('/w/tool/package.json', { name: 'tool', scripts: { dev: 'tsc -w' } }, [])).toHaveLength(1);
+  });
+
+  it('Run Script… starts the same package with another script', () => {
+    const [web] = nodeTargets('/w/web/package.json', { name: 'web', scripts: { dev: 'vite', preview: 'vite preview --port 4173', build: 'vite build' } }, []);
+    const preview = nodeScriptTarget(web!, 'preview')!;
+    expect([preview.id, preview.label, preview.node!.script, preview.node!.devServerUrl]).toEqual(['node:/w/web/package.json#preview', 'web: preview', 'preview', 'http://localhost:4173']);
+    expect(nodeScriptTarget(web!, 'nope')).toBeUndefined();
   });
 
   it('generates js-debug configurations instead of reimplementing them', () => {
