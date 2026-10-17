@@ -424,7 +424,11 @@ const scenarios = visual
       {
         name: 'run-multi-solution',
         fixtureCopy: ['Runnable', 'Runnable.sln'],
-        addAfterCopy: { 'Tools.slnx': '<Solution>\n  <Project Path="Desktop/BlazorClient/BlazorClient.csproj" />\n</Solution>\n' },
+        addAfterCopy: {
+          'Tools.slnx': '<Solution>\n  <Project Path="Desktop/BlazorClient/BlazorClient.csproj" />\n  <Project Path="Tools/Importer/Importer.csproj" />\n</Solution>\n',
+          'Tools/Importer/Importer.csproj': '<Project Sdk="Microsoft.NET.Sdk">\n  <PropertyGroup>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n',
+          'Tools/Importer/Importer.cs': 'namespace Tools;\n\npublic class Importer\n{\n    public int Count() => 1;\n}\n',
+        },
         trusted: true,
         env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' },
       },
@@ -534,7 +538,10 @@ for (const s of scenarios.filter((x) => only.length === 0 || only.includes(x.nam
     copy = fixtureCopy(s.name, ...s.fixtureCopy);
     s.workspace = copy.workspace;
     for (const f of s.removeAfterCopy ?? []) fs.rmSync(path.join(copy.workspace, f), { force: true });
-    for (const [f, text] of Object.entries(s.addAfterCopy ?? {})) fs.writeFileSync(path.join(copy.workspace, f), text);
+    for (const [f, text] of Object.entries(s.addAfterCopy ?? {})) {
+      fs.mkdirSync(path.dirname(path.join(copy.workspace, f)), { recursive: true });
+      fs.writeFileSync(path.join(copy.workspace, f), text);
+    }
   } else if (s.pinnedCopy) {
     // tests/fixtures/CompatPinned with another SDK version in its global.json; not restored (the SDK is missing).
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `refyntra-${s.name}-`));

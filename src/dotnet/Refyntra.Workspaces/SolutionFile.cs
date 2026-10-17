@@ -24,6 +24,10 @@ public static class SolutionFileReader
     {
         if (path.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase)) return ReadSlnx(path);
         if (path.EndsWith(".sln", StringComparison.OrdinalIgnoreCase)) return ReadSln(path);
+        if (WorkspaceSession.IsProjectList(path))
+            return new SolutionFileModel("project", Array.Empty<SolutionFolderEntry>(), File.ReadLines(path).Select(l => l.Trim())
+                .Where(l => l.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) && Path.IsPathRooted(l))
+                .Select(l => new SolutionProjectEntry(Path.GetFileNameWithoutExtension(l), Path.GetFullPath(l), null)).ToList());
         return new SolutionFileModel("project", Array.Empty<SolutionFolderEntry>(), new[] { new SolutionProjectEntry(Path.GetFileNameWithoutExtension(path), Path.GetFullPath(path), null) });
     }
 

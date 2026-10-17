@@ -1645,11 +1645,15 @@ scenarios['run-debug'] = require('./runDebug.cjs').cases({ api, csharp, waitFor 
 
 scenarios['run-multi-solution'] = [
   [
-    'several solutions, none selected: no solution is loaded, Run still lists every project grouped by solution and runs one',
+    'several solutions: every project of the folder is loaded together (nothing to pick), Run lists them grouped by solution and runs one',
     async () => {
       const a = await api();
-      await waitFor(() => csharp(a.health())?.reasonCode === 'SolutionNotSelected', 'the host waits for a solution choice', 60000);
-      const spawnsBefore = a.hostSpawnCount();
+      await waitFor(() => ['Ready', 'Partial', 'Failed'].includes(csharp(a.health())?.state), 'all projects loaded', 300000);
+      const h = csharp(a.health());
+      assert.ok(['Ready', 'Partial'].includes(h.state), `${h.state} ${h.reasonCode ?? ''} ${h.message ?? ''}`);
+      const loaded = (h.projects ?? []).map((p) => p.name);
+      // Projects of Runnable.sln and of Tools.slnx in one workspace.
+      for (const n of ['ConsoleApp', 'WebApp', 'Lib', 'BlazorClient', 'Importer']) assert.ok(loaded.includes(n), `${n} loaded: ${loaded.join(', ')}`);
       const targets = await a.run.refresh();
       const byName = Object.fromEntries(targets.filter((t) => t.language === 'dotnet').map((t) => [t.label, t]));
       for (const n of ['ConsoleApp', 'WebApp', 'WorkerApp', 'MultiApp', 'BlazorClient']) assert.ok(byName[n]?.runnable, `${n} is runnable: ${Object.keys(byName).join(', ')}`);
@@ -1657,11 +1661,13 @@ scenarios['run-multi-solution'] = [
       assert.equal(byName.MauiApp?.runnable, false, 'MAUI is not offered');
       assert.equal(byName.ConsoleApp.group, 'Runnable.sln');
       assert.equal(byName.BlazorClient.group, 'Tools.slnx');
-      // The classification ran in a short-lived host: no solution got loaded, the C# route still waits for a choice.
-      assert.ok(a.hostSpawnCount() > spawnsBefore, 'a short-lived host classified the files');
-      assert.equal(csharp(a.health()).reasonCode, 'SolutionNotSelected');
       const groups = a.run.getChildren().map((g) => g.label);
       assert.ok(groups.includes('.NET · Runnable.sln') && groups.includes('.NET · Tools.slnx'), groups.join(' | '));
+      // Navigation sees both solutions: Find returns a type of each.
+      const calc = JSON.stringify((await a.engine.find('Calc')).items ?? []);
+      const importer = JSON.stringify((await a.engine.find('Importer')).items ?? []);
+      assert.match(calc, /ConsoleApp/, `Find sees Runnable.sln: ${calc.slice(0, 300)}`);
+      assert.match(importer, /Importer\.cs/, `Find sees Tools.slnx: ${importer.slice(0, 300)}`);
       const session = await a.run.run(byName.ConsoleApp.id);
       const code = await Promise.race([session.done, new Promise((_, rej) => setTimeout(() => rej(new Error('run did not finish')), 240000))]);
       assert.equal(code, 7);
