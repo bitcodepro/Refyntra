@@ -1667,6 +1667,45 @@ scenarios['run-multi-solution'] = [
       assert.equal(code, 7);
     },
   ],
+  [
+    'Hide from Run removes a row (Show Hidden brings it back, dimmed); several selected rows run and stop together',
+    async () => {
+      const a = await api();
+      await a.run.ready();
+      const row = (label) => a.run.getChildren().flatMap((g) => (g.kind === 'group' ? a.run.getChildren(g) : [])).find((n) => n.target?.label === label);
+      const worker = row('WorkerApp');
+      assert.ok(worker, 'WorkerApp is listed');
+      await vscode.commands.executeCommand('refyntra.run.hide', worker, [worker]);
+      assert.equal(row('WorkerApp'), undefined, 'hidden');
+      await vscode.commands.executeCommand('refyntra.run.showHidden');
+      const shown = row('WorkerApp');
+      assert.ok(shown, 'Show Hidden lists it again');
+      const item = a.run.getTreeItem(shown);
+      assert.match(String(item.description), /hidden/);
+      assert.match(item.contextValue, /\.hidden$/);
+      await vscode.commands.executeCommand('refyntra.run.unhide', shown, [shown]);
+      await vscode.commands.executeCommand('refyntra.run.hideShown');
+      assert.ok(row('WorkerApp'), 'shown again after Show in Run');
+      assert.doesNotMatch(a.run.getTreeItem(row('WorkerApp')).contextValue, /hidden/);
+      // Two rows selected: Run starts both (no "main" project), Stop ends both.
+      const web = row('WebApp');
+      const both = [row('WorkerApp'), web];
+      try {
+        await vscode.commands.executeCommand('refyntra.run', both[0], both);
+        const workerSession = a.run.sessions.get(both[0].target.id);
+        const webSession = a.run.sessions.get(web.target.id);
+        assert.ok(workerSession && webSession, 'both started');
+        // The fixture worker ticks three times and ends; the web app keeps listening next to it.
+        assert.equal(await Promise.race([workerSession.done, new Promise((_, rej) => setTimeout(() => rej(new Error('worker did not finish')), 240000))]), 0);
+        assert.match(workerSession.output, /Worker tick 2/);
+        await waitFor(() => /Now listening on/.test(webSession.output), 'the web app listens', 240000);
+        assert.ok(a.run.sessions.has(web.target.id), 'the web app still runs');
+      } finally {
+        await vscode.commands.executeCommand('refyntra.stop', both[0], both);
+      }
+      await waitFor(() => !a.run.sessions.has(web.target.id) && !a.run.sessions.has(both[0].target.id), 'both stopped', 60000);
+    },
+  ],
 ];
 // Test runner on the Testing API (test/suite/testing.cjs).
 scenarios.tests = require('./testing.cjs').cases({ api, csharp, waitFor });

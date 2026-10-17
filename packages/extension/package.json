@@ -478,6 +478,36 @@
         "icon": "$(eye)"
       },
       {
+        "command": "refyntra.run.hide",
+        "title": "Hide from Run",
+        "category": "Refyntra",
+        "icon": "$(eye-closed)"
+      },
+      {
+        "command": "refyntra.run.unhide",
+        "title": "Show in Run",
+        "category": "Refyntra",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "refyntra.run.showHidden",
+        "title": "Show Hidden Targets",
+        "category": "Refyntra",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "refyntra.run.hideShown",
+        "title": "Hide Hidden Targets",
+        "category": "Refyntra",
+        "icon": "$(eye-closed)"
+      },
+      {
+        "command": "refyntra.run.runScript",
+        "title": "Run Script…",
+        "category": "Refyntra",
+        "icon": "$(list-unordered)"
+      },
+      {
         "command": "refyntra.run.refresh",
         "title": "Refresh Run Targets",
         "category": "Refyntra",
@@ -1408,6 +1438,16 @@
           "group": "1_run@0"
         },
         {
+          "command": "refyntra.run.showHidden",
+          "when": "view == refyntra.runView && !refyntra.run.showHidden",
+          "group": "2_view@1"
+        },
+        {
+          "command": "refyntra.run.hideShown",
+          "when": "view == refyntra.runView && refyntra.run.showHidden",
+          "group": "2_view@1"
+        },
+        {
           "command": "refyntra.generateLaunchJson",
           "when": "view == refyntra.runView",
           "group": "1_run@1"
@@ -1620,6 +1660,21 @@
       ],
       "view/item/context": [
         {
+          "command": "refyntra.run.runScript",
+          "when": "view == refyntra.runView && viewItem =~ /^refyntra\\.runTarget.*\\.scripts$/",
+          "group": "1_run@5"
+        },
+        {
+          "command": "refyntra.run.hide",
+          "when": "view == refyntra.runView && viewItem =~ /^refyntra\\.runTarget(\\.running|\\.unsupported)?(\\.scripts)?$/",
+          "group": "8_visibility@1"
+        },
+        {
+          "command": "refyntra.run.unhide",
+          "when": "view == refyntra.runView && viewItem =~ /\\.hidden/",
+          "group": "8_visibility@1"
+        },
+        {
           "command": "refyntra.run.runGroup",
           "when": "view == refyntra.runView && viewItem == refyntra.launchGroup",
           "group": "inline@1"
@@ -1696,22 +1751,22 @@
         },
         {
           "command": "refyntra.run",
-          "when": "view == refyntra.runView && viewItem =~ /^refyntra\\.run(Target|Profile)$/",
+          "when": "view == refyntra.runView && viewItem =~ /^refyntra\\.run(Target|Profile)(\\.hidden)?(\\.scripts)?$/",
           "group": "inline@1"
         },
         {
           "command": "refyntra.debug",
-          "when": "view == refyntra.runView && viewItem =~ /^refyntra\\.run(Target|Profile)$/",
+          "when": "view == refyntra.runView && viewItem =~ /^refyntra\\.run(Target|Profile)(\\.hidden)?(\\.scripts)?$/",
           "group": "inline@2"
         },
         {
           "command": "refyntra.stop",
-          "when": "view == refyntra.runView && viewItem =~ /^refyntra\\.run(Target|Profile)\\.running$/",
+          "when": "view == refyntra.runView && viewItem =~ /^refyntra\\.run(Target|Profile)\\.running(\\.hidden)?(\\.scripts)?$/",
           "group": "inline@1"
         },
         {
           "command": "refyntra.restart",
-          "when": "view == refyntra.runView && viewItem =~ /^refyntra\\.run(Target|Profile)\\.running$/",
+          "when": "view == refyntra.runView && viewItem =~ /^refyntra\\.run(Target|Profile)\\.running(\\.hidden)?(\\.scripts)?$/",
           "group": "inline@2"
         },
         {
@@ -1731,7 +1786,7 @@
         },
         {
           "command": "refyntra.stop",
-          "when": "view == refyntra.runView && viewItem =~ /^refyntra\\.run(Target|Profile)\\.running$/",
+          "when": "view == refyntra.runView && viewItem =~ /^refyntra\\.run(Target|Profile)\\.running(\\.hidden)?(\\.scripts)?$/",
           "group": "1_run@4"
         },
         {
