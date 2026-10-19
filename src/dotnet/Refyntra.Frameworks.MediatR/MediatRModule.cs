@@ -246,11 +246,58 @@ public sealed class MediatRModule : IFrameworkModule
         return true;
     }
 
+    /// <summary>
+    /// The other direction: a controller, endpoint method or any code that calls Send / Publish / CreateStream gets, per
+    /// request it sends, the handler(s) that serve it ("GetOrderQuery → GetOrderQueryHandler"). Subject: a method (its
+    /// body) or a type (all its members); the request type comes from the call's argument, as for the Send callers.
+    /// </summary>
+    private void RelateOutgoingSends(Facts facts, ISymbol subject, List<FrameworkRelation> result)
+    {
+        if (subject is not (IMethodSymbol or INamedTypeSymbol)) return;
+        var declarations = subject.DeclaringSyntaxReferences;
+        if (declarations.Length == 0) return;
+        var inside = facts.Sends.Where(s => declarations.Any(d => d.SyntaxTree == s.Tree && d.Span.Contains(s.Span))).ToList();
+        if (inside.Count == 0) return;
+        var confidence = facts.VersionVerified ? Confidences.Proven : Confidences.Likely;
+        var versionLimit = facts.VersionVerified ? Array.Empty<string>() : new[] { "Unverified MediatR version: " + string.Join("; ", facts.AssemblyEvidence) };
+        foreach (var byRequest in inside.GroupBy(s => s.RequestType.OriginalDefinition, SymbolEqualityComparer.Default))
+        {
+            var request = (ITypeSymbol)byRequest.Key!;
+            var sends = byRequest.ToList();
+            var isNotification = sends[0].MethodName == "Publish";
+            var callEvidence = sends.Select(s => new EvidenceItem($"{s.MethodName}({request.Name}) in {s.Container}", s.Location)).ToList();
+            var handlers = facts.Handlers.Where(h => h.IsNotification == isNotification && SymbolIdentity.SameDefinition(h.Request, request)).ToList();
+            if (handlers.Count == 0)
+            {
+                result.Add(new FrameworkRelation(RelationKinds.MediatRRequest, RelationGroups.Handlers,
+                    new RelationTarget($"{request.Name} → no handler in source", Symbol: request),
+                    callEvidence, Confidences.Likely,
+                    versionLimit.Append("No handler of this request was found in the loaded projects (it may live in another solution or a package).").ToList(),
+                    ProviderRouteId));
+                continue;
+            }
+            foreach (var h in handlers)
+            {
+                var limitations = new List<string>(versionLimit);
+                if (!isNotification && handlers.Count > 1)
+                    limitations.Add($"{handlers.Count} source handlers found; which one runs depends on runtime registration.");
+                result.Add(new FrameworkRelation(
+                    isNotification ? RelationKinds.MediatRNotificationHandler : RelationKinds.MediatRHandler,
+                    RelationGroups.Handlers,
+                    new RelationTarget($"{request.Name} → {h.HandlerType.Name}", Symbol: h.HandlerType),
+                    callEvidence.Append(new EvidenceItem($"{h.HandlerType.Name} implements {h.Interface.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}",
+                        h.HandlerType.Locations.FirstOrDefault(l => l.IsInSource))).ToList(),
+                    confidence, limitations, ProviderRouteId));
+            }
+        }
+    }
+
     public IReadOnlyList<FrameworkRelation> Relate(object factsObj, ISymbol subject, FrameworkContext context)
     {
         var facts = (Facts)factsObj;
         var result = new List<FrameworkRelation>();
         if (facts.AssemblyEvidence.Count == 0) return result;
+        RelateOutgoingSends(facts, subject, result);
         var type = subject switch
         {
             INamedTypeSymbol t => t,

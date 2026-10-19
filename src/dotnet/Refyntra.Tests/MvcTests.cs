@@ -192,6 +192,26 @@ public sealed class MvcTests
     }
 
     [Fact]
+    public async Task ControllerActionShowsTheHandlerOfTheRequestItSends()
+    {
+        var related = await RelatedAsync(Orders, "GetOrder(int id)");
+        var h = Assert.Single(Relations(related, "mediatr.handler"));
+        Assert.Equal("GetOrderQueryHandler", h.GetProperty("target").GetProperty("symbol").GetProperty("name").GetString());
+        Assert.Equal("GetOrderQuery → GetOrderQueryHandler", h.GetProperty("target").GetProperty("label").GetString());
+        Assert.Equal("handlers", h.GetProperty("group").GetString());
+        Assert.Equal("proven", h.GetProperty("confidence").GetString());
+    }
+
+    [Fact]
+    public async Task ControllerClassShowsTheHandlersOfAllItsActions()
+    {
+        var related = await RelatedAsync(Orders, "class OrdersController", 6);
+        Assert.Equal("GetOrderQueryHandler", Assert.Single(Relations(related, "mediatr.handler")).GetProperty("target").GetProperty("symbol").GetProperty("name").GetString());
+        // An action without Send relates to no handler.
+        Assert.Empty(Relations(await RelatedAsync(Orders, "Create()"), "mediatr.handler"));
+    }
+
+    [Fact]
     public async Task StreamRequestHasHandlerAndCreateStreamCaller()
     {
         var related = await RelatedAsync(Features, "record CountdownStream", 7);

@@ -385,9 +385,10 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
       this.lensChanged,
       this.status,
       watcher,
-      watcher.onDidCreate(() => this.scheduleRefresh()),
-      watcher.onDidChange(() => this.scheduleRefresh()),
-      watcher.onDidDelete(() => this.scheduleRefresh()),
+      // Not the package.json files of installed packages (an npm install or a running dev server touches thousands).
+      watcher.onDidCreate((u) => this.onWatched(u)),
+      watcher.onDidChange((u) => this.onWatched(u)),
+      watcher.onDidDelete((u) => this.onWatched(u)),
       engine.onDidChangeHealth((h) => {
         if (h.adapters.some((a) => a.adapterId === 'csharp' && (a.state === 'Ready' || a.state === 'Partial'))) this.scheduleRefresh();
       }),
@@ -412,6 +413,11 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
 
   targets(): RunTarget[] {
     return this.targetsCache;
+  }
+
+  private onWatched(uri: vscode.Uri): void {
+    if (/[\\/](node_modules|bin|obj|\.git|\.vscode-test)[\\/]/.test(uri.fsPath)) return;
+    this.scheduleRefresh();
   }
 
   private scheduleRefresh(): void {
