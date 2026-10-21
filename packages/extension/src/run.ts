@@ -1483,6 +1483,11 @@ export function registerRun(context: vscode.ExtensionContext, engine: EngineClie
     vscode.commands.registerCommand('refyntra.run.stopGroup', (arg?: unknown) => service.stopGroup(groupNameOf(arg))),
     vscode.commands.registerCommand('refyntra.run.deleteGroup', (arg?: unknown) => service.deleteGroup(groupNameOf(arg))),
     vscode.commands.registerCommand('refyntra.run.focus', (arg?: unknown) => service.focus(arg)),
+    // Ctrl+Alt+R: the Run tab (its own activity bar entry) with every runnable project.
+    vscode.commands.registerCommand('refyntra.run.open', async () => {
+      await vscode.commands.executeCommand('workbench.view.extension.refyntraRun');
+      await vscode.commands.executeCommand('refyntra.runView.focus');
+    }),
     vscode.commands.registerCommand('refyntra.restart', (arg?: unknown) => service.restart(arg)),
     vscode.commands.registerCommand('refyntra.selectRunTarget', () => service.chooseTarget()),
     vscode.commands.registerCommand('refyntra.selectRunTargetById', async (id: string) => {

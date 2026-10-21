@@ -50,7 +50,7 @@ Full documentation: **[docs/guide.md](docs/guide.md)**.
 
 1. Open a folder with a `.sln`, `.slnx` or `.csproj` and trust it. The status bar shows **Refyntra: C# Ready**; click it for a menu of all commands.
 2. Put the cursor on a symbol and run **Refyntra: Related**, or search with **Refyntra: Find**.
-3. Run or debug from the **Run** view in the Refyntra side bar, or press F5 without a launch.json.
+3. Run or debug from the **Refyntra Run** tab (its own icon in the activity bar, **Ctrl+Alt+R**), or press F5 without a launch.json.
 4. Keyboard: VS Code's keys stay by default; **Refyntra: Keyboard Shortcuts Preset** switches to the Visual Studio or the alternative preset.
 5. If something is missing, open **Refyntra: Show Health**.
 
