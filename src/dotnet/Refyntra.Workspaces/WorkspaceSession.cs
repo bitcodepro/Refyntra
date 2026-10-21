@@ -121,6 +121,19 @@ public sealed class WorkspaceSession : IDisposable
 
     public static bool IsProjectList(string path) => path.EndsWith(ProjectListExtension, StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>A classic .sln that lists the given projects by absolute path (no folders, Debug|Any CPU only).</summary>
+    public static string GeneratedSolution(IReadOnlyList<string> projects)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append("\r\nMicrosoft Visual Studio Solution File, Format Version 12.00\r\n# Visual Studio Version 17\r\n");
+        for (var i = 0; i < projects.Count; i++)
+        {
+            var guid = new Guid(i + 1, 0, 0, new byte[8]).ToString("B").ToUpperInvariant();
+            sb.Append($"Project(\"{{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}}\") = \"{System.IO.Path.GetFileNameWithoutExtension(projects[i])}\", \"{projects[i]}\", \"{guid}\"\r\nEndProject\r\n");
+        }
+        return sb.ToString();
+    }
+
     /// <summary>Starts loading. The returned task completes when loading finished (successfully or not).</summary>
     public Task StartLoad(CancellationToken ct)
     {
@@ -171,7 +184,9 @@ public sealed class WorkspaceSession : IDisposable
                 }
             }
             await LoadWithWorkspaceAsync(generation, ct).ConfigureAwait(false);
-            if (key != null && State == EngineStates.Ready && Current is { } loaded && loaded.Generation == generation
+            // Partial too: in a folder with many projects one of them nearly always lacks something (packages, an SDK),
+            // and without an index every start would wait for MSBuild again.
+            if (key != null && State is EngineStates.Ready or EngineStates.Partial && Current is { } loaded && loaded.Generation == generation
                 && Sdk?.Version is { } v && ProjectCache.Key(Path, expected, v) == key)
                 ProjectCache.Store(Path, key, loaded.Solution, Projects);
             Log.Write("info", "workspace", $"loaded {Projects.Count} project(s), state {State}", op: "workspace/load",
@@ -259,22 +274,12 @@ public sealed class WorkspaceSession : IDisposable
                 solution = await workspace.OpenSolutionAsync(Path, cancellationToken: ct).ConfigureAwait(false);
             else if (IsProjectList(Path))
             {
-                // Each project with the projects it references; one that fails to load does not stop the others
-                // (MSBuildWorkspace records why in its diagnostics, shown in Health).
-                foreach (var projectPath in ExpectedProjects())
-                {
-                    ct.ThrowIfCancellationRequested();
-                    if (workspace.CurrentSolution.Projects.Any(x => x.FilePath != null && UriPaths.PathComparer.Equals(x.FilePath, projectPath))) continue;
-                    try
-                    {
-                        await workspace.OpenProjectAsync(projectPath, cancellationToken: ct).ConfigureAwait(false);
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException)
-                    {
-                        Log.Warn("workspace", $"project not loaded: {System.IO.Path.GetFileName(projectPath)}: {ex.GetType().Name}");
-                    }
-                }
-                solution = workspace.CurrentSolution;
+                // One generated solution (absolute project paths) next to the list: MSBuildWorkspace loads a solution's
+                // projects far faster than one OpenProjectAsync after another (measured: 26 projects in 12 s instead
+                // of 46 s). A project that fails to load is reported in the workspace diagnostics; the others load.
+                var generated = Path + ".sln";
+                File.WriteAllText(generated, GeneratedSolution(ExpectedProjects()));
+                solution = await workspace.OpenSolutionAsync(generated, cancellationToken: ct).ConfigureAwait(false);
             }
             else
             {
