@@ -428,6 +428,9 @@ const scenarios = visual
           'Tools.slnx': '<Solution>\n  <Project Path="Desktop/BlazorClient/BlazorClient.csproj" />\n  <Project Path="Tools/Importer/Importer.csproj" />\n</Solution>\n',
           'Tools/Importer/Importer.csproj': '<Project Sdk="Microsoft.NET.Sdk">\n  <PropertyGroup>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n',
           'Tools/Importer/Importer.cs': 'namespace Tools;\n\npublic class Importer\n{\n    public int Count() => 1;\n}\n',
+          // The same project name as Runnable's Lib, in another folder (clones of several repositories have them).
+          'Tools/Lib/Lib.csproj': '<Project Sdk="Microsoft.NET.Sdk">\n  <PropertyGroup>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n',
+          'Tools/Lib/ToolsLib.cs': 'namespace Tools;\n\npublic class ToolsLib\n{\n}\n',
         },
         trusted: true,
         env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' },

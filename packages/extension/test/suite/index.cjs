@@ -1654,6 +1654,7 @@ scenarios['run-multi-solution'] = [
       const loaded = (h.projects ?? []).map((p) => p.name);
       // Projects of Runnable.sln and of Tools.slnx in one workspace.
       for (const n of ['ConsoleApp', 'WebApp', 'Lib', 'BlazorClient', 'Importer']) assert.ok(loaded.includes(n), `${n} loaded: ${loaded.join(', ')}`);
+      assert.equal(loaded.filter((n) => n === 'Lib').length, 2, `both projects named Lib loaded: ${loaded.join(', ')}`);
       const targets = await a.run.refresh();
       const byName = Object.fromEntries(targets.filter((t) => t.language === 'dotnet').map((t) => [t.label, t]));
       for (const n of ['ConsoleApp', 'WebApp', 'WorkerApp', 'MultiApp', 'BlazorClient']) assert.ok(byName[n]?.runnable, `${n} is runnable: ${Object.keys(byName).join(', ')}`);
