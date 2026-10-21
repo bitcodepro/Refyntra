@@ -11,6 +11,9 @@ public static class RelationKinds
         AspNetEndpoint = "aspnet.endpoint", DiRegistration = "di.registration", DiImplementation = "di.implementation",
         DiService = "di.service", Implementation = "implementation", Reference = "reference", Test = "test";
 
+    // The project's own handler interfaces (ICommandHandler<T>, …): handler, its request, the places that dispatch to it.
+    public const string Handler = "handler.handler", HandlerRequest = "handler.request", HandlerDispatch = "handler.dispatch";
+
     // EF Core (group "data", queries in "callers").
     public const string EfCoreEntity = "efcore.entity", EfCoreDbContext = "efcore.dbContext", EfCoreConfiguration = "efcore.configuration",
         EfCoreNavigation = "efcore.navigation", EfCoreTable = "efcore.table", EfCoreQuery = "efcore.query", EfCoreMigration = "efcore.migration";

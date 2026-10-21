@@ -295,6 +295,7 @@ export type RelationKind =
   | 'declaration'
   | 'mediatr.handler' | 'mediatr.request' | 'mediatr.response' | 'mediatr.send' | 'mediatr.notificationHandler'
   | 'mediatr.behavior'
+  | 'handler.handler' | 'handler.request' | 'handler.dispatch'
   | 'aspnet.endpoint'
   | 'di.registration' | 'di.implementation' | 'di.service' | 'di.openGenericUsage'
   | 'efcore.entity' | 'efcore.dbContext' | 'efcore.configuration' | 'efcore.navigation' | 'efcore.table' | 'efcore.query'

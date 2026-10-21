@@ -43,7 +43,8 @@ public static class SemanticService
     public static readonly IFrameworkModule AspNetCore = new AspNetCoreModule();
     public static readonly IFrameworkModule DependencyInjection = new DependencyInjectionModule();
     public static readonly IFrameworkModule EfCore = new EfCoreModule();
-    public static readonly IFrameworkModule[] Modules = { MediatR, AspNetCore, DependencyInjection, EfCore };
+    public static readonly IFrameworkModule HandlerInterfaces = new HandlerInterfacesModule();
+    public static readonly IFrameworkModule[] Modules = { MediatR, HandlerInterfaces, AspNetCore, DependencyInjection, EfCore };
 
     private static readonly ConditionalWeakTable<Solution, ConcurrentDictionary<string, Lazy<Task<object>>>> FactsCache = new();
 
