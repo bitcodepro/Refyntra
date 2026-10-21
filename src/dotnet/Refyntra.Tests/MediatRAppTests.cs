@@ -90,6 +90,39 @@ public sealed class MediatRAppTests : IClassFixture<MediatRAppFixture>
         Assert.Equal(new[] { "OrderCreated → SendConfirmationEmailHandler", "OrderCreated → WriteAuditEntryHandler" }, handlers);
     }
 
+    // ------------------------------------------------------------------ own handler interfaces (no MediatR)
+
+    private string Archive => _f.File("Orders.Api", "Controllers", "ArchiveController.cs");
+    private string CustomHandlers => _f.File("Orders.Application", "Custom", "Archive.cs");
+    private string CustomContracts => _f.File("Orders.Application", "Custom", "Contracts.cs");
+
+    [Fact]
+    public async Task OwnHandlerInterfacesConnectControllerActionsAndHandlers()
+    {
+        var archive = Assert.Single(Relations(await RelatedAsync(Archive, "Archive(int id"), "handler.handler"));
+        Assert.Equal("ArchiveOrderCommand → ArchiveOrderHandler", Label(archive));
+        Assert.Equal("likely", archive.GetProperty("confidence").GetString());
+        Assert.Equal("CountArchivedQuery → CountArchivedHandler", Label(Assert.Single(Relations(await RelatedAsync(Archive, "Count(CancellationToken"), "handler.handler"))));
+        // Through the project's own dispatcher.
+        Assert.Equal("ShipOrderCommand → ShipOrderHandler", Label(Assert.Single(Relations(await RelatedAsync(Archive, "Ship(int id"), "handler.handler"))));
+        var all = Relations(await RelatedAsync(Archive, "class ArchiveController", 6), "handler.handler").Select(Label).OrderBy(x => x).ToList();
+        Assert.Equal(new[] { "ArchiveOrderCommand → ArchiveOrderHandler", "CountArchivedQuery → CountArchivedHandler", "ShipOrderCommand → ShipOrderHandler" }, all);
+    }
+
+    [Fact]
+    public async Task OwnHandlersShowWhereTheyAreReachedFrom()
+    {
+        var archive = Relations(await RelatedAsync(CustomHandlers, "class ArchiveOrderHandler", 6), "handler.dispatch").Select(Label).ToList();
+        Assert.Contains(archive, l => l.StartsWith("HandleAsync(ArchiveOrderCommand) in") && l.Contains("ArchiveController.Archive"));
+        var ship = Relations(await RelatedAsync(CustomHandlers, "class ShipOrderHandler", 6), "handler.dispatch").Select(Label).ToList();
+        Assert.Contains(ship, l => l.StartsWith("DispatchAsync(ShipOrderCommand) in") && l.Contains("ArchiveController.Ship"));
+        // The generic call inside the dispatcher is not a dispatch of one request.
+        Assert.DoesNotContain(ship, l => l.Contains("CommandDispatcher"));
+        // A MediatR handler is not reported twice by the pattern module.
+        Assert.Single(Relations(await RelatedAsync(Controller, "GetOrder(int id)"), "mediatr.handler"));
+        Assert.Empty(Relations(await RelatedAsync(Controller, "GetOrder(int id)"), "handler.handler"));
+    }
+
     [Fact]
     public async Task AServiceThatSendsShowsTheHandler()
     {

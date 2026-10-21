@@ -24,7 +24,7 @@ export class MediatRHoverProvider implements vscode.HoverProvider {
       if (o.kind !== 'related' || token.isCancellationRequested) return undefined;
       const handlers = o.groups
         .flatMap((g) => g.relations)
-        .filter((r) => r.relationKind === 'mediatr.handler' || r.relationKind === 'mediatr.notificationHandler')
+        .filter((r) => r.relationKind === 'mediatr.handler' || r.relationKind === 'mediatr.notificationHandler' || r.relationKind === 'handler.handler')
         .map((r) => {
           const location = relationLocation(r);
           return { label: r.target.label, notification: r.relationKind === 'mediatr.notificationHandler', ...(location ? { location } : {}) };
