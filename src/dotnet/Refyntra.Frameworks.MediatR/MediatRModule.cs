@@ -43,8 +43,12 @@ public sealed class MediatRModule : IFrameworkModule
         public bool IsOpenGeneric => Request is ITypeParameterSymbol;
     }
 
+    /// <summary>
+    /// A place that dispatches a request: Send / Publish / CreateStream on a MediatR sender, or Handle called on an
+    /// injected handler interface (IRequestHandler&lt;TRequest, TResponse&gt;; DI picks the implementation at run time).
+    /// </summary>
     public sealed record SendFact(Location Location, ITypeSymbol RequestType, string MethodName, string Container, ProjectId ProjectId,
-        SyntaxTree Tree, TextSpan Span);
+        SyntaxTree Tree, TextSpan Span, bool Notification = false);
 
     public sealed class Facts
     {
@@ -90,15 +94,30 @@ public sealed class MediatRModule : IFrameworkModule
                 }
             }
 
-            foreach (var (doc, root, model) in await SymbolIdentity.DocumentsContainingAsync(project, new[] { "Send", "Publish", "CreateStream" }, ct).ConfigureAwait(false))
+            foreach (var (doc, root, model) in await SymbolIdentity.DocumentsContainingAsync(project, new[] { "Send", "Publish", "CreateStream", "Handle" }, ct).ConfigureAwait(false))
             {
                 foreach (var inv in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
                 {
                     var name = SymbolIdentity.InvokedName(inv);
-                    if (name is not ("Send" or "Publish" or "CreateStream")) continue;
+                    if (name is not ("Send" or "Publish" or "CreateStream" or "Handle")) continue;
                     var method = SymbolIdentity.InvokedMethod(model, inv, ct);
                     if (method == null) continue;
                     var container = method.ContainingType;
+                    if (name == "Handle")
+                    {
+                        // Only a call through the handler interface (an injected IRequestHandler<,>): the request type
+                        // comes from the interface, the implementation from DI. A call on a concrete handler is a
+                        // plain reference.
+                        if (container.TypeKind != TypeKind.Interface || container.TypeArguments.Length == 0) continue;
+                        var notification = INotificationHandler1.Matches(container);
+                        if (!(notification || IRequestHandler2.Matches(container) || IRequestHandler1.Matches(container) || IStreamRequestHandler2.Matches(container))) continue;
+                        var requestType = container.TypeArguments[0];
+                        if (requestType.TypeKind is TypeKind.TypeParameter or TypeKind.Error) { facts.UnresolvedSendSites++; continue; }
+                        var at = inv.Expression is MemberAccessExpressionSyntax hm ? hm.Name.GetLocation() : inv.GetLocation();
+                        facts.Sends.Add(new SendFact(at, requestType, "Handle", SymbolIdentity.CompositionRoot(model, inv, ct), project.Id,
+                            inv.SyntaxTree, inv.Span, notification));
+                        continue;
+                    }
                     if (!(ISender.Matches(container) || IPublisher.Matches(container) || IMediator.Matches(container) || Mediator.Matches(container)))
                         continue;
                     if (inv.ArgumentList.Arguments.Count == 0) continue;
@@ -111,7 +130,7 @@ public sealed class MediatRModule : IFrameworkModule
                     }
                     var location = inv.Expression is MemberAccessExpressionSyntax ma ? ma.Name.GetLocation() : inv.GetLocation();
                     facts.Sends.Add(new SendFact(location, argType, name, SymbolIdentity.CompositionRoot(model, inv, ct), project.Id,
-                        inv.SyntaxTree, inv.Span));
+                        inv.SyntaxTree, inv.Span, name == "Publish"));
                 }
             }
         }
@@ -264,7 +283,7 @@ public sealed class MediatRModule : IFrameworkModule
         {
             var request = (ITypeSymbol)byRequest.Key!;
             var sends = byRequest.ToList();
-            var isNotification = sends[0].MethodName == "Publish";
+            var isNotification = sends[0].Notification;
             var callEvidence = sends.Select(s => new EvidenceItem($"{s.MethodName}({request.Name}) in {s.Container}", s.Location)).ToList();
             var handlers = facts.Handlers.Where(h => h.IsNotification == isNotification && SymbolIdentity.SameDefinition(h.Request, request)).ToList();
             if (handlers.Count == 0)
@@ -352,6 +371,15 @@ public sealed class MediatRModule : IFrameworkModule
                 new RelationTarget(h.Request.Name, Symbol: h.Request),
                 new[] { new EvidenceItem($"{type.Name} implements {h.Interface.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}"), assemblyEvidence },
                 confidence, versionLimit, ProviderRouteId));
+            // Where this handler is called from: every place that sends its request (a controller action, a service, an
+            // injected handler interface), so the handler shows its controllers without a detour through the request.
+            foreach (var s in facts.Sends.Where(s => s.Notification == h.IsNotification && SymbolIdentity.SameDefinition(s.RequestType, h.Request)))
+            {
+                result.Add(new FrameworkRelation(RelationKinds.MediatRSend, RelationGroups.Callers,
+                    new RelationTarget($"{s.MethodName}({h.Request.Name}) in {s.Container}", Location: s.Location),
+                    new[] { new EvidenceItem($"{s.MethodName}({h.Request.Name}) dispatches to {h.HandlerType.Name}", s.Location), assemblyEvidence },
+                    confidence, versionLimit, ProviderRouteId));
+            }
             if (h.Response != null && h.Response.Name != "Unit")
             {
                 result.Add(new FrameworkRelation(RelationKinds.MediatRResponse, RelationGroups.Declarations,

@@ -121,17 +121,68 @@ public sealed class WorkspaceSession : IDisposable
 
     public static bool IsProjectList(string path) => path.EndsWith(ProjectListExtension, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>A classic .sln that lists the given projects by absolute path (no folders, Debug|Any CPU only).</summary>
+    /// <summary>
+    /// A classic .sln that lists the given projects by absolute path. Clones of several repositories nearly always have
+    /// projects of the same name (Api, Domain, Tests), and a solution refuses two projects of one name in one solution
+    /// folder (the name comes from the file name), so each project whose name repeats goes into a solution folder named
+    /// after its repository folders ("repo-b"); the projects themselves keep their names.
+    /// </summary>
     public static string GeneratedSolution(IReadOnlyList<string> projects)
     {
+        const string CSharp = "{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}";
+        const string Folder = "{2150E333-8FDC-42A3-9474-1A3956D46DE8}";
+        static string Guid(int n) => new System.Guid(n, 0, 0, new byte[8]).ToString("B").ToUpperInvariant();
         var sb = new System.Text.StringBuilder();
         sb.Append("\r\nMicrosoft Visual Studio Solution File, Format Version 12.00\r\n# Visual Studio Version 17\r\n");
-        for (var i = 0; i < projects.Count; i++)
+        var repeated = projects.GroupBy(p => System.IO.Path.GetFileNameWithoutExtension(p), StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Count() > 1).Select(g => g.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var folders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); // folder name -> guid
+        var taken = new HashSet<string>(StringComparer.OrdinalIgnoreCase);              // folder|project name
+        var nested = new List<(string Project, string Folder)>();
+        var next = 1;
+        foreach (var p in projects)
         {
-            var guid = new Guid(i + 1, 0, 0, new byte[8]).ToString("B").ToUpperInvariant();
-            sb.Append($"Project(\"{{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}}\") = \"{System.IO.Path.GetFileNameWithoutExtension(projects[i])}\", \"{projects[i]}\", \"{guid}\"\r\nEndProject\r\n");
+            var name = System.IO.Path.GetFileNameWithoutExtension(p);
+            var projectGuid = Guid(next++);
+            string? folder = null;
+            if (repeated.Contains(name))
+            {
+                var baseName = DistinctFolders(p).Replace('/', '.');
+                folder = baseName;
+                for (var n = 2; taken.Contains(folder + "|" + name); n++) folder = $"{baseName} {n}";
+                if (!folders.ContainsKey(folder))
+                {
+                    var folderGuid = Guid(100000 + folders.Count + 1);
+                    folders[folder] = folderGuid;
+                    sb.Append($"Project(\"{Folder}\") = \"{folder}\", \"{folder}\", \"{folderGuid}\"\r\nEndProject\r\n");
+                }
+                nested.Add((projectGuid, folders[folder]));
+            }
+            taken.Add((folder ?? "") + "|" + name);
+            sb.Append($"Project(\"{CSharp}\") = \"{name}\", \"{p}\", \"{projectGuid}\"\r\nEndProject\r\n");
+        }
+        if (nested.Count > 0)
+        {
+            sb.Append("Global\r\n\tGlobalSection(NestedProjects) = preSolution\r\n");
+            foreach (var (project, folder) in nested) sb.Append($"\t\t{project} = {folder}\r\n");
+            sb.Append("\tEndGlobalSection\r\nEndGlobal\r\n");
         }
         return sb.ToString();
+    }
+
+    /// <summary>The folder above the project's own folder ("repo-b"), to tell projects of the same name apart.</summary>
+    private static string DistinctFolders(string projectPath)
+    {
+        var dir = System.IO.Path.GetDirectoryName(System.IO.Path.GetDirectoryName(projectPath));
+        var parts = new List<string>();
+        for (var k = 0; k < 1 && !string.IsNullOrEmpty(dir); k++)
+        {
+            var nameOfDir = System.IO.Path.GetFileName(dir);
+            if (string.IsNullOrEmpty(nameOfDir)) break;
+            parts.Insert(0, nameOfDir);
+            dir = System.IO.Path.GetDirectoryName(dir);
+        }
+        return parts.Count == 0 ? "root" : string.Join("/", parts);
     }
 
     /// <summary>Starts loading. The returned task completes when loading finished (successfully or not).</summary>
@@ -278,8 +329,30 @@ public sealed class WorkspaceSession : IDisposable
                 // projects far faster than one OpenProjectAsync after another (measured: 26 projects in 12 s instead
                 // of 46 s). A project that fails to load is reported in the workspace diagnostics; the others load.
                 var generated = Path + ".sln";
-                File.WriteAllText(generated, GeneratedSolution(ExpectedProjects()));
-                solution = await workspace.OpenSolutionAsync(generated, cancellationToken: ct).ConfigureAwait(false);
+                var listed = ExpectedProjects();
+                File.WriteAllText(generated, GeneratedSolution(listed));
+                try
+                {
+                    solution = await workspace.OpenSolutionAsync(generated, cancellationToken: ct).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // Never the whole folder down because of the generated solution: one project after another (slower).
+                    Log.Warn("workspace", $"generated solution not opened ({ex.GetType().Name}: {ex.Message}); loading the projects one by one");
+                    workspace.Dispose();
+                    workspace = MSBuildWorkspace.Create();
+                    foreach (var projectPath in listed)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        if (workspace.CurrentSolution.Projects.Any(x => x.FilePath != null && UriPaths.PathComparer.Equals(x.FilePath, projectPath))) continue;
+                        try { await workspace.OpenProjectAsync(projectPath, cancellationToken: ct).ConfigureAwait(false); }
+                        catch (Exception pex) when (pex is not OperationCanceledException)
+                        {
+                            Log.Warn("workspace", $"project not loaded: {System.IO.Path.GetFileName(projectPath)}: {pex.GetType().Name}");
+                        }
+                    }
+                    solution = workspace.CurrentSolution;
+                }
             }
             else
             {
