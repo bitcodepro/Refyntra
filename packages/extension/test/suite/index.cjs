@@ -85,7 +85,9 @@ const common = [
     'contributes no default keybindings (only the opt-in presets) and limited support in untrusted workspaces',
     async () => {
       const pkg = vscode.extensions.getExtension('refyntra.refyntra').packageJSON;
-      for (const kb of pkg.contributes.keybindings) assert.match(kb.when, /config\.refyntra\.keybindings\.preset == '(visualStudio|resharper)'/);
+      // One exception: Open Run (Ctrl+Alt+R), a key VS Code itself leaves free.
+      for (const kb of pkg.contributes.keybindings) if (kb.command !== 'refyntra.run.open') assert.match(kb.when, /config\.refyntra\.keybindings\.preset == '(visualStudio|resharper)'/);
+      assert.deepEqual(pkg.contributes.keybindings.filter((k) => k.command === 'refyntra.run.open').map((k) => k.key), ['ctrl+alt+r']);
       assert.equal(pkg.capabilities.untrustedWorkspaces.supported, 'limited');
     },
   ],
@@ -1679,6 +1681,8 @@ scenarios['run-multi-solution'] = [
       const a = await api();
       await a.run.ready();
       const row = (label) => a.run.getChildren().flatMap((g) => (g.kind === 'group' ? a.run.getChildren(g) : [])).find((n) => n.target?.label === label);
+      // Ctrl+Alt+R (Open Run): the Run tab of its own shows the list.
+      await vscode.commands.executeCommand('refyntra.run.open');
       const worker = row('WorkerApp');
       assert.ok(worker, 'WorkerApp is listed');
       await vscode.commands.executeCommand('refyntra.run.hide', worker, [worker]);

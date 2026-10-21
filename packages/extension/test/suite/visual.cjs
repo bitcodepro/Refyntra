@@ -336,8 +336,8 @@ exports.cases = ({ api, csharp, waitFor }) => {
         }, 'Run | Debug lenses', 60000);
         // The view's `when` (config.refyntra.run.view) needs a moment after the setting changed.
         await sleep(1500);
-        await vscode.commands.executeCommand('workbench.view.extension.refyntra');
-        await vscode.commands.executeCommand('refyntra.runView.focus');
+        // The Run tab of its own (Ctrl+Alt+R).
+        await vscode.commands.executeCommand('refyntra.run.open');
         await shot('run-view', 2500);
       },
     ],

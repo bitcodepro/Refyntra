@@ -508,6 +508,12 @@
         "icon": "$(list-unordered)"
       },
       {
+        "command": "refyntra.run.open",
+        "title": "Open Run",
+        "category": "Refyntra",
+        "icon": "$(play)"
+      },
+      {
         "command": "refyntra.run.refresh",
         "title": "Refresh Run Targets",
         "category": "Refyntra",
@@ -2117,6 +2123,11 @@
           "id": "refyntra",
           "title": "Refyntra",
           "icon": "media/refyntra.svg"
+        },
+        {
+          "id": "refyntraRun",
+          "title": "Refyntra Run",
+          "icon": "media/refyntra-run.svg"
         }
       ],
       "panel": [
@@ -2128,6 +2139,14 @@
       ]
     },
     "views": {
+      "refyntraRun": [
+        {
+          "id": "refyntra.runView",
+          "name": "Refyntra Run",
+          "contextualTitle": "Refyntra",
+          "when": "refyntra.run.viewVisible"
+        }
+      ],
       "refyntra": [
         {
           "id": "refyntra.solutionView",
@@ -2135,12 +2154,6 @@
           "contextualTitle": "Refyntra",
           "icon": "media/refyntra.svg",
           "when": "config.refyntra.solutionExplorer.enabled"
-        },
-        {
-          "id": "refyntra.runView",
-          "name": "Run",
-          "contextualTitle": "Refyntra",
-          "when": "refyntra.run.viewVisible"
         },
         {
           "id": "refyntra.relatedView",
@@ -2818,6 +2831,11 @@
       }
     },
     "keybindings": [
+      {
+        "command": "refyntra.run.open",
+        "key": "ctrl+alt+r",
+        "when": "!terminalFocus"
+      },
       {
         "command": "refyntra.find",
         "key": "ctrl+,",
