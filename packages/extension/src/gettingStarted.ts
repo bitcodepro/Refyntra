@@ -52,6 +52,7 @@ export const MAIN_MENU: readonly MenuEntry[] = [
   { label: '$(debug-alt) Start Debugging', detail: 'Debug the selected project with the bundled netcoredbg or debugpy (F5 without launch.json)', command: 'refyntra.debug' },
   { label: '$(flame) Run with Hot Reload', detail: 'dotnet watch for the selected .NET project', command: 'refyntra.runWatch' },
   { label: '$(list-selection) Select What to Run', detail: 'Project, launch profile, target framework and configuration for Run and Debug', command: 'refyntra.selectRunTarget' },
+  { label: '$(history) Show History (Git)', detail: 'Who changed this file or the selected lines; each change opens as a diff', command: 'refyntra.git.history' },
   { label: '$(play) Open Run', detail: 'The Run tab with every runnable project (Ctrl+Alt+R)', command: 'refyntra.run.open' },
   { label: '$(run-all) Run Group', detail: 'Start several projects together, in order (a web project is waited for before the next)', command: 'refyntra.run.runGroup' },
   { label: '$(debug-alt) Debug Group', detail: 'Debug several projects together; each debug session is named Group › Project', command: 'refyntra.run.debugGroup' },

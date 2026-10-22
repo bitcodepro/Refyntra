@@ -104,7 +104,7 @@ const common = [
         assert.ok(fsx.existsSync(px.join(ext.extensionPath, st.media.markdown)), st.media.markdown);
         assert.match(st.description, /\(command:refyntra\.[A-Za-z.]+\)/, `${st.id} has a command button`);
       }
-      assert.deepEqual(pkg.contributes.menus['refyntra.editorContext'].map((m) => m.command), ['refyntra.related', 'refyntra.tests.runRelated', 'refyntra.find', 'refyntra.findHandler', 'refyntra.findEndpoint', 'refyntra.findRegistration', 'refyntra.rename', 'refyntra.extractMethod', 'refyntra.changeSignature', 'refyntra.moveTypeToFile', 'refyntra.safeDelete', 'refyntra.generateHandler', 'refyntra.cleanup', 'refyntra.taskContext.addSymbol', 'refyntra.taskContext.addFile', 'refyntra.actions']);
+      assert.deepEqual(pkg.contributes.menus['refyntra.editorContext'].map((m) => m.command), ['refyntra.related', 'refyntra.git.history', 'refyntra.tests.runRelated', 'refyntra.find', 'refyntra.findHandler', 'refyntra.findEndpoint', 'refyntra.findRegistration', 'refyntra.rename', 'refyntra.extractMethod', 'refyntra.changeSignature', 'refyntra.moveTypeToFile', 'refyntra.safeDelete', 'refyntra.generateHandler', 'refyntra.cleanup', 'refyntra.taskContext.addSymbol', 'refyntra.taskContext.addFile', 'refyntra.actions']);
       assert.match(pkg.contributes.menus['editor/context'][0].when, /csharp\|typescript/);
       const whens = pkg.contributes.viewsWelcome.map((v) => v.when);
       for (const v of ['ready', 'untrusted', 'noSolution', 'hostFailed']) assert.equal(whens.filter((x) => x.includes(`refyntra.welcome == ${v}`)).length, 1, v);
@@ -1442,7 +1442,7 @@ scenarios['ts-delegated'] = [
 
 // ---- accessibility -----------------------------------------------------------------------------------
 // Internal commands: invoked by buttons and tree items, hidden from the Command Palette on purpose.
-const INTERNAL_COMMANDS = ['refyntra.openLocation', 'refyntra.openMetadata', 'refyntra.delegatedAction', 'refyntra.runRestore', 'refyntra.related.open', 'refyntra.nativeRename', 'refyntra.stackTrace.openFrame', 'refyntra.stackTrace.related', 'refyntra.taskContext.addFindItem', 'refyntra.taskContext.addFromRelated', 'refyntra.codeLens.related', 'refyntra.selectRunTargetById', 'refyntra.pickDotnetProcess', 'refyntra.immediate.clear', 'refyntra.editAction', 'refyntra.usages.open', 'refyntra.usages.activate', 'refyntra.usages.closeSession', 'refyntra.usages.showMore', 'refyntra.tests.run', 'refyntra.tests.debug', 'refyntra.ef.open', 'refyntra.structuralSearch.showMore', 'refyntra.structuralSearch.openMatch', 'refyntra.structuralSearch.replaceMatch', 'refyntra.solution.open', 'refyntra.solution.revealInExplorer', 'refyntra.solution.revealInOS', 'refyntra.solution.copyPath', 'refyntra.projectFile.loadVersions', ...['kind', 'project', 'folder', 'file', 'type', 'member'].flatMap((g) => [`refyntra.usages.group.${g}`, `refyntra.usages.ungroup.${g}`])];
+const INTERNAL_COMMANDS = ['refyntra.openLocation', 'refyntra.openMetadata', 'refyntra.delegatedAction', 'refyntra.runRestore', 'refyntra.related.open', 'refyntra.nativeRename', 'refyntra.stackTrace.openFrame', 'refyntra.stackTrace.related', 'refyntra.taskContext.addFindItem', 'refyntra.taskContext.addFromRelated', 'refyntra.codeLens.related', 'refyntra.selectRunTargetById', 'refyntra.pickDotnetProcess', 'refyntra.immediate.clear', 'refyntra.editAction', 'refyntra.usages.open', 'refyntra.usages.activate', 'refyntra.usages.closeSession', 'refyntra.usages.showMore', 'refyntra.tests.run', 'refyntra.tests.debug', 'refyntra.ef.open', 'refyntra.structuralSearch.showMore', 'refyntra.structuralSearch.openMatch', 'refyntra.structuralSearch.replaceMatch', 'refyntra.solution.open', 'refyntra.solution.revealInExplorer', 'refyntra.solution.revealInOS', 'refyntra.solution.copyPath', 'refyntra.projectFile.loadVersions', 'refyntra.git.rangeHistory', ...['kind', 'project', 'folder', 'file', 'type', 'member'].flatMap((g) => [`refyntra.usages.group.${g}`, `refyntra.usages.ungroup.${g}`])];
 
 common.push([
   'keyboard: every user command is in the Command Palette and the status bar menu leads to the main ones',
@@ -1644,6 +1644,50 @@ scenarios.navigation.push(...require('./metadata.cjs').cases({ api, csharp, wait
 // Visual (screenshot) scenarios, Docker/Xvfb only (test/suite/visual.cjs, scripts/test/linux-visual.sh).
 // Run and Debug on a temp copy of the Runnable fixture (bundled netcoredbg and debugpy; test/suite/runDebug.cjs).
 scenarios['run-debug'] = require('./runDebug.cjs').cases({ api, csharp, waitFor });
+
+scenarios['git-history'] = [
+  [
+    'Show History of a file and of selected lines (two authors); a change opens as a diff; the authorship CodeLens names the authors',
+    async () => {
+      const a = await api();
+      const root = vscode.workspace.workspaceFolders[0].uri.fsPath;
+      const { execFileSync } = require('node:child_process');
+      const git = (args, author) =>
+        execFileSync('git', args, { cwd: root, env: { ...process.env, GIT_AUTHOR_NAME: author ?? 'Alice', GIT_AUTHOR_EMAIL: 'a@example.com', GIT_COMMITTER_NAME: author ?? 'Alice', GIT_COMMITTER_EMAIL: 'a@example.com' } });
+      git(['init', '-q']);
+      git(['add', '-A']);
+      git(['commit', '-q', '-m', 'Initial version'], 'Alice');
+      const file = nodePath.join(root, 'ConsoleApp', 'Calc.cs');
+      const text = fs.readFileSync(file, 'utf8');
+      fs.writeFileSync(file, text.replace(/\}\s*$/, '    public static int Triple(int x) => 3 * x;\n}\n'));
+      git(['commit', '-q', '-am', 'Add Triple'], 'Bob');
+      const uri = vscode.Uri.file(file);
+      assert.equal(await a.git.history(uri), 2, 'two commits touch the file');
+      const doc = await vscode.workspace.openTextDocument(uri);
+      const line = doc.getText().split(/\r?\n/).findIndex((l) => l.includes('Triple'));
+      assert.ok(line > 0);
+      assert.equal(await a.git.history(uri, { from: line, to: line }), 1, 'only Bob\'s commit touches the new line');
+      // Opening a change: a diff of the commit against its parent.
+      await a.git.history(uri, undefined, true);
+      await waitFor(() => vscode.window.tabGroups.activeTabGroup.activeTab?.input instanceof vscode.TabInputTextDiff, 'the diff of the newest commit', 20000);
+      const diff = vscode.window.tabGroups.activeTabGroup.activeTab.input;
+      assert.equal(diff.modified.scheme, 'refyntra-git');
+      const after = (await vscode.workspace.openTextDocument(diff.modified)).getText();
+      assert.match(after, /Triple/, 'the commit side has the new method');
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      // Authorship CodeLens: Bob for Triple, Alice for the class.
+      await vscode.window.showTextDocument(doc);
+      const titles = await waitFor(async () => {
+        const lenses = await vscode.commands.executeCommand('vscode.executeCodeLensProvider', uri, 100);
+        const t = lenses.map((l) => l.command?.title ?? '').filter((x) => x.includes('$(person)'));
+        return t.some((x) => /Bob/.test(x)) && t.some((x) => /Alice/.test(x)) ? t : undefined;
+      }, 'authorship lenses with both authors', 30000);
+      assert.ok(titles.every((t) => /just now|ago/.test(t)), titles.join(' | '));
+      // The new method is Bob's alone: the class's closing brace (Alice's) does not count.
+      assert.ok(titles.some((t) => /\$\(person\) Bob, /.test(t)), titles.join(' | '));
+    },
+  ],
+];
 
 scenarios['run-multi-solution'] = [
   [
