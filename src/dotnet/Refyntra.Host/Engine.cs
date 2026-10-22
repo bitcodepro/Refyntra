@@ -113,6 +113,10 @@ public sealed partial class Engine : IRpcHandler, IDisposable
                 var bp = Params<BarrierParams>(p);
                 var session = RequireSession(bp.WorkspaceId);
                 var snap = await session.BarrierAsync(bp.Sequence, BarrierTimeout, ct).ConfigureAwait(false);
+                // Once per load (not per edit): framework facts in the background, so the first Related is quick.
+                if (Interlocked.Exchange(ref _prewarmedGeneration, session.LoadGeneration) != session.LoadGeneration
+                    && session.State is EngineStates.Ready or EngineStates.Partial)
+                    SemanticService.Prewarm(snap);
                 return new BarrierResult { AcknowledgedSequence = Math.Max(session.AppliedSequence, bp.Sequence), SnapshotId = snap.Id, WorkspaceRevision = session.Revision };
             }
             case "capability/query":
@@ -375,6 +379,8 @@ public sealed partial class Engine : IRpcHandler, IDisposable
             FromProjectIndex = s.FromProjectIndex ? true : null,
         };
     }
+
+    private long _prewarmedGeneration = -1;
 
     private WorkspaceSession RequireSession(string workspaceId) =>
         _sessions.TryGetValue(workspaceId ?? "", out var s)
