@@ -63,3 +63,34 @@ describe('git log, branches and status', () => {
     ]);
   });
 });
+
+describe('commit details, diff, GitHub remote, search', async () => {
+  const { parseNumstat, parsePatch, gitHubRepoOf, searchArgs } = await import('../../src/gitGraphModel');
+
+  it('reads numstat: counts, binary files, renames', () => {
+    const s = parseNumstat(['3\t1\tsrc/a.cs', '-\t-\timg.png', '0\t0\t', 'old.cs', 'new.cs', ''].join('\0'));
+    expect(s).toEqual([
+      { path: 'src/a.cs', added: 3, deleted: 1, binary: false },
+      { path: 'img.png', added: 0, deleted: 0, binary: true },
+      { path: 'new.cs', from: 'old.cs', added: 0, deleted: 0, binary: false },
+    ]);
+  });
+
+  it('reads a unified diff with line numbers on both sides', () => {
+    const d = parsePatch('diff --git a/x b/x\nindex 1..2\n--- a/x\n+++ b/x\n@@ -1,3 +1,3 @@ class X\n a\n-b\n+B\n c\n');
+    expect(d.map((l) => `${l.kind}:${l.old ?? ''}:${l.new ?? ''}:${l.text}`)).toEqual(['hunk:::@@ -1,3 +1,3 @@ class X', 'ctx:1:1:a', 'del:2::b', 'add::2:B', 'ctx:3:3:c']);
+  });
+
+  it('finds owner/repo of GitHub remotes only', () => {
+    expect(gitHubRepoOf('https://github.com/bitcodepro/Refyntra.git')).toEqual({ owner: 'bitcodepro', repo: 'Refyntra' });
+    expect(gitHubRepoOf('git@github.com:a/b.git')).toEqual({ owner: 'a', repo: 'b' });
+    expect(gitHubRepoOf('https://user@github.com/a/b')).toEqual({ owner: 'a', repo: 'b' });
+    expect(gitHubRepoOf('https://gitlab.com/a/b.git')).toBeUndefined();
+  });
+
+  it('builds the search: message, code change, author; a branch or all', () => {
+    expect(searchArgs('fix', 'message', 'main')).toEqual(['log', 'main', '--date-order', '-i', '--grep=fix', '--fixed-strings', '-n', '200']);
+    expect(searchArgs('Triple', 'code', undefined)).toEqual(['log', '--all', '--date-order', '-STriple', '-n', '200']);
+    expect(searchArgs('alice', 'author', undefined)).toContain('--author=alice');
+  });
+});

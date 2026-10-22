@@ -160,3 +160,83 @@ export function parseStatus(text: string): FileChange[] {
   }
   return out;
 }
+
+// ---------------------------------------------------------------------------------------------------- commit details
+
+export interface FileStat {
+  path: string;
+  /** For a rename: the old path. */
+  from?: string;
+  added: number;
+  deleted: number;
+  /** A binary file (git prints "-"). */
+  binary: boolean;
+}
+
+/** `git show --numstat -z --format= <sha>` (or `git diff --numstat -z`) → files with added / deleted line counts. */
+export function parseNumstat(text: string): FileStat[] {
+  const out: FileStat[] = [];
+  const parts = text.split('\0');
+  for (let i = 0; i < parts.length; i++) {
+    const head = parts[i]!.replace(/^\n+/, '');
+    const m = /^(-|\d+)\t(-|\d+)\t(.*)$/s.exec(head);
+    if (!m) continue;
+    const binary = m[1] === '-';
+    let file = m[3]!;
+    let from: string | undefined;
+    // A rename: the path field is empty and the old and new paths follow as two more entries.
+    if (file === '') {
+      from = parts[++i];
+      file = parts[++i] ?? '';
+    }
+    out.push({ path: file, ...(from ? { from } : {}), added: binary ? 0 : Number(m[1]), deleted: binary ? 0 : Number(m[2]), binary });
+  }
+  return out;
+}
+
+export interface DiffLine {
+  kind: 'add' | 'del' | 'ctx' | 'hunk';
+  text: string;
+  /** Line numbers in the old and new file (absent for the other side). */
+  old?: number;
+  new?: number;
+}
+
+/** A unified diff of one file → lines with their kind and numbers (headers before the first hunk dropped). */
+export function parsePatch(text: string): DiffLine[] {
+  const out: DiffLine[] = [];
+  let oldNo = 0;
+  let newNo = 0;
+  let inHunk = false;
+  for (const raw of text.split('\n')) {
+    const h = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/.exec(raw);
+    if (h) {
+      oldNo = Number(h[1]);
+      newNo = Number(h[2]);
+      inHunk = true;
+      out.push({ kind: 'hunk', text: raw });
+      continue;
+    }
+    if (!inHunk) continue;
+    if (raw.startsWith('+')) out.push({ kind: 'add', text: raw.slice(1), new: newNo++ });
+    else if (raw.startsWith('-')) out.push({ kind: 'del', text: raw.slice(1), old: oldNo++ });
+    else if (raw.startsWith(' ')) out.push({ kind: 'ctx', text: raw.slice(1), old: oldNo++, new: newNo++ });
+    else if (raw.startsWith('diff --git')) inHunk = false;
+  }
+  return out;
+}
+
+/** owner/repo of a GitHub remote URL (https or ssh); undefined for another host. */
+export function gitHubRepoOf(url: string): { owner: string; repo: string } | undefined {
+  const m = /^(?:https?:\/\/(?:[^@/]+@)?github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([^/]+)\/([^/]+?)(?:\.git)?\/?$/.exec(url.trim());
+  return m ? { owner: m[1]!, repo: m[2]! } : undefined;
+}
+
+export type SearchMode = 'message' | 'code' | 'author';
+
+/** The git log arguments of a search: in commit messages (--grep), in code changes (-S, pickaxe) or by author. */
+export function searchArgs(text: string, mode: SearchMode, branch: string | undefined): string[] {
+  const where = branch ? [branch] : ['--all'];
+  const what = mode === 'message' ? ['-i', `--grep=${text}`, '--fixed-strings'] : mode === 'author' ? ['-i', `--author=${text}`, '--fixed-strings'] : [`-S${text}`];
+  return ['log', ...where, '--date-order', ...what, '-n', '200'];
+}

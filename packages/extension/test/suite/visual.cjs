@@ -735,7 +735,7 @@ exports.cases = ({ api, csharp, waitFor }) => {
       },
     ],
     [
-      'visual: git-tab — the Refyntra Git tab: a change to stage, branches, the graph with a branch cut from main and merged back',
+      'visual: git-tab — the Refyntra Git tab (a change to stage, branches, the graph with a branch cut from main and merged back), then a commit with its diff',
       async () => {
         const a = await ready();
         await reset();
@@ -772,6 +772,16 @@ exports.cases = ({ api, csharp, waitFor }) => {
         const m = await a.gitView.refresh();
         assert.equal(m.rows.length, 5, JSON.stringify(m.rows.map((r) => r.commit.subject)));
         await shot('git-tab', 2500);
+        // A commit in the editor area: files with +/- and the coloured diff.
+        const commit = m.rows.find((r) => r.commit.subject === 'Cancel order endpoint').commit.sha;
+        const panel = await a.gitView.commits.show(commit);
+        await shot('git-commit', 3000);
+        panel.dispose();
+        // The full-width client in an editor tab.
+        const editorTab = a.gitView.openInEditor();
+        await vscode.commands.executeCommand('workbench.action.closeSidebar');
+        await shot('git-editor', 3000);
+        editorTab.dispose();
       },
     ],
   ];

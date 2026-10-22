@@ -424,7 +424,7 @@ describe('keyboard reachability of commands (package.json + status bar menu)', (
 
   it('every user command is in the status bar menu, or is a Related view toolbar command that the palette offers', () => {
     const inMenu = new Set(MAIN_MENU.map((m) => m.command));
-    const viewToolbar = new Set(['refyntra.showMenu', 'refyntra.statusMenu', 'refyntra.related.pin', 'refyntra.related.unpin', 'refyntra.related.refresh', 'refyntra.stackTrace.clear', 'refyntra.stop', 'refyntra.restart', 'refyntra.run.refresh', 'refyntra.run.stopGroup', 'refyntra.run.deleteGroup', 'refyntra.run.focus', 'refyntra.run.hide', 'refyntra.run.unhide', 'refyntra.run.showHidden', 'refyntra.run.hideShown', 'refyntra.run.runScript', 'refyntra.git.refresh']);
+    const viewToolbar = new Set(['refyntra.showMenu', 'refyntra.statusMenu', 'refyntra.related.pin', 'refyntra.related.unpin', 'refyntra.related.refresh', 'refyntra.stackTrace.clear', 'refyntra.stop', 'refyntra.restart', 'refyntra.run.refresh', 'refyntra.run.stopGroup', 'refyntra.run.deleteGroup', 'refyntra.run.focus', 'refyntra.run.hide', 'refyntra.run.unhide', 'refyntra.run.showHidden', 'refyntra.run.hideShown', 'refyntra.run.runScript', 'refyntra.git.refresh', 'refyntra.git.openInEditor', 'refyntra.git.fetchAll', 'refyntra.git.pullAll', 'refyntra.git.fetch', 'refyntra.git.pull', 'refyntra.git.push', 'refyntra.git.checkout', 'refyntra.git.newBranch', 'refyntra.git.createPullRequest']);
     for (const c of pkg.contributes.commands.map((x) => x.command)) {
       if (INTERNAL.includes(c) || viewToolbar.has(c)) continue;
       // The Hot Reload status bar item runs it (shown only during a dotnet watch run); also in the palette.
