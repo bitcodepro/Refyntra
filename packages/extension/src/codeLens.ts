@@ -49,6 +49,16 @@ export class RefyntraCodeLensProvider implements vscode.CodeLensProvider<Refyntr
         this.docs.clear();
         this.changed.fire();
       }),
+      // C# became usable (loaded, reloaded): the lenses that could not be answered are asked again.
+      engine.onDidChangeHealth((h) => {
+        const cs = h.adapters.find((a) => a.adapterId === 'csharp');
+        const usable = !!cs && (cs.state === 'Ready' || cs.state === 'Partial');
+        if (usable && !this.wasUsable && this.failures.size > 0) {
+          this.failures.clear();
+          this.changed.fire();
+        }
+        this.wasUsable = usable;
+      }),
       vscode.workspace.onDidCloseTextDocument((d) => this.docs.delete(d.uri.toString())),
       vscode.workspace.onDidChangeConfiguration((e) => {
         if (e.affectsConfiguration('refyntra.codeLens')) this.changed.fire();
@@ -94,6 +104,10 @@ export class RefyntraCodeLensProvider implements vscode.CodeLensProvider<Refyntr
   }
 
   private readonly settled = new Map<string, LensSummary | undefined>();
+  /** Why a lens could not be answered (reason code by uri#version#declaration): its text says so. */
+  private readonly failures = new Map<string, string>();
+  private wasUsable = false;
+  private retryTimer: NodeJS.Timeout | undefined;
 
   private knownSummary(c: DocCache, d: CSharpDeclaration): LensSummary | undefined {
     return this.settled.get(`${c.version}#${declKey(d)}`);
@@ -103,7 +117,7 @@ export class RefyntraCodeLensProvider implements vscode.CodeLensProvider<Refyntr
     const s = this.settings();
     const summary = await this.summary(lens, token);
     if (!summary) {
-      lens.command = { title: 'Refyntra: not available yet', command: 'refyntra.showHealth', tooltip: 'The C# analysis is not ready or the request was cancelled.' };
+      lens.command = unavailableLens(this.failures.get(`${lens.uri}#${lens.version}#${declKey(lens.decl)}`));
       return lens;
     }
     let kind = lens.lensKind;
@@ -133,7 +147,10 @@ export class RefyntraCodeLensProvider implements vscode.CodeLensProvider<Refyntr
       p = this.engine
         .related({ uri: lens.uri, position: { line: lens.decl.line, character: lens.decl.character } }, source.token)
         .then(async (o) => {
-          if (o.kind !== 'related') return undefined;
+          if (o.kind !== 'related') {
+            this.failures.set(`${lens.uri}#${lens.version}#${key}`, (o as { reasonCode?: string }).reasonCode ?? 'Unavailable');
+            return undefined;
+          }
           const s = summarize(!!o.subject, o.groups.flatMap((g) => g.relations));
           // A handler's "sent from" places are relations of its request type: one more Related request, only for handlers.
           if (s.isHandler && s.sends.length === 0 && s.requests[0] && this.settings().mediatr) {
@@ -143,18 +160,24 @@ export class RefyntraCodeLensProvider implements vscode.CodeLensProvider<Refyntr
           }
           return s;
         })
-        .catch(() => undefined)
+        .catch((e: unknown) => {
+          this.failures.set(`${lens.uri}#${lens.version}#${key}`, token.isCancellationRequested || (e instanceof Error && /cancel/i.test(e.message)) ? 'Cancelled' : 'RequestFailed');
+          return undefined;
+        })
         .finally(() => {
           sub.dispose();
           source.dispose();
         });
       c.summaries.set(key, p);
       void p.then((sum) => {
-        // A cancelled or failed request is asked again next time.
+        // A cancelled or failed request is asked again next time; a cancelled one or one that met a loading host soon.
         if (!sum) {
           if (c.summaries.get(key) === p) c.summaries.delete(key);
+          const reason = this.failures.get(`${lens.uri}#${lens.version}#${key}`);
+          if (reason === 'Cancelled' || reason === 'Loading' || reason === 'Restarting' || reason === 'Stale') this.retrySoon();
           return;
         }
+        this.failures.delete(`${lens.uri}#${lens.version}#${key}`);
         this.settled.set(`${c.version}#${key}`, sum);
         if (this.settled.size > 5000) this.settled.clear();
         if (!c.emitted.has(key) && extraLensKinds(sum, this.settings()).length > 0) {
@@ -164,6 +187,14 @@ export class RefyntraCodeLensProvider implements vscode.CodeLensProvider<Refyntr
       });
     }
     return p;
+  }
+
+  private retrySoon(): void {
+    if (this.retryTimer) return;
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = undefined;
+      this.changed.fire();
+    }, 2500);
   }
 
   private scheduleRefresh(): void {
@@ -176,6 +207,7 @@ export class RefyntraCodeLensProvider implements vscode.CodeLensProvider<Refyntr
 
   dispose(): void {
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
+    if (this.retryTimer) clearTimeout(this.retryTimer);
     for (const s of this.subs) s.dispose();
     this.changed.dispose();
     this.docs.clear();
@@ -200,4 +232,23 @@ export function registerCodeLens(engine: EngineClient): { provider: RefyntraCode
     }),
   );
   return { provider, disposable };
+}
+
+/** The text of a lens that got no answer: why, in words (Show Health on click). */
+export function unavailableLens(reason: string | undefined): vscode.Command {
+  switch (reason) {
+    case 'Loading':
+    case 'Restarting':
+    case 'Cancelled':
+    case 'Stale':
+    case undefined:
+      return { title: 'Refyntra: loading C#…', command: 'refyntra.showHealth', tooltip: 'The C# analysis is still loading; the lens updates by itself.' };
+    case 'DocumentNotFound':
+      return { title: "Refyntra: this file's project is not loaded", command: 'refyntra.showHealth', tooltip: 'The file is not part of a loaded project (it failed to load, or it is outside the loaded solution). Show Health tells why.' };
+    case 'NoSymbol':
+    case 'SymbolNotFound':
+      return { title: 'Refyntra: no symbol here yet', command: 'refyntra.showHealth', tooltip: 'The C# analysis does not know this declaration yet (the file may have changed); it updates after the next analysis.' };
+    default:
+      return { title: `Refyntra: not available (${reason})`, command: 'refyntra.showHealth', tooltip: 'Show Health tells why.' };
+  }
 }
