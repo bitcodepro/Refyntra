@@ -173,6 +173,26 @@ public static class SemanticService
             .ToList();
         var projectIds = projects.Select(p => p.Id).ToHashSet();
 
+        // A C# file name, also with a path ("Orders/OrderService.cs", pasted from the explorer or a stack trace): the types
+        // declared in that file come first, then the search goes on with the name without ".cs".
+        var fileName = System.Text.RegularExpressions.Regex.Match(query, @"([^\\/\s]+)\.cs$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (fileName.Success && !filters.Entity && filters.Table == null && filters.Route == null && filters.Method == null)
+        {
+            var wanted = fileName.Groups[1].Value + ".cs";
+            foreach (var project in projects)
+            foreach (var doc in project.Documents)
+            {
+                if (doc.FilePath == null || !Path.GetFileName(doc.FilePath).Equals(wanted, StringComparison.OrdinalIgnoreCase)) continue;
+                var root = await doc.GetSyntaxRootAsync(ct).ConfigureAwait(false);
+                var model = await doc.GetSemanticModelAsync(ct).ConfigureAwait(false);
+                if (root == null || model == null) continue;
+                foreach (var decl in root.DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.BaseTypeDeclarationSyntax>())
+                    if (model.GetDeclaredSymbol(decl, ct) is { } type)
+                        hits.Add(new SearchHit(type, project, null, 110, SymbolFacts.DisplayName(type), doc.FilePath));
+            }
+            query = fileName.Groups[1].Value;
+        }
+
         if (filters.Entity || filters.Table != null)
         {
             // EF Core entities ("entity:" by type name, "table:" by mapped table name, explicit or convention).
@@ -257,7 +277,10 @@ public static class SemanticService
             }
         }
         var ordered = hits.OrderByDescending(h => h.Score).ThenBy(h => h.SortName, StringComparer.Ordinal)
-            .ThenBy(h => h.SortPath, StringComparer.Ordinal).ToList();
+            .ThenBy(h => h.SortPath, StringComparer.Ordinal)
+            // A type found by its file and again by its name: once.
+            .DistinctBy(h => h.Symbol == null ? $"{h.SortName}|{h.SortPath}|{h.Endpoint?.Location.SourceSpan.Start}" : $"{DocumentationCommentId.CreateDeclarationId(h.Symbol) ?? h.Symbol.Name}|{h.SortPath}|{SymbolFacts.PrimaryLocation(h.Symbol)?.SourceSpan.Start}")
+            .ToList();
         var truncated = ordered.Count > limit;
         return new SearchModel(ordered.Take(limit).ToList(), truncated);
     }

@@ -139,6 +139,22 @@ public sealed class MediatRAppTests : IClassFixture<MediatRAppFixture>
     }
 
     [Fact]
+    public async Task FindWithACSharpFileNameShowsTheTypesOfThatFile()
+    {
+        // Pasted from the explorer: "CreateOrder.cs" (a file with five types), also with a path.
+        foreach (var query in new[] { "CreateOrder.cs", @"Orders.Application\Features\CreateOrder.cs" })
+        {
+            var snap = await C.BarrierAsync();
+            var r = await C.RequestAsync("code/search", new { traceId = "t", workspaceId = C.WorkspaceId, snapshotId = snap, query, filters = new { }, limit = 50 });
+            var names = r.GetProperty("items").EnumerateArray().Select(i => i.GetProperty("symbol").GetProperty("name").GetString()).ToList();
+            foreach (var n in new[] { "CreateOrderCommand", "OrderCreated", "CreateOrderCommandHandler", "SendConfirmationEmailHandler", "WriteAuditEntryHandler" })
+                Assert.Contains(n, names);
+            // Each type once, although "CreateOrder" also finds CreateOrderCommand by name.
+            Assert.Single(names, n => n == "CreateOrderCommand");
+        }
+    }
+
+    [Fact]
     public async Task AServiceThatSendsShowsTheHandler()
     {
         Assert.Equal("GetOrderQuery → GetOrderQueryHandler", Label(Assert.Single(Relations(await RelatedAsync(Pricing, "TotalWithTaxAsync("), "mediatr.handler"))));

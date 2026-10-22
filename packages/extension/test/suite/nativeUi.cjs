@@ -100,6 +100,26 @@ exports.cases = ({ api, csharp, waitFor }) => {
       }, 'MediatR sent-from lens', 60000);
       assert.equal(sent.command.command, 'editor.action.peekLocations');
       assert.ok(a.codeLens.scanTimes.length > 0 && Math.max(...a.codeLens.scanTimes) < 50, `scan ms ${a.codeLens.scanTimes.join(',')}`);
+      // A C# file outside every loaded project: a clear lens, not the old catch-all.
+      const stray = vscode.Uri.joinPath(vscode.workspace.workspaceFolders[0].uri, 'Stray.cs');
+      await vscode.workspace.fs.writeFile(stray, Buffer.from('public class Stray\n{\n}\n'));
+      try {
+        await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(stray));
+        let seen = [];
+        const strayLens = await waitFor(async () => {
+          const ls = await vscode.commands.executeCommand('vscode.executeCodeLensProvider', stray, 100);
+          seen = ls.map((l) => (l.command ? l.command.title : '(unresolved)'));
+          return ls.find((l) => l.command && !/loading/.test(l.command.title));
+        }, 'the lens of a file outside the projects', 60000).catch((e) => {
+          throw new Error(`${e.message}; lenses: ${JSON.stringify(seen)}`);
+        });
+        // The host answers "no symbol" for it; never the old catch-all "not available yet".
+        assert.match(strayLens.command.title, /no symbol|project is not loaded/);
+        assert.doesNotMatch(strayLens.command.title, /not available yet/);
+      } finally {
+        await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+        await vscode.workspace.fs.delete(stray);
+      }
     }],
     ['Call Hierarchy: incoming calls of IOrderService.Find come from the handler (built-in command, Refyntra host)', async () => {
       await ready();
