@@ -48,7 +48,7 @@ public sealed class MediatRModule : IFrameworkModule
     /// injected handler interface (IRequestHandler&lt;TRequest, TResponse&gt;; DI picks the implementation at run time).
     /// </summary>
     public sealed record SendFact(Location Location, ITypeSymbol RequestType, string MethodName, string Container, ProjectId ProjectId,
-        SyntaxTree Tree, TextSpan Span, bool Notification = false);
+        SyntaxTree Tree, TextSpan Span, bool Notification = false, bool Inferred = false);
 
     public sealed class Facts
     {
@@ -142,8 +142,58 @@ public sealed class MediatRModule : IFrameworkModule
             }
         }
         await ResolveWrapperCallsAsync(context, facts, wrappers, ct).ConfigureAwait(false);
+        await ScanRequestArgumentsAsync(context, facts, ct).ConfigureAwait(false);
         return facts;
     }
+
+    /// <summary>
+    /// Any other call that receives a request object with a handler in source (a helper of a base controller shipped in a
+    /// package, a dispatcher interface without source, Mediator.Send through dynamic…): a likely dispatch, named after
+    /// the called method. Calls already found (Send, wrappers) are not repeated; constructors and the handlers' own
+    /// calls are not counted.
+    /// </summary>
+    private static async Task ScanRequestArgumentsAsync(FrameworkContext context, Facts facts, CancellationToken ct)
+    {
+        if (facts.Handlers.Count == 0) return;
+        // By identity across projects (a request type seen from the controller's project is another symbol instance).
+        var handled = facts.Handlers.Select(h => DefinitionKey(h.Request.OriginalDefinition)).ToHashSet(StringComparer.Ordinal);
+        var handlerTypes = facts.Handlers.Select(h => DefinitionKey(h.HandlerType.OriginalDefinition)).ToHashSet(StringComparer.Ordinal);
+        var seen = new HashSet<(SyntaxTree, TextSpan)>(facts.Sends.Select(x => (x.Tree, x.Span)));
+        foreach (var project in context.Projects)
+        {
+            var compilation = await project.GetCompilationAsync(ct).ConfigureAwait(false);
+            if (compilation == null || !compilation.References.Select(compilation.GetAssemblyOrModuleSymbol).OfType<IAssemblySymbol>().Any(a => ContractAssemblies.Contains(a.Identity.Name)))
+                continue;
+            foreach (var doc in project.Documents)
+            {
+                var root = await doc.GetSyntaxRootAsync(ct).ConfigureAwait(false);
+                if (root == null) continue;
+                SemanticModel? model = null;
+                foreach (var inv in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
+                {
+                    if (inv.ArgumentList.Arguments.Count == 0 || seen.Contains((inv.SyntaxTree, inv.Span))) continue;
+                    model ??= await doc.GetSemanticModelAsync(ct).ConfigureAwait(false);
+                    if (model == null) break;
+                    foreach (var arg in inv.ArgumentList.Arguments)
+                    {
+                        if (model.GetTypeInfo(arg.Expression, ct).Type is not INamedTypeSymbol t || t.TypeKind is not (TypeKind.Class or TypeKind.Struct)) continue;
+                        if (!handled.Contains(DefinitionKey(t.OriginalDefinition))) continue;
+                        var container = model.GetEnclosingSymbol(inv.SpanStart, ct)?.ContainingType;
+                        if (container != null && handlerTypes.Contains(DefinitionKey(container.OriginalDefinition))) continue;
+                        var notification = t.AllInterfaces.Any(i => INotification.Matches(i));
+                        var name = SymbolIdentity.InvokedName(inv) ?? "call";
+                        var at = inv.Expression is MemberAccessExpressionSyntax ma ? ma.Name.GetLocation() : inv.Expression.GetLocation();
+                        facts.Sends.Add(new SendFact(at, t, name, SymbolIdentity.CompositionRoot(model, inv, ct), project.Id, inv.SyntaxTree, inv.Span, notification, Inferred: true));
+                        seen.Add((inv.SyntaxTree, inv.Span));
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>A symbol's identity across compilations (as SymbolIdentity.SameDefinition compares it).</summary>
+    private static string DefinitionKey(ISymbol s) => (DocumentationCommentId.CreateDeclarationId(s) ?? s.ToDisplayString()) + "|" + s.ContainingAssembly?.Identity.Name;
 
     /// <summary>Records the enclosing method as a wrapper when <paramref name="argument"/> is one of its parameters.</summary>
     private static bool TryAddWrapper(SemanticModel model, ExpressionSyntax argument, string sendName, bool notification,
@@ -184,8 +234,11 @@ public sealed class MediatRModule : IFrameworkModule
                         if (SymbolIdentity.InvokedMethod(model, inv, ct) is not { } called) continue;
                         var target = (called.ReducedFrom ?? called).OriginalDefinition;
                         // An override or an implementation of the wrapper counts as the wrapper.
-                        var w = pending.FirstOrDefault(x => SymbolEqualityComparer.Default.Equals(x.Method, target)
-                            || SymbolEqualityComparer.Default.Equals(x.Method, target.OverriddenMethod?.OriginalDefinition));
+                        // By identity, not by symbol instance: the wrapper is often in another project (a shared base
+                        // controller) than the controllers that call it.
+                        var targetKey = DefinitionKey(target);
+                        var overriddenKey = target.OverriddenMethod is { } o ? DefinitionKey(o.OriginalDefinition) : null;
+                        var w = pending.FirstOrDefault(x => DefinitionKey(x.Method) == targetKey || DefinitionKey(x.Method) == overriddenKey);
                         if (w == null) continue;
                         var ordinal = called.ReducedFrom != null ? w.Ordinal - 1 : w.Ordinal;
                         if (ordinal < 0 || ordinal >= inv.ArgumentList.Arguments.Count) continue;
@@ -365,18 +418,22 @@ public sealed class MediatRModule : IFrameworkModule
                     ProviderRouteId));
                 continue;
             }
+            // Only through calls that merely receive the request (not Send or a wrapper seen in source): likely.
+            var inferred = sends.All(x => x.Inferred);
             foreach (var h in handlers)
             {
                 var limitations = new List<string>(versionLimit);
                 if (!isNotification && handlers.Count > 1)
                     limitations.Add($"{handlers.Count} source handlers found; which one runs depends on runtime registration.");
+                if (inferred)
+                    limitations.Add($"The request is passed to {string.Join(", ", sends.Select(x => x.MethodName).Distinct())}, whose Send is not in source (a package, an interface): the dispatch is assumed.");
                 result.Add(new FrameworkRelation(
                     isNotification ? RelationKinds.MediatRNotificationHandler : RelationKinds.MediatRHandler,
                     RelationGroups.Handlers,
                     new RelationTarget($"{request.Name} → {h.HandlerType.Name}", Symbol: h.HandlerType),
                     callEvidence.Append(new EvidenceItem($"{h.HandlerType.Name} implements {h.Interface.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}",
                         h.HandlerType.Locations.FirstOrDefault(l => l.IsInSource))).ToList(),
-                    confidence, limitations, ProviderRouteId));
+                    inferred ? Confidences.Likely : confidence, limitations, ProviderRouteId));
             }
         }
     }
