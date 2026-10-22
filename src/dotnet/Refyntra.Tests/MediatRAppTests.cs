@@ -155,6 +155,33 @@ public sealed class MediatRAppTests : IClassFixture<MediatRAppFixture>
     }
 
     [Fact]
+    public async Task AHelperOfABaseClassInAnotherProjectIsAWrapper()
+    {
+        var reports = _f.File("Orders.Api", "Controllers", "ReportsController.cs");
+        var h = Assert.Single(Relations(await RelatedAsync(reports, "CreateReportOrder()"), "mediatr.handler"));
+        Assert.Equal("CreateOrderCommand → CreateOrderCommandHandler", Label(h));
+        // Found as a wrapper (Send in source), not merely as a request passed somewhere: proven.
+        Assert.Equal("proven", h.GetProperty("confidence").GetString());
+    }
+
+    [Fact]
+    public async Task ARequestHandedToAnythingWithoutSourceIsALikelyDispatch()
+    {
+        // InvoicesController.Get passes new GetOrderQuery(id) to IRequestRunner.Run (no Send in source).
+        var invoices = _f.File("Orders.Api", "Controllers", "InvoicesController.cs");
+        var h = Assert.Single(Relations(await RelatedAsync(invoices, "Get(int id)"), "mediatr.handler"));
+        Assert.Equal("GetOrderQuery → GetOrderQueryHandler", Label(h));
+        Assert.Equal("likely", h.GetProperty("confidence").GetString());
+        Assert.Contains(h.GetProperty("limitations").EnumerateArray(), l => l.GetString()!.Contains("Run"));
+        // The handler lists it among its callers; the direct Send stays proven.
+        var callers = Relations(await RelatedAsync(GetOrder, "class GetOrderQueryHandler", 6), "mediatr.send").Select(Label).ToList();
+        Assert.Contains(callers, l => l.StartsWith("Run(GetOrderQuery) in") && l.Contains("InvoicesController.Get"));
+        Assert.Equal("proven", Assert.Single(Relations(await RelatedAsync(Controller, "GetOrder(int id)"), "mediatr.handler")).GetProperty("confidence").GetString());
+        // A method without a request: nothing.
+        Assert.Empty(Relations(await RelatedAsync(invoices, "Log(int id)"), "mediatr.handler"));
+    }
+
+    [Fact]
     public async Task AServiceThatSendsShowsTheHandler()
     {
         Assert.Equal("GetOrderQuery → GetOrderQueryHandler", Label(Assert.Single(Relations(await RelatedAsync(Pricing, "TotalWithTaxAsync("), "mediatr.handler"))));
