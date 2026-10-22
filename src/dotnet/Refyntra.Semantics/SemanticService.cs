@@ -64,6 +64,15 @@ public static class SemanticService
         return lazy.Value.WaitAsync(ct);
     }
 
+    /// <summary>
+    /// Starts every module's analysis in the background (once per solution, cached), so the first Related after a load
+    /// does not wait for MediatR, ASP.NET Core, DI and EF Core facts of every project.
+    /// </summary>
+    public static void Prewarm(Snapshot snapshot)
+    {
+        foreach (var module in Modules) _ = GetFactsAsync(snapshot, module, CancellationToken.None);
+    }
+
     public static string Completeness(Snapshot snapshot) =>
         snapshot.Session.Projects.All(p => p.State == ProjectStates.Loaded) ? "complete" : "partial";
 
@@ -322,12 +331,14 @@ public static class SemanticService
                 Array.Empty<EvidenceItem>(), Confidences.Proven, Array.Empty<string>(), ProviderRouteId));
         }
 
+        // The modules' facts in parallel (each is computed once per solution and cached).
         var factsByModule = new Dictionary<string, object>();
-        foreach (var module in Modules)
+        var pending = Modules.Select(m => GetFactsAsync(snapshot, m, ct)).ToArray();
+        await Task.WhenAll(pending).ConfigureAwait(false);
+        for (var i = 0; i < Modules.Length; i++)
         {
-            var facts = await GetFactsAsync(snapshot, module, ct).ConfigureAwait(false);
-            factsByModule[module.Id] = facts;
-            relations.AddRange(module.Relate(facts, subject, context));
+            factsByModule[Modules[i].Id] = pending[i].Result;
+            relations.AddRange(Modules[i].Relate(pending[i].Result, subject, context));
         }
 
         // Cross-framework: a MediatR Send/Publish call site inside a Minimal API handler or an MVC action links the request to that endpoint.

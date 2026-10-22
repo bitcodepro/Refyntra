@@ -124,6 +124,21 @@ public sealed class MediatRAppTests : IClassFixture<MediatRAppFixture>
     }
 
     [Fact]
+    public async Task AnActionThatCallsABaseControllerHelperShowsTheHandler()
+    {
+        // SettingsController.RefreshSettings → HandleRequest(new RefreshSettingsCommand()) → Sender.Send(request).
+        var settings = _f.File("Orders.Api", "Controllers", "SettingsController.cs");
+        var h = Assert.Single(Relations(await RelatedAsync(settings, "RefreshSettings(bool"), "mediatr.handler"));
+        Assert.Equal("RefreshSettingsCommand → RefreshSettingsCommandHandler", Label(h));
+        var refresh = _f.File("Orders.Application", "Features", "RefreshSettings.cs");
+        var callers = Relations(await RelatedAsync(refresh, "class RefreshSettingsCommandHandler", 6), "mediatr.send").Select(Label).ToList();
+        Assert.Contains(callers, l => l.StartsWith("HandleRequest(RefreshSettingsCommand) in") && l.Contains("SettingsController.RefreshSettings"));
+        // The helper itself sends no particular request.
+        var helper = _f.File("Orders.Api", "Controllers", "AppBaseController.cs");
+        Assert.Empty(Relations(await RelatedAsync(helper, "HandleRequest<TResponse>("), "mediatr.handler"));
+    }
+
+    [Fact]
     public async Task AServiceThatSendsShowsTheHandler()
     {
         Assert.Equal("GetOrderQuery → GetOrderQueryHandler", Label(Assert.Single(Relations(await RelatedAsync(Pricing, "TotalWithTaxAsync("), "mediatr.handler"))));

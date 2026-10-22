@@ -60,9 +60,13 @@ public sealed class MediatRModule : IFrameworkModule
         public int UnresolvedSendSites { get; set; }
     }
 
+    /// <summary>A method that forwards one of its parameters to Send / Publish (or to another wrapper).</summary>
+    private sealed record Wrapper(IMethodSymbol Method, int Ordinal, bool Notification);
+
     public async Task<object> AnalyzeAsync(FrameworkContext context, CancellationToken ct)
     {
         var facts = new Facts();
+        var wrappers = new Dictionary<IMethodSymbol, Wrapper>(SymbolEqualityComparer.Default);
         foreach (var project in context.Projects)
         {
             var compilation = await project.GetCompilationAsync(ct).ConfigureAwait(false);
@@ -125,7 +129,10 @@ public sealed class MediatRModule : IFrameworkModule
                     if (argType == null || argType.TypeKind is TypeKind.Interface or TypeKind.TypeParameter or TypeKind.Error
                         || argType.SpecialType == SpecialType.System_Object)
                     {
-                        facts.UnresolvedSendSites++;
+                        // Send(request) where request is a parameter of the enclosing method: that method is a wrapper
+                        // (a base controller's HandleRequest<T>(T request), an extension method…); its callers name the type.
+                        if (!TryAddWrapper(model, inv.ArgumentList.Arguments[0].Expression, name, name == "Publish", wrappers, ct))
+                            facts.UnresolvedSendSites++;
                         continue;
                     }
                     var location = inv.Expression is MemberAccessExpressionSyntax ma ? ma.Name.GetLocation() : inv.GetLocation();
@@ -134,7 +141,70 @@ public sealed class MediatRModule : IFrameworkModule
                 }
             }
         }
+        await ResolveWrapperCallsAsync(context, facts, wrappers, ct).ConfigureAwait(false);
         return facts;
+    }
+
+    /// <summary>Records the enclosing method as a wrapper when <paramref name="argument"/> is one of its parameters.</summary>
+    private static bool TryAddWrapper(SemanticModel model, ExpressionSyntax argument, string sendName, bool notification,
+        Dictionary<IMethodSymbol, Wrapper> wrappers, CancellationToken ct)
+    {
+        var expr = argument;
+        while (expr is CastExpressionSyntax c) expr = c.Expression;
+        while (expr is ParenthesizedExpressionSyntax p) expr = p.Expression;
+        if (model.GetSymbolInfo(expr, ct).Symbol is not IParameterSymbol parameter) return false;
+        if (parameter.ContainingSymbol is not IMethodSymbol method || method.MethodKind is MethodKind.AnonymousFunction or MethodKind.LambdaMethod) return false;
+        var key = method.OriginalDefinition;
+        if (!wrappers.ContainsKey(key)) wrappers[key] = new Wrapper(key, parameter.Ordinal, notification);
+        return true;
+    }
+
+    /// <summary>
+    /// Calls of the wrappers (and of wrappers of wrappers, a few levels): the request type comes from the call's
+    /// argument, e.g. <c>HandleRequest(new RefreshSettingsCommand())</c> in a controller derived from a base
+    /// controller whose HandleRequest&lt;T&gt; sends it.
+    /// </summary>
+    private static async Task ResolveWrapperCallsAsync(FrameworkContext context, Facts facts, Dictionary<IMethodSymbol, Wrapper> wrappers, CancellationToken ct)
+    {
+        var done = new HashSet<IMethodSymbol>(SymbolEqualityComparer.Default);
+        var seen = new HashSet<(SyntaxTree, TextSpan)>(facts.Sends.Select(x => (x.Tree, x.Span)));
+        for (var level = 0; level < 4; level++)
+        {
+            var pending = wrappers.Values.Where(w => !done.Contains(w.Method)).ToList();
+            if (pending.Count == 0) break;
+            foreach (var w in pending) done.Add(w.Method);
+            var names = pending.Select(w => w.Method.Name).Distinct().ToArray();
+            foreach (var project in context.Projects)
+            {
+                foreach (var (_, root, model) in await SymbolIdentity.DocumentsContainingAsync(project, names, ct).ConfigureAwait(false))
+                {
+                    foreach (var inv in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
+                    {
+                        if (SymbolIdentity.InvokedName(inv) is not { } n || Array.IndexOf(names, n) < 0) continue;
+                        if (SymbolIdentity.InvokedMethod(model, inv, ct) is not { } called) continue;
+                        var target = (called.ReducedFrom ?? called).OriginalDefinition;
+                        // An override or an implementation of the wrapper counts as the wrapper.
+                        var w = pending.FirstOrDefault(x => SymbolEqualityComparer.Default.Equals(x.Method, target)
+                            || SymbolEqualityComparer.Default.Equals(x.Method, target.OverriddenMethod?.OriginalDefinition));
+                        if (w == null) continue;
+                        var ordinal = called.ReducedFrom != null ? w.Ordinal - 1 : w.Ordinal;
+                        if (ordinal < 0 || ordinal >= inv.ArgumentList.Arguments.Count) continue;
+                        var argExpr = inv.ArgumentList.Arguments[ordinal].Expression;
+                        var argType = model.GetTypeInfo(argExpr, ct).Type;
+                        if (argType == null || argType.TypeKind is TypeKind.Interface or TypeKind.TypeParameter or TypeKind.Error
+                            || argType.SpecialType == SpecialType.System_Object)
+                        {
+                            TryAddWrapper(model, argExpr, n, w.Notification, wrappers, ct);
+                            continue;
+                        }
+                        if (!seen.Add((inv.SyntaxTree, inv.Span))) continue;
+                        var location = inv.Expression is MemberAccessExpressionSyntax ma ? ma.Name.GetLocation() : inv.Expression.GetLocation();
+                        facts.Sends.Add(new SendFact(location, argType, n, SymbolIdentity.CompositionRoot(model, inv, ct), project.Id,
+                            inv.SyntaxTree, inv.Span, w.Notification));
+                    }
+                }
+            }
+        }
     }
 
     private static bool IsVerifiedVersion(AssemblyIdentity id) => id.Name switch
