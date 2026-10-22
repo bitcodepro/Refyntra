@@ -514,6 +514,81 @@
         "icon": "$(play)"
       },
       {
+        "command": "refyntra.git.open",
+        "title": "Open Git",
+        "category": "Refyntra",
+        "icon": "$(git-merge)"
+      },
+      {
+        "command": "refyntra.git.refresh",
+        "title": "Refresh Git",
+        "category": "Refyntra",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "refyntra.git.fetch",
+        "title": "Git: Fetch",
+        "category": "Refyntra",
+        "icon": "$(sync)",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "refyntra.git.pull",
+        "title": "Git: Pull",
+        "category": "Refyntra",
+        "icon": "$(arrow-down)",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "refyntra.git.push",
+        "title": "Git: Push",
+        "category": "Refyntra",
+        "icon": "$(arrow-up)",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "refyntra.git.checkout",
+        "title": "Git: Checkout…",
+        "category": "Refyntra",
+        "icon": "$(git-branch)",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "refyntra.git.newBranch",
+        "title": "Git: New Branch…",
+        "category": "Refyntra",
+        "icon": "$(add)",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "refyntra.git.createPullRequest",
+        "title": "Git: Create Pull Request",
+        "category": "Refyntra",
+        "icon": "$(git-pull-request-create)",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "refyntra.git.openInEditor",
+        "title": "Open Git in Editor",
+        "category": "Refyntra",
+        "icon": "$(link-external)",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "refyntra.git.fetchAll",
+        "title": "Git: Fetch All Repositories",
+        "category": "Refyntra",
+        "icon": "$(sync)",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "refyntra.git.pullAll",
+        "title": "Git: Pull All Repositories",
+        "category": "Refyntra",
+        "icon": "$(cloud-download)",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
         "command": "refyntra.git.history",
         "title": "Show History (Git)",
         "category": "Refyntra",
@@ -1460,6 +1535,56 @@
           "group": "1_run@0"
         },
         {
+          "command": "refyntra.git.refresh",
+          "when": "view == refyntra.gitView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "refyntra.git.openInEditor",
+          "when": "view == refyntra.gitView",
+          "group": "navigation@0"
+        },
+        {
+          "command": "refyntra.git.fetchAll",
+          "when": "view == refyntra.gitView",
+          "group": "1_sync@4"
+        },
+        {
+          "command": "refyntra.git.pullAll",
+          "when": "view == refyntra.gitView",
+          "group": "1_sync@5"
+        },
+        {
+          "command": "refyntra.git.fetch",
+          "when": "view == refyntra.gitView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "refyntra.git.pull",
+          "when": "view == refyntra.gitView",
+          "group": "1_sync@2"
+        },
+        {
+          "command": "refyntra.git.push",
+          "when": "view == refyntra.gitView",
+          "group": "1_sync@3"
+        },
+        {
+          "command": "refyntra.git.checkout",
+          "when": "view == refyntra.gitView",
+          "group": "2_branch@1"
+        },
+        {
+          "command": "refyntra.git.newBranch",
+          "when": "view == refyntra.gitView",
+          "group": "2_branch@2"
+        },
+        {
+          "command": "refyntra.git.createPullRequest",
+          "when": "view == refyntra.gitView",
+          "group": "3_github@1"
+        },
+        {
           "command": "refyntra.run.showHidden",
           "when": "view == refyntra.runView && !refyntra.run.showHidden",
           "group": "2_view@1"
@@ -2154,6 +2279,11 @@
           "id": "refyntraRun",
           "title": "Refyntra Run",
           "icon": "media/refyntra-run.svg"
+        },
+        {
+          "id": "refyntraGit",
+          "title": "Refyntra Git",
+          "icon": "media/refyntra-git.svg"
         }
       ],
       "panel": [
@@ -2165,6 +2295,14 @@
       ]
     },
     "views": {
+      "refyntraGit": [
+        {
+          "type": "webview",
+          "id": "refyntra.gitView",
+          "name": "Refyntra Git",
+          "contextualTitle": "Refyntra"
+        }
+      ],
       "refyntraRun": [
         {
           "id": "refyntra.runView",
@@ -2678,6 +2816,12 @@
           "type": "boolean",
           "default": true,
           "description": "CodeLens: ASP.NET Core endpoints (\"GET /api/... · N frontend calls\")."
+        },
+        "refyntra.git.autoFetch": {
+          "type": "number",
+          "default": 5,
+          "minimum": 0,
+          "markdownDescription": "Minutes between background fetches of every repository of the workspace (the Git tab then shows incoming commits, ↓N, and a badge). `0` turns it off. Never pulls by itself."
         },
         "refyntra.codeLens.authors": {
           "type": "boolean",

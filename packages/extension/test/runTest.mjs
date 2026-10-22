@@ -435,6 +435,8 @@ const scenarios = visual
         trusted: true,
         env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' },
       },
+      // The Git tab as a client: a local bare repository as origin, a second clone as a colleague.
+      { name: 'git-client', fixtureCopy: ['Runnable', 'Runnable.sln'], trusted: true, env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' } },
       // Git history and authorship on a temp copy turned into a repository by the test (two authors).
       { name: 'git-history', fixtureCopy: ['Runnable', 'Runnable.sln'], trusted: true, env: { REFYNTRA_HOST_PATH: process.env.REFYNTRA_HOST_PATH ?? '' } },
       // Blazor WebAssembly: Run (development server, browser URL) and Debug (js-debug browser session through the debugging proxy).

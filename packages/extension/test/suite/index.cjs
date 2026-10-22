@@ -1687,6 +1687,213 @@ scenarios['git-history'] = [
       assert.ok(titles.some((t) => /\$\(person\) Bob, /.test(t)), titles.join(' | '));
     },
   ],
+  [
+    'Git tab: branches with their state, the graph shows where a branch was cut and merged; stage, unstage and commit from the tab',
+    async () => {
+      const a = await api();
+      const root = vscode.workspace.workspaceFolders[0].uri.fsPath;
+      const { execFileSync } = require('node:child_process');
+      const env = { ...process.env, GIT_AUTHOR_NAME: 'Carol', GIT_AUTHOR_EMAIL: 'c@example.com', GIT_COMMITTER_NAME: 'Carol', GIT_COMMITTER_EMAIL: 'c@example.com' };
+      const git = (...args) => String(execFileSync('git', args, { cwd: root, env }));
+      const main = git('rev-parse', '--abbrev-ref', 'HEAD').trim();
+      // The tab commits as the repository's user (no identity in the test container otherwise).
+      git('config', 'user.name', 'Carol');
+      git('config', 'user.email', 'c@example.com');
+      git('switch', '-q', '-c', 'feature/greeting');
+      fs.writeFileSync(nodePath.join(root, 'ConsoleApp', 'Greeting.cs'), 'public static class Greeting { public const string Text = "hi"; }\n');
+      git('add', '-A');
+      git('commit', '-q', '-m', 'Add Greeting');
+      git('switch', '-q', main);
+      fs.writeFileSync(nodePath.join(root, 'notes.txt'), 'main work\n');
+      git('add', '-A');
+      git('commit', '-q', '-m', 'Main work');
+      git('merge', '-q', '--no-ff', '-m', 'Merge feature/greeting', 'feature/greeting');
+      await vscode.commands.executeCommand('refyntra.git.open');
+      const m = await a.gitView.refresh();
+      assert.equal(m.error, undefined, m.error);
+      assert.deepEqual(m.branches.map((b) => b.name).sort(), [main, 'feature/greeting'].sort());
+      assert.ok(m.branches.find((b) => b.name === main).current);
+      const merge = m.rows.find((r) => r.commit.subject === 'Merge feature/greeting');
+      assert.ok(merge, 'the merge commit is in the graph');
+      assert.equal(merge.commit.parents.length, 2);
+      assert.deepEqual(merge.out.length, 2, 'two lines leave the merge: main and the merged branch');
+      assert.ok(merge.commit.refs.some((r) => r.includes(main)), JSON.stringify(merge.commit.refs));
+      const tip = m.rows.find((r) => r.commit.subject === 'Add Greeting');
+      assert.ok(tip.commit.refs.includes('feature/greeting'), JSON.stringify(tip.commit.refs));
+      assert.notEqual(tip.lane, merge.lane, 'the branch has its own lane');
+      // The fork point (Bob's commit): the branch line and main meet there.
+      const fork = m.rows.find((r) => r.commit.subject === 'Add Triple');
+      assert.ok(fork.into.length >= 2, `the fork commit joins two lines: ${JSON.stringify(fork.into)}`);
+      // Stage, unstage, commit.
+      fs.appendFileSync(nodePath.join(root, 'notes.txt'), 'more\n');
+      let w = await a.gitView.refresh();
+      assert.deepEqual(w.changes.map((c) => `${c.staged ? 'S' : 'W'}:${c.status}:${c.path}`), ['W:M:notes.txt']);
+      await a.gitView.stage(['notes.txt']);
+      assert.deepEqual(a.gitView.model().changes.map((c) => `${c.staged ? 'S' : 'W'}:${c.path}`), ['S:notes.txt']);
+      await a.gitView.unstage(['notes.txt']);
+      assert.deepEqual(a.gitView.model().changes.map((c) => `${c.staged ? 'S' : 'W'}:${c.path}`), ['W:notes.txt']);
+      await a.gitView.stage(['notes.txt']);
+      assert.equal(await a.gitView.commit('Notes from the Git tab'), true);
+      assert.deepEqual(a.gitView.model().changes, []);
+      assert.equal(git('log', '-1', '--format=%s').trim(), 'Notes from the Git tab');
+      assert.equal(a.gitView.model().rows[0].commit.subject, 'Notes from the Git tab');
+      // A commit opens in the editor area with its files.
+      const details = await a.gitView.commitDetails(a.gitView.model().rows[0].commit.sha);
+      assert.deepEqual(details.files.map((f) => [f.path, f.added, f.deleted]), [['notes.txt', 1, 0]]);
+      const panel = await a.gitView.commits.show(details.sha);
+      assert.ok(panel, 'commit pane');
+      panel.dispose();
+    },
+  ],
+];
+
+scenarios['git-client'] = [
+  [
+    'Git client: publish, fetch, pull, checkout (local and remote), new branch, merge, delete, discard, search, commit details with a diff, pull requests (fake GitHub)',
+    async () => {
+      const a = await api();
+      const g = a.gitView;
+      const root = vscode.workspace.workspaceFolders[0].uri.fsPath;
+      const os = require('node:os');
+      const { execFileSync } = require('node:child_process');
+      const env = { ...process.env, GIT_AUTHOR_NAME: 'Dana', GIT_AUTHOR_EMAIL: 'd@example.com', GIT_COMMITTER_NAME: 'Dana', GIT_COMMITTER_EMAIL: 'd@example.com' };
+      const git = (cwd, ...args) => String(execFileSync('git', args, { cwd, env }));
+      const remote = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'refyntra-origin-'));
+      const other = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'refyntra-colleague-'));
+      try {
+        git(remote, 'init', '-q', '--bare', '-b', 'main');
+        git(root, 'init', '-q', '-b', 'main');
+        git(root, 'config', 'user.name', 'Dana');
+        git(root, 'config', 'user.email', 'd@example.com');
+        git(root, 'remote', 'add', 'origin', remote);
+        git(root, 'add', '-A');
+        git(root, 'commit', '-q', '-m', 'Initial import');
+        await vscode.commands.executeCommand('refyntra.git.open');
+        let m = await g.refresh();
+        assert.equal(m.head, 'main');
+        assert.equal(m.branches[0].upstream, undefined, 'not published yet');
+        // Publish: push -u origin main.
+        assert.equal(await g.push(), true, g.lastError);
+        m = g.model();
+        assert.equal(m.branches.find((b) => b.name === 'main').upstream, 'origin/main');
+        // A colleague pushes; fetch shows main behind by one, pull brings it.
+        git(other, 'clone', '-q', remote, 'c');
+        const c = nodePath.join(other, 'c');
+        fs.writeFileSync(nodePath.join(c, 'COLLEAGUE.md'), 'from the colleague\n');
+        git(c, 'add', '-A');
+        git(c, 'commit', '-q', '-m', 'Colleague: add notes with Zebra');
+        git(c, 'push', '-q', 'origin', 'main');
+        assert.equal(await g.fetch(), true, g.lastError);
+        assert.equal(g.model().branches.find((b) => b.name === 'main').behind, 1);
+        assert.equal(await g.pull(), true, g.lastError);
+        assert.ok(fs.existsSync(nodePath.join(root, 'COLLEAGUE.md')), 'pulled');
+        assert.equal(g.model().branches.find((b) => b.name === 'main').behind, 0);
+        // A remote-only branch: checkout creates the local tracking branch.
+        git(c, 'switch', '-q', '-c', 'remote-work');
+        fs.writeFileSync(nodePath.join(c, 'REMOTE.md'), 'remote work\n');
+        git(c, 'add', '-A');
+        git(c, 'commit', '-q', '-m', 'Remote work');
+        git(c, 'push', '-q', 'origin', 'remote-work');
+        await g.fetch();
+        assert.ok(g.model().remoteBranches.includes('origin/remote-work'), JSON.stringify(g.model().remoteBranches));
+        assert.equal(await g.checkout('origin/remote-work'), true, g.lastError);
+        assert.equal(g.model().head, 'remote-work');
+        assert.equal(g.model().branches.find((b) => b.name === 'remote-work').upstream, 'origin/remote-work');
+        assert.equal(await g.checkout('main'), true, g.lastError);
+        // New branch, a commit on it, merge into main, delete it.
+        assert.equal(await g.createBranch('feature/zoo'), true, g.lastError);
+        assert.equal(g.model().head, 'feature/zoo');
+        fs.writeFileSync(nodePath.join(root, 'ConsoleApp', 'Zoo.cs'), 'public static class Zoo { public const string Animal = "Zebra"; }\n');
+        await g.stage(['ConsoleApp/Zoo.cs']);
+        assert.equal(await g.commit('Add the zoo'), true, g.lastError);
+        assert.equal(await g.checkout('main'), true);
+        g.hooks.confirm = true;
+        assert.equal(await g.mergeBranch('feature/zoo'), true, g.lastError);
+        assert.ok(fs.existsSync(nodePath.join(root, 'ConsoleApp', 'Zoo.cs')), 'merged');
+        assert.equal(await g.deleteBranch('feature/zoo'), true, g.lastError);
+        assert.ok(!g.model().branches.some((b) => b.name === 'feature/zoo'));
+        // Option-like names are refused before git sees them.
+        assert.equal(await g.checkout('--orphan'), false);
+        // Discard: a tracked change is restored, an untracked file deleted.
+        const calc = nodePath.join(root, 'ConsoleApp', 'Calc.cs');
+        const before = fs.readFileSync(calc, 'utf8');
+        fs.writeFileSync(calc, before + '// scratch\n');
+        fs.writeFileSync(nodePath.join(root, 'scratch.txt'), 'x');
+        await g.refresh();
+        assert.equal(await g.discard(['ConsoleApp/Calc.cs', 'scratch.txt']), true);
+        assert.equal(fs.readFileSync(calc, 'utf8'), before);
+        assert.ok(!fs.existsSync(nodePath.join(root, 'scratch.txt')));
+        // Search: message, code change, author, one branch.
+        assert.deepEqual((await g.runSearch('zebra', 'message')).map((r) => r.commit.subject), ['Colleague: add notes with Zebra']);
+        assert.deepEqual((await g.runSearch('Zebra', 'code')).map((r) => r.commit.subject), ['Add the zoo']);
+        assert.ok((await g.runSearch('dana', 'author')).length >= 3);
+        assert.deepEqual((await g.runSearch('Remote', 'message', 'origin/remote-work')).map((r) => r.commit.subject), ['Remote work']);
+        assert.equal(g.model().search.rows.length, 1);
+        await g.clearSearch();
+        assert.equal(g.model().search, undefined);
+        // Commit details: files with counts and a diff with line numbers.
+        const zoo = g.model().rows.find((r) => r.commit.subject === 'Add the zoo').commit.sha;
+        const d = await g.commitDetails(zoo);
+        assert.deepEqual(d.files.map((f) => [f.path, f.added, f.deleted]), [['ConsoleApp/Zoo.cs', 1, 0]]);
+        const patch = await g.filePatch(d.parent, d.sha, 'ConsoleApp/Zoo.cs');
+        assert.deepEqual(patch.filter((l) => l.kind === 'add').map((l) => [l.new, l.text.includes('Zebra')]), [[1, true]]);
+        const panel = await g.commits.show(zoo);
+        assert.ok(panel && panel.title.startsWith('Commit '), 'the commit opens in the editor area');
+        panel.dispose();
+        // Pull All / Fetch All over every repository; the main button turns into Push after a commit.
+        fs.writeFileSync(nodePath.join(c, 'MORE.md'), 'more from the colleague\n');
+        git(c, 'switch', '-q', 'main');
+        git(c, 'add', '-A');
+        git(c, 'commit', '-q', '-m', 'Colleague: more');
+        git(c, 'push', '-q', 'origin', 'main');
+        const fetched = await g.allRepos('fetch', true);
+        assert.deepEqual(fetched.map((r) => r.ok), [true]);
+        assert.equal(g.model().states[0].behind, 1, JSON.stringify(g.model().states));
+        const pulled = await g.allRepos('pull', true);
+        assert.deepEqual(pulled.map((r) => r.ok), [true], JSON.stringify(pulled));
+        assert.ok(fs.existsSync(nodePath.join(root, 'MORE.md')), 'pulled by Pull All');
+        assert.equal(g.model().states[0].behind, 0);
+        // The full-width client in an editor tab shares the same state.
+        const editorTab = g.openInEditor();
+        assert.equal(editorTab.title, 'Refyntra Git');
+        editorTab.dispose();
+        // Pull requests against a fake GitHub (no network): origin must be on GitHub.
+        git(root, 'remote', 'set-url', 'origin', 'https://github.com/acme/shop.git');
+        git(root, 'remote', 'set-url', '--push', 'origin', remote);
+        await g.refresh();
+        assert.deepEqual(g.model().github, { owner: 'acme', repo: 'shop' });
+        const calls = [];
+        const pr = (n, head) => ({ number: n, title: 'PR ' + n, html_url: 'https://github.com/acme/shop/pull/' + n, user: { login: 'dana' }, head: { ref: head }, base: { ref: 'main' } });
+        g.hooks.fetch = async (url, init) => {
+          calls.push(init.method + ' ' + url.replace('https://api.github.com/repos/acme/shop', ''));
+          const ok = (body) => ({ ok: true, status: 200, json: async () => body, text: async () => '' });
+          if (init.method === 'GET' && url.endsWith('/pulls?state=open&per_page=50')) return ok([pr(5, 'remote-work')]);
+          if (init.method === 'GET' && url.endsWith('/repos/acme/shop')) return ok({ default_branch: 'main' });
+          if (init.method === 'POST') return ok(pr(6, JSON.parse(init.body).head));
+          if (init.method === 'PUT') return ok({ sha: 'abc', merged: true, message: 'ok' });
+          return { ok: false, status: 404, json: async () => ({ message: 'Not Found' }), text: async () => '' };
+        };
+        {
+          const prs = await g.loadPulls();
+          assert.deepEqual(prs.map((p) => [p.number, p.head]), [[5, 'remote-work']]);
+          assert.equal(await g.createBranch('feature/pr'), true);
+          g.hooks.inputs = ['main', 'My PR', 'Body'];
+          const created = await g.createPull();
+          assert.equal(created.number, 6);
+          assert.ok(calls.includes('POST /pulls'), calls.join(', '));
+          assert.equal(await g.mergePull(5), true);
+          assert.ok(calls.includes('PUT /pulls/5/merge'), calls.join(', '));
+        }
+      } finally {
+        g.hooks.confirm = undefined;
+        g.hooks.inputs = undefined;
+        g.hooks.github = undefined;
+        g.hooks.fetch = undefined;
+        fs.rmSync(remote, { recursive: true, force: true });
+        fs.rmSync(other, { recursive: true, force: true });
+      }
+    },
+  ],
 ];
 
 scenarios['run-multi-solution'] = [

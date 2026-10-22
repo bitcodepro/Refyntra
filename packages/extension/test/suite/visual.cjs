@@ -734,6 +734,56 @@ exports.cases = ({ api, csharp, waitFor }) => {
         await reset();
       },
     ],
+    [
+      'visual: git-tab — the Refyntra Git tab (a change to stage, branches, the graph with a branch cut from main and merged back), then a commit with its diff',
+      async () => {
+        const a = await ready();
+        await reset();
+        // The last case: the copy becomes a repository with fixed dates and authors (nothing after it depends on that).
+        const root = vscode.workspace.workspaceFolders[0].uri.fsPath;
+        const { execFileSync } = require('node:child_process');
+        let t = 1700000000;
+        const git = (...args) => {
+          t += 3600;
+          const env = { ...process.env, GIT_AUTHOR_DATE: `${t} +0000`, GIT_COMMITTER_DATE: `${t} +0000` };
+          return String(execFileSync('git', args, { cwd: root, env }));
+        };
+        git('init', '-q', '-b', 'main');
+        git('config', 'user.name', 'Alice');
+        git('config', 'user.email', 'a@example.com');
+        git('add', '-A');
+        git('commit', '-q', '-m', 'Shop: orders API');
+        git('switch', '-q', '-c', 'feature/cancel');
+        fs.appendFileSync(path.join(root, 'README.md'), 'Cancel orders\n');
+        git('add', '-A');
+        git('commit', '-q', '-m', 'Cancel order endpoint');
+        git('switch', '-q', 'main');
+        fs.appendFileSync(path.join(root, 'NOTES.md'), 'Release notes\n');
+        git('add', '-A');
+        git('commit', '-q', '-m', 'Release notes');
+        git('merge', '-q', '--no-ff', '-m', 'Merge feature/cancel', 'feature/cancel');
+        git('switch', '-q', '-c', 'feature/audit');
+        fs.appendFileSync(path.join(root, 'NOTES.md'), 'Audit\n');
+        git('commit', '-q', '-am', 'Audit log');
+        git('switch', '-q', 'main');
+        fs.appendFileSync(path.join(root, 'NOTES.md'), 'Draft\n');
+        await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+        await vscode.commands.executeCommand('refyntra.git.open');
+        const m = await a.gitView.refresh();
+        assert.equal(m.rows.length, 5, JSON.stringify(m.rows.map((r) => r.commit.subject)));
+        await shot('git-tab', 2500);
+        // A commit in the editor area: files with +/- and the coloured diff.
+        const commit = m.rows.find((r) => r.commit.subject === 'Cancel order endpoint').commit.sha;
+        const panel = await a.gitView.commits.show(commit);
+        await shot('git-commit', 3000);
+        panel.dispose();
+        // The full-width client in an editor tab.
+        const editorTab = a.gitView.openInEditor();
+        await vscode.commands.executeCommand('workbench.action.closeSidebar');
+        await shot('git-editor', 3000);
+        editorTab.dispose();
+      },
+    ],
   ];
   // REFYNTRA_VISUAL_ONLY=codelens,find: only these screenshots (local debugging); the window setup always runs.
   return only.length ? cases.filter(([title], i) => i === 0 || only.some((o) => title.startsWith(`visual: ${o} `))) : cases;
