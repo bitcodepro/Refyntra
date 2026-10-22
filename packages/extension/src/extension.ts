@@ -57,6 +57,7 @@ import { type DebugExtras, registerDebugExtras } from './debugExtras';
 import { type CSharpEvaluatableExpressionProvider, type CSharpInlineValuesProvider, registerInlineValues } from './inlineValues';
 import { type RefyntraCodeLensProvider, registerCodeLens } from './codeLens';
 import { type GitApi, registerGit } from './git';
+import { type GitViewProvider, registerGitView } from './gitView';
 import { registerHierarchy } from './hierarchy';
 import { registerMediatRHover } from './hover';
 import { ChangeSignatureDialog } from './changeSignaturePanel';
@@ -146,6 +147,7 @@ export interface RefyntraTestApi {
   /** CodeLens provider (e2e resolves lenses and reads scan times). */
   codeLens: RefyntraCodeLensProvider;
   git: GitApi;
+  gitView: GitViewProvider;
   /** The open Change Signature dialog (e2e drives it through the same message path as the page). */
   changeSignatureDialog(): ChangeSignatureDialog | undefined;
   /** Status bar state: loading / ready / problem / idle. */
@@ -399,6 +401,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
   const taskContext = registerTaskContext(engine, context.workspaceState, related);
   const codeLens = registerCodeLens(engine);
   const git = registerGit(context, isTrusted);
+  const gitView = registerGitView(context, isTrusted);
   context.subscriptions.push(codeLens.disposable);
   // Find Usages grouped (protocol 1.12) and Navigate To (Alt+`).
   const usages = registerUsages(engine, context.workspaceState);
@@ -551,6 +554,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     webFrameworks: { status: () => web.service.status(), launches: () => web.launches.map((l) => ({ command: l.command, args: [...l.args] })) },
     codeLens: codeLens.provider,
     git,
+    gitView,
     changeSignatureDialog: () => ChangeSignatureDialog.current,
     statusKind: () => statusBar.kind(),
     run: run.service,

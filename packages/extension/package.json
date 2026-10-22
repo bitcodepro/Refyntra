@@ -514,6 +514,18 @@
         "icon": "$(play)"
       },
       {
+        "command": "refyntra.git.open",
+        "title": "Open Git",
+        "category": "Refyntra",
+        "icon": "$(git-merge)"
+      },
+      {
+        "command": "refyntra.git.refresh",
+        "title": "Refresh Git",
+        "category": "Refyntra",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "refyntra.git.history",
         "title": "Show History (Git)",
         "category": "Refyntra",
@@ -1460,6 +1472,11 @@
           "group": "1_run@0"
         },
         {
+          "command": "refyntra.git.refresh",
+          "when": "view == refyntra.gitView",
+          "group": "navigation@1"
+        },
+        {
           "command": "refyntra.run.showHidden",
           "when": "view == refyntra.runView && !refyntra.run.showHidden",
           "group": "2_view@1"
@@ -2154,6 +2171,11 @@
           "id": "refyntraRun",
           "title": "Refyntra Run",
           "icon": "media/refyntra-run.svg"
+        },
+        {
+          "id": "refyntraGit",
+          "title": "Refyntra Git",
+          "icon": "media/refyntra-git.svg"
         }
       ],
       "panel": [
@@ -2165,6 +2187,14 @@
       ]
     },
     "views": {
+      "refyntraGit": [
+        {
+          "type": "webview",
+          "id": "refyntra.gitView",
+          "name": "Refyntra Git",
+          "contextualTitle": "Refyntra"
+        }
+      ],
       "refyntraRun": [
         {
           "id": "refyntra.runView",

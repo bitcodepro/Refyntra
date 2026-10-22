@@ -1687,6 +1687,62 @@ scenarios['git-history'] = [
       assert.ok(titles.some((t) => /\$\(person\) Bob, /.test(t)), titles.join(' | '));
     },
   ],
+  [
+    'Git tab: branches with their state, the graph shows where a branch was cut and merged; stage, unstage and commit from the tab',
+    async () => {
+      const a = await api();
+      const root = vscode.workspace.workspaceFolders[0].uri.fsPath;
+      const { execFileSync } = require('node:child_process');
+      const env = { ...process.env, GIT_AUTHOR_NAME: 'Carol', GIT_AUTHOR_EMAIL: 'c@example.com', GIT_COMMITTER_NAME: 'Carol', GIT_COMMITTER_EMAIL: 'c@example.com' };
+      const git = (...args) => String(execFileSync('git', args, { cwd: root, env }));
+      const main = git('rev-parse', '--abbrev-ref', 'HEAD').trim();
+      // The tab commits as the repository's user (no identity in the test container otherwise).
+      git('config', 'user.name', 'Carol');
+      git('config', 'user.email', 'c@example.com');
+      git('switch', '-q', '-c', 'feature/greeting');
+      fs.writeFileSync(nodePath.join(root, 'ConsoleApp', 'Greeting.cs'), 'public static class Greeting { public const string Text = "hi"; }\n');
+      git('add', '-A');
+      git('commit', '-q', '-m', 'Add Greeting');
+      git('switch', '-q', main);
+      fs.writeFileSync(nodePath.join(root, 'notes.txt'), 'main work\n');
+      git('add', '-A');
+      git('commit', '-q', '-m', 'Main work');
+      git('merge', '-q', '--no-ff', '-m', 'Merge feature/greeting', 'feature/greeting');
+      await vscode.commands.executeCommand('refyntra.git.open');
+      const m = await a.gitView.refresh();
+      assert.equal(m.error, undefined, m.error);
+      assert.deepEqual(m.branches.map((b) => b.name).sort(), [main, 'feature/greeting'].sort());
+      assert.ok(m.branches.find((b) => b.name === main).current);
+      const merge = m.rows.find((r) => r.commit.subject === 'Merge feature/greeting');
+      assert.ok(merge, 'the merge commit is in the graph');
+      assert.equal(merge.commit.parents.length, 2);
+      assert.deepEqual(merge.out.length, 2, 'two lines leave the merge: main and the merged branch');
+      assert.ok(merge.commit.refs.some((r) => r.includes(main)), JSON.stringify(merge.commit.refs));
+      const tip = m.rows.find((r) => r.commit.subject === 'Add Greeting');
+      assert.ok(tip.commit.refs.includes('feature/greeting'), JSON.stringify(tip.commit.refs));
+      assert.notEqual(tip.lane, merge.lane, 'the branch has its own lane');
+      // The fork point (Bob's commit): the branch line and main meet there.
+      const fork = m.rows.find((r) => r.commit.subject === 'Add Triple');
+      assert.ok(fork.into.length >= 2, `the fork commit joins two lines: ${JSON.stringify(fork.into)}`);
+      // Stage, unstage, commit.
+      fs.appendFileSync(nodePath.join(root, 'notes.txt'), 'more\n');
+      let w = await a.gitView.refresh();
+      assert.deepEqual(w.changes.map((c) => `${c.staged ? 'S' : 'W'}:${c.status}:${c.path}`), ['W:M:notes.txt']);
+      await a.gitView.stage(['notes.txt']);
+      assert.deepEqual(a.gitView.model().changes.map((c) => `${c.staged ? 'S' : 'W'}:${c.path}`), ['S:notes.txt']);
+      await a.gitView.unstage(['notes.txt']);
+      assert.deepEqual(a.gitView.model().changes.map((c) => `${c.staged ? 'S' : 'W'}:${c.path}`), ['W:notes.txt']);
+      await a.gitView.stage(['notes.txt']);
+      assert.equal(await a.gitView.commit('Notes from the Git tab'), true);
+      assert.deepEqual(a.gitView.model().changes, []);
+      assert.equal(git('log', '-1', '--format=%s').trim(), 'Notes from the Git tab');
+      assert.equal(a.gitView.model().rows[0].commit.subject, 'Notes from the Git tab');
+      // A commit's files open as a diff.
+      assert.equal(await a.gitView.showCommit(a.gitView.model().rows[0].commit.sha, async (items) => items[0]), 1);
+      await waitFor(() => vscode.window.tabGroups.activeTabGroup.activeTab?.input instanceof vscode.TabInputTextDiff, 'the commit diff', 20000);
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    },
+  ],
 ];
 
 scenarios['run-multi-solution'] = [
