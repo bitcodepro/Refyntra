@@ -33,6 +33,7 @@ public static class ProcessTree
     public static IReadOnlyList<Proc> Descendants(int rootPid)
     {
         var all = All();
+        var starts = new Dictionary<int, DateTime?>();
         var result = new List<Proc>();
         var frontier = new HashSet<int> { rootPid };
         bool grew;
@@ -40,7 +41,7 @@ public static class ProcessTree
         {
             grew = false;
             foreach (var p in all)
-                if (p.Pid != rootPid && frontier.Contains(p.ParentPid) && !result.Contains(p))
+                if (p.Pid != rootPid && frontier.Contains(p.ParentPid) && !result.Contains(p) && !StartedBefore(p.Pid, p.ParentPid, starts))
                 {
                     result.Add(p);
                     frontier.Add(p.Pid);
@@ -48,6 +49,35 @@ public static class ProcessTree
                 }
         } while (grew);
         return result;
+    }
+
+    /// <summary>
+    /// True when <paramref name="pid"/> started before its recorded parent: Windows keeps a parent pid after the parent
+    /// exits, and that pid can be reused by a newer process (e.g. our host), which would adopt an unrelated older
+    /// process (seen in CI: a PING.EXE "orphaned after the host exited"). A child never starts before its parent.
+    /// </summary>
+    private static bool StartedBefore(int pid, int parentPid, Dictionary<int, DateTime?> starts)
+    {
+        var child = StartOf(pid, starts);
+        var parent = StartOf(parentPid, starts);
+        return child != null && parent != null && child < parent;
+    }
+
+    private static DateTime? StartOf(int pid, Dictionary<int, DateTime?> starts)
+    {
+        if (starts.TryGetValue(pid, out var known)) return known;
+        DateTime? start;
+        try
+        {
+            using var p = Process.GetProcessById(pid);
+            start = p.StartTime;
+        }
+        catch (Exception e) when (e is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
+        {
+            start = null;
+        }
+        starts[pid] = start;
+        return start;
     }
 
     /// <summary>True when a process with this pid is still running (and has not been replaced by an unrelated one started later).</summary>
