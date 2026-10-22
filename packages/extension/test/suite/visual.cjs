@@ -780,7 +780,13 @@ exports.cases = ({ api, csharp, waitFor }) => {
         // The full-width client in an editor tab.
         const editorTab = a.gitView.openInEditor();
         await vscode.commands.executeCommand('workbench.action.closeSidebar');
+        // Wide: a file's diff next to the list (what a click shows).
+        await a.gitView.refresh();
+        a.gitView.broadcast({ type: 'selectFile', path: 'NOTES.md' });
         await shot('git-editor', 3000);
+        // Switching with changes asks what to do with them (the dialog the branch picker opens).
+        a.gitView.broadcast({ type: 'switchChoice', branch: 'feature/audit', from: 'main', changes: 1 });
+        await shot('git-switch', 2000);
         editorTab.dispose();
       },
     ],

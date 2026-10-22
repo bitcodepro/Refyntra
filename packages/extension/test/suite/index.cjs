@@ -1823,6 +1823,37 @@ scenarios['git-client'] = [
         assert.equal(await g.discard(['ConsoleApp/Calc.cs', 'scratch.txt']), true);
         assert.equal(fs.readFileSync(calc, 'utf8'), before);
         assert.ok(!fs.existsSync(nodePath.join(root, 'scratch.txt')));
+        // Switching with changes: the caller chooses; "leave them here" stashes them and offers them back on return.
+        fs.writeFileSync(calc, before + '// work in progress\n');
+        await g.refresh();
+        assert.equal(await g.switchBranch('remote-work'), 'needsChoice');
+        assert.equal(g.model().head, 'main', 'nothing switched without a choice');
+        assert.equal(await g.switchBranch('remote-work', 'stash'), 'ok', g.lastError);
+        assert.equal(g.model().head, 'remote-work');
+        assert.deepEqual(g.model().changes, [], 'the changes stayed on main');
+        assert.equal(g.model().stash, undefined, 'no stash for remote-work');
+        assert.equal(await g.switchBranch('main'), 'ok');
+        assert.equal(g.model().stash?.branch, 'main', 'main offers its changes back');
+        assert.equal(await g.restoreStash(), true, g.lastError);
+        assert.match(fs.readFileSync(calc, 'utf8'), /work in progress/);
+        assert.equal(g.model().stash, undefined);
+        fs.writeFileSync(calc, before);
+        // Merge preview: commits it brings and conflicts, before merging.
+        assert.equal(await g.createBranch('feature/clash'), true);
+        fs.writeFileSync(calc, before.replace(/class Calc/, 'class Calc /* clash A */'));
+        await g.stage(['ConsoleApp/Calc.cs']);
+        assert.equal(await g.commit('Clash A'), true, g.lastError);
+        assert.equal(await g.checkout('main'), true);
+        fs.writeFileSync(calc, before.replace(/class Calc/, 'class Calc /* clash B */'));
+        await g.stage(['ConsoleApp/Calc.cs']);
+        assert.equal(await g.commit('Clash B'), true, g.lastError);
+        const preview = await g.mergePreview('feature/clash');
+        assert.equal(preview.commits, 1);
+        assert.deepEqual(preview.conflicts, ['ConsoleApp/Calc.cs']);
+        assert.deepEqual(await g.mergePreview('remote-work'), { commits: 1, conflicts: [], upToDate: false });
+        assert.deepEqual(await g.mergePreview('main'), { commits: 0, conflicts: [], upToDate: true });
+        g.hooks.confirm = true;
+        assert.equal(await g.deleteBranch('feature/clash'), true);
         // Search: message, code change, author, one branch.
         assert.deepEqual((await g.runSearch('zebra', 'message')).map((r) => r.commit.subject), ['Colleague: add notes with Zebra']);
         assert.deepEqual((await g.runSearch('Zebra', 'code')).map((r) => r.commit.subject), ['Add the zoo']);
