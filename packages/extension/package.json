@@ -514,6 +514,18 @@
         "icon": "$(play)"
       },
       {
+        "command": "refyntra.git.history",
+        "title": "Show History (Git)",
+        "category": "Refyntra",
+        "icon": "$(history)",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "refyntra.git.rangeHistory",
+        "title": "Show History of Lines (Git)",
+        "category": "Refyntra"
+      },
+      {
         "command": "refyntra.run.refresh",
         "title": "Refresh Run Targets",
         "category": "Refyntra",
@@ -1065,6 +1077,10 @@
     ],
     "menus": {
       "commandPalette": [
+        {
+          "command": "refyntra.git.rangeHistory",
+          "when": "false"
+        },
         {
           "command": "refyntra.openLocation",
           "when": "false"
@@ -1985,6 +2001,11 @@
       ],
       "explorer/context": [
         {
+          "command": "refyntra.git.history",
+          "when": "!explorerResourceIsFolder && resourceScheme == file",
+          "group": "7_refyntra@1"
+        },
+        {
           "command": "refyntra.cleanup",
           "when": "explorerResourceIsFolder || resourceExtname == .cs || resourceExtname == .csproj",
           "group": "7_modification@90"
@@ -2026,6 +2047,11 @@
         {
           "command": "refyntra.related",
           "group": "1_navigate@1"
+        },
+        {
+          "command": "refyntra.git.history",
+          "when": "resourceScheme == file",
+          "group": "1_navigate@8"
         },
         {
           "command": "refyntra.tests.runRelated",
@@ -2652,6 +2678,11 @@
           "type": "boolean",
           "default": true,
           "description": "CodeLens: ASP.NET Core endpoints (\"GET /api/... · N frontend calls\")."
+        },
+        "refyntra.codeLens.authors": {
+          "type": "boolean",
+          "default": true,
+          "description": "CodeLens: who wrote a C# type or method (git blame: main author, last change); click for the history of its lines."
         },
         "refyntra.codeLens.efCore": {
           "type": "boolean",
