@@ -33,6 +33,8 @@ import { type FetchLike, GitHubClient, type PullRequest } from './github';
 export const GIT_VIEW = 'refyntra.gitView';
 const GRAPH_LIMIT = 400;
 const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+/** The message of the stash that keeps a branch's changes while another branch is checked out. */
+const STASH_PREFIX = 'refyntra: changes left on ';
 
 /** A repository's state for the overview: its branch, ahead / behind its upstream, changed files. */
 export interface RepoState {
@@ -79,6 +81,8 @@ export interface GitViewModel {
   search?: { text: string; mode: SearchMode; branch?: string; rows: GraphRow[] };
   /** The repository has a remote to push to. */
   hasRemote?: boolean;
+  /** Changes left on the current branch when switching away (Restore brings them back). */
+  stash?: { ref: string; branch: string };
   github?: { owner: string; repo: string };
   pulls?: PullRequest[];
   pullsError?: string;
@@ -226,8 +230,19 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
 
   private post(): void {
     const model = toWire({ ...this.current, ...(this.busy ? { busy: this.busy } : {}) });
-    for (const w of this.webviews) void w.postMessage({ type: 'model', model });
+    this.broadcast({ type: 'model', model });
     this.updateBadge();
+  }
+
+  /** Sends to every open page; a page closed meanwhile is dropped (posting to it throws "Webview is disposed"). */
+  private broadcast(message: unknown): void {
+    for (const w of [...this.webviews]) {
+      try {
+        void Promise.resolve(w.postMessage(message)).then(undefined, () => this.webviews.delete(w));
+      } catch {
+        this.webviews.delete(w);
+      }
+    }
   }
 
   private async read(): Promise<GitViewModel> {
@@ -253,15 +268,24 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
     const hasRemote = (await runGit(['remote'], repo)).stdout.trim().length > 0;
     if (status.code !== 0) return { repos, repo, ...empty, error: status.stderr.trim() || 'git status failed.' };
     const github = origin.code === 0 ? gitHubRepoOf(origin.stdout) : undefined;
-    const states = await Promise.all(repos.map(async (r) => parseRepoState(r, (await runGit(['status', '--porcelain=v2', '--branch', '--untracked-files=normal'], r)).stdout)));
+    // The overview of every repository is read separately (refreshStates); the selected one is updated here.
+    const branchList = parseBranches(branches.stdout);
+    const changes = parseStatus(status.stdout);
+    const curBranch = branchList.find((b) => b.current);
+    const own: RepoState = { path: repo, branch: head.stdout.trim(), ...(curBranch?.upstream ? { upstream: curBranch.upstream } : {}), ahead: curBranch?.ahead ?? 0, behind: curBranch?.behind ?? 0, changes: new Set(changes.map((c) => c.path)).size };
+    const known = this.states.filter((x) => repos.includes(x.path) && x.path !== repo);
+    const states = repos.map((r) => (r === repo ? own : known.find((x) => x.path === r) ?? { path: r, branch: '', ahead: 0, behind: 0, changes: 0 }));
+    if (this.states.length === 0 && repos.length > 1) void this.refreshStates();
+    const stash = await this.stashFor(repo, own.branch);
     return {
       states,
+      ...(stash ? { stash } : {}),
       hasRemote,
       repos,
       repo,
       head: head.stdout.trim(),
-      changes: parseStatus(status.stdout),
-      branches: parseBranches(branches.stdout),
+      changes,
+      branches: branchList,
       remoteBranches: remotes.stdout.split('\n').map((s) => s.trim()).filter((s) => s && !s.endsWith('/HEAD')),
       rows: log.code === 0 ? layoutGraph(parseGraphLog(log.stdout)) : [],
       ...(this.search ? { search: this.search } : {}),
@@ -269,6 +293,43 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
       ...(this.pulls.list ? { pulls: this.pulls.list } : {}),
       ...(this.pulls.error ? { pullsError: this.pulls.error } : {}),
     };
+  }
+
+  private states: RepoState[] = [];
+  private statesRunning: Promise<RepoState[]> | undefined;
+
+  /** The overview: branch, ahead / behind and changes of every repository, four at a time. */
+  refreshStates(): Promise<RepoState[]> {
+    if (this.statesRunning) return this.statesRunning;
+    this.statesRunning = (async () => {
+      const repos = this.current.repos;
+      const out: RepoState[] = new Array(repos.length);
+      let next = 0;
+      const worker = async () => {
+        while (next < repos.length) {
+          const i = next++;
+          const r = repos[i]!;
+          out[i] = parseRepoState(r, (await runGit(['status', '--porcelain=v2', '--branch', '--untracked-files=normal'], r)).stdout);
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(4, repos.length) }, worker));
+      this.states = out.filter(Boolean);
+      this.current = { ...this.current, states: this.states };
+      this.post();
+      return this.states;
+    })().finally(() => (this.statesRunning = undefined));
+    return this.statesRunning;
+  }
+
+  /** The stash Refyntra left for a branch when switching away from it with changes. */
+  private async stashFor(repo: string, branch: string): Promise<{ ref: string; branch: string } | undefined> {
+    if (!branch) return undefined;
+    const r = await runGit(['stash', 'list', '--format=%gd%x1f%s'], repo);
+    for (const line of r.stdout.split('\n')) {
+      const [ref, subject] = line.split('\x1f');
+      if (ref && subject?.endsWith(`${STASH_PREFIX}${branch}`)) return { ref, branch };
+    }
+    return undefined;
   }
 
   async selectRepo(repo: string): Promise<void> {
@@ -360,6 +421,56 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
 
   // ---- branches and remotes
 
+  /**
+   * Switches branch the way GitHub Desktop does: with uncommitted changes the caller chooses — leave them on the
+   * current branch (a stash Refyntra offers back when the branch is checked out again) or bring them along (git refuses
+   * when they collide). 'needsChoice' when changes exist and no mode was given.
+   */
+  async switchBranch(branch: string, mode?: 'stash' | 'bring'): Promise<'ok' | 'needsChoice' | 'failed'> {
+    if (!this.repo || !safeRef(branch)) return 'failed';
+    if (this.current.changes.length > 0 && !mode) return 'needsChoice';
+    const from = this.current.head ?? '';
+    if (mode === 'stash' && this.current.changes.length > 0) {
+      const s = await this.git(['stash', 'push', '--include-untracked', '-m', `${STASH_PREFIX}${from}`], 'stash the changes');
+      if (!s.ok) return 'failed';
+    }
+    const ok = await this.checkout(branch);
+    if (!ok && mode === 'stash') {
+      // Switching failed: the changes come back where they were.
+      await this.git(['stash', 'pop'], 'restore the changes');
+      await this.refresh();
+    }
+    return ok ? 'ok' : 'failed';
+  }
+
+  /** Brings back the changes left on this branch (git stash pop). */
+  async restoreStash(): Promise<boolean> {
+    const st = this.current.stash;
+    if (!st) return false;
+    const ok = (await this.git(['stash', 'pop', st.ref], 'restore the stashed changes')).ok;
+    await this.refresh();
+    return ok;
+  }
+
+  async dropStash(): Promise<boolean> {
+    const st = this.current.stash;
+    if (!st || !(await this.confirm(`Discard the changes stashed on ${st.branch}? This cannot be undone.`, 'Discard'))) return false;
+    const ok = (await this.git(['stash', 'drop', st.ref], 'discard the stash')).ok;
+    await this.refresh();
+    return ok;
+  }
+
+  /** What merging a branch into the current one would do: commits it brings, files that would conflict. */
+  async mergePreview(branch: string): Promise<{ commits: number; conflicts: string[]; upToDate: boolean } | undefined> {
+    if (!this.repo || !safeRef(branch)) return undefined;
+    const count = await runGit(['rev-list', '--count', `HEAD..${branch}`], this.repo);
+    const commits = Number(count.stdout.trim()) || 0;
+    if (commits === 0) return { commits: 0, conflicts: [], upToDate: true };
+    const t = await runGit(['merge-tree', '--write-tree', '--name-only', '--no-messages', 'HEAD', branch], this.repo);
+    const conflicts = t.code === 1 ? t.stdout.split('\n').slice(1).map((l) => l.trim()).filter(Boolean) : [];
+    return { commits, conflicts: [...new Set(conflicts)], upToDate: false };
+  }
+
   async checkout(branch: string): Promise<boolean> {
     if (!safeRef(branch)) return false;
     // A remote branch (origin/x) without a local one: a local tracking branch named x.
@@ -394,9 +505,9 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
   }
 
   /** Merges a branch into the current one (a merge commit when it does not fast-forward). */
-  async mergeBranch(name: string): Promise<boolean> {
+  async mergeBranch(name: string, confirmed = false): Promise<boolean> {
     if (!safeRef(name)) return false;
-    if (!(await this.confirm(`Merge ${name} into ${this.current.head}?`, 'Merge'))) return false;
+    if (!confirmed && !(await this.confirm(`Merge ${name} into ${this.current.head}?`, 'Merge'))) return false;
     const ok = (await this.git(['merge', '--no-edit', name], `merge ${name}`)).ok;
     await this.refresh();
     return ok;
@@ -433,12 +544,14 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
           continue;
         }
         const r = await runGit(op === 'pull' ? await pullArgs(repo) : ['fetch', '--all', '--prune'], repo);
+        void state;
         const text = (r.code === 0 ? r.stdout : r.stderr || r.stdout).trim().split('\n').filter(Boolean);
         results.push({ repo, ok: r.code === 0, message: r.code === 0 ? (text.find((l) => /Already up to date|Fast-forward|files? changed|Merge made/.test(l)) ?? (op === 'fetch' ? 'fetched' : 'done')) : text.slice(-2).join(' ') });
       }
     } finally {
       this.busy = undefined;
       await this.refresh();
+      await this.refreshStates();
     }
     if (!quiet) {
       this.log.appendLine(`${new Date().toLocaleTimeString()} ${op} all:`);
@@ -514,6 +627,19 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
       refs: (refs ?? '').split(',').map((s) => s.trim()).filter(Boolean),
       files: parseNumstat(n.stdout),
     };
+  }
+
+  /** The diff of a changed file: staged (index vs HEAD), unstaged (working tree vs index) or a new file. */
+  async workingPatch(file: string, staged: boolean): Promise<ReturnType<typeof parsePatch>> {
+    if (!this.repo) return [];
+    const c = this.current.changes.find((x) => x.path === file && x.staged === staged) ?? this.current.changes.find((x) => x.path === file);
+    if (c?.status === '?') {
+      // Untracked: the whole file as added (git diff --no-index exits 1 when the files differ).
+      const r = await runGit(['diff', '--no-color', '--no-index', '--', process.platform === 'win32' ? 'NUL' : '/dev/null', file], this.repo);
+      return parsePatch(r.stdout);
+    }
+    const r = await runGit(['diff', '--no-color', '-M', ...(staged ? ['--cached'] : []), '--', file], this.repo);
+    return parsePatch(r.stdout);
   }
 
   async filePatch(parent: string, sha: string, file: string, from?: string): Promise<ReturnType<typeof parsePatch>> {
@@ -632,7 +758,7 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
         await this.discard(paths);
         break;
       case 'commit':
-        if (str('message') !== undefined && (await this.commit(str('message')!, m.push === true))) for (const w of this.webviews) void w.postMessage({ type: 'committed' });
+        if (str('message') !== undefined && (await this.commit(str('message')!, m.push === true))) this.broadcast({ type: 'committed' });
         break;
       case 'open': {
         const p = str('path');
@@ -645,7 +771,38 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
         break;
       }
       case 'checkout':
-        if (str('branch')) await this.checkout(str('branch')!);
+      case 'switch': {
+        const b = str('branch');
+        if (!b) break;
+        const mode = str('mode') === 'stash' || str('mode') === 'bring' ? (str('mode') as 'stash' | 'bring') : undefined;
+        const r = await this.switchBranch(b, mode);
+        if (r === 'needsChoice') this.broadcast({ type: 'switchChoice', branch: b, from: this.current.head, changes: new Set(this.current.changes.map((c) => c.path)).size });
+        break;
+      }
+      case 'workDiff': {
+        const p = str('path');
+        if (p && this.current.changes.some((c) => c.path === p)) this.broadcast({ type: 'workDiff', path: p, lines: await this.workingPatch(p, m.staged === true) });
+        break;
+      }
+      case 'restoreStash':
+        await this.restoreStash();
+        break;
+      case 'dropStash':
+        await this.dropStash();
+        break;
+      case 'states':
+        await this.refreshStates();
+        break;
+      case 'mergePreview': {
+        const b = str('branch');
+        if (b) this.broadcast({ type: 'mergePreview', branch: b, into: this.current.head, preview: await this.mergePreview(b) });
+        break;
+      }
+      case 'merge':
+        if (str('branch')) await this.mergeBranch(str('branch')!, true);
+        break;
+      case 'createBranch':
+        if (str('name')) await this.createBranch(str('name'), str('from') || undefined);
         break;
       case 'switchBranch': {
         const items = [
@@ -755,6 +912,7 @@ function toWire(m: GitViewModel) {
   return {
     repos: m.repos.map((r) => ({ path: r, name: repoName(r) })),
     hasRemote: m.hasRemote,
+    stash: m.stash,
     states: m.states,
     repo: m.repo,
     head: m.head,
@@ -799,192 +957,341 @@ function sidebarHtml(webview: vscode.Webview, wide = false): string {
   return `<!doctype html><html><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${n}';">
 <style>${BASE_CSS}
-h3{font-size:11px;text-transform:uppercase;letter-spacing:.04em;margin:14px 0 6px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none}
-h3 .tools{text-transform:none;letter-spacing:0;font-weight:400}
-.bar{display:flex;gap:4px;align-items:center;flex-wrap:wrap;margin:6px 0}
-.bar .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-select.full,textarea,input.full{width:100%}
-textarea{min-height:44px;resize:vertical;margin:4px 0}
-.row{display:flex;align-items:center;gap:6px;padding:1px 0;cursor:pointer;white-space:nowrap;overflow:hidden}
+body{padding:0;margin:0;display:flex;flex-direction:column;height:100vh;overflow:hidden}
+.top{display:flex;gap:1px;border-bottom:1px solid var(--vscode-panel-border,rgba(128,128,128,.3));flex:none}
+.tb{flex:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start;padding:6px 10px;background:none;color:var(--vscode-foreground);border-radius:0;text-align:left}
+.tb:hover{background:var(--vscode-list-hoverBackground)}
+.tb .k{font-size:10px;opacity:.65;text-transform:uppercase;letter-spacing:.04em}
+.tb .v{font-weight:600;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tb .v .badge{font-weight:600;margin-left:6px;color:var(--vscode-charts-blue,var(--vscode-textLink-foreground))}
+body:not(.wide) .top{flex-wrap:wrap}body:not(.wide) .tb{flex:1 1 45%}
+.tabs{display:flex;gap:0;border-bottom:1px solid var(--vscode-panel-border,rgba(128,128,128,.3));flex:none}
+.tab{background:none;color:var(--vscode-foreground);opacity:.7;border-radius:0;padding:6px 12px;border-bottom:2px solid transparent}
+.tab.on{opacity:1;border-bottom-color:var(--vscode-focusBorder)}
+.main{flex:1;min-height:0;display:flex}
+.pane{flex:1;min-width:0;overflow:auto;padding:6px 10px}
+.banner{margin:6px 10px;padding:6px 8px;border-radius:3px;background:var(--vscode-editorInfo-background,rgba(55,148,255,.12));display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.banner .grow{flex:1}
+.err{margin:6px 10px}
+.busy{margin:2px 10px;color:var(--vscode-descriptionForeground);font-style:italic;font-size:12px}
+.row{display:flex;align-items:center;gap:6px;padding:2px 4px;cursor:pointer;white-space:nowrap;overflow:hidden;border-radius:3px}
 .row:hover{background:var(--vscode-list-hoverBackground)}
+.row.sel{background:var(--vscode-list-activeSelectionBackground);color:var(--vscode-list-activeSelectionForeground)}
 .st{width:14px;text-align:center;font-weight:600;flex:none}
-.st.M{color:var(--vscode-gitDecoration-modifiedResourceForeground)}.st.A,.st.\\?{color:var(--vscode-gitDecoration-untrackedResourceForeground)}
-.st.D{color:var(--vscode-gitDecoration-deletedResourceForeground)}.st.U{color:var(--vscode-gitDecoration-conflictingResourceForeground)}
-.path{overflow:hidden;text-overflow:ellipsis;flex:1}
+.st.M{color:var(--vscode-gitDecoration-modifiedResourceForeground)}.st.A,.st.U{color:var(--vscode-gitDecoration-untrackedResourceForeground)}
+.st.D{color:var(--vscode-gitDecoration-deletedResourceForeground)}.st.C{color:var(--vscode-gitDecoration-conflictingResourceForeground)}
+.path{overflow:hidden;text-overflow:ellipsis;flex:1}.dir{opacity:.6}
 .act{visibility:hidden;flex:none}.row:hover .act{visibility:visible}
-.cur{font-weight:600}
+input[type=checkbox]{margin:0;flex:none}
+.commitBox{border-top:1px solid var(--vscode-panel-border,rgba(128,128,128,.3));padding:8px 10px;flex:none}
+.commitBox input,.commitBox textarea{width:100%;margin-bottom:6px}.commitBox textarea{min-height:44px;resize:vertical}
+.commitBox button{width:100%;padding:5px}
+.changes{display:flex;flex-direction:column;height:100%}
+.changes .list{flex:1;overflow:auto;padding:6px 10px}
 .g{display:flex;align-items:center;height:22px;cursor:pointer}.g:hover{background:var(--vscode-list-hoverBackground)}
 .g svg{flex:none}.g .msg{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
-.collapsed>.body{display:none}
-.busy{color:var(--vscode-descriptionForeground);font-style:italic}
+.bar{display:flex;gap:4px;align-items:center;flex-wrap:wrap;margin:4px 0}.bar input{flex:1;min-width:80px}
 .in{color:var(--vscode-charts-blue,var(--vscode-textLink-foreground));font-weight:600}
-body.wide{padding:12px 20px}
-body.wide #cols{display:grid;grid-template-columns:minmax(320px,420px) 1fr;gap:28px;align-items:start}
-body.wide .g{height:24px}
+.pop{position:fixed;z-index:10;background:var(--vscode-quickInput-background,var(--vscode-editorWidget-background));color:var(--vscode-quickInput-foreground,var(--vscode-foreground));border:1px solid var(--vscode-widget-border,rgba(128,128,128,.4));box-shadow:0 4px 16px rgba(0,0,0,.35);border-radius:4px;padding:6px;max-height:70vh;overflow:auto;width:min(420px,calc(100vw - 16px))}
+.pop input{width:100%;margin-bottom:6px}
+.pop .sec{font-size:10px;text-transform:uppercase;opacity:.65;margin:8px 4px 2px}
+.pop .foot{display:flex;gap:6px;border-top:1px solid var(--vscode-widget-border,rgba(128,128,128,.3));margin-top:6px;padding-top:6px;flex-wrap:wrap}
+.modalBack{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:20;display:flex;align-items:flex-start;justify-content:center;padding-top:10vh}
+.modal{background:var(--vscode-editorWidget-background);color:var(--vscode-foreground);border:1px solid var(--vscode-widget-border,rgba(128,128,128,.4));border-radius:6px;box-shadow:0 8px 32px rgba(0,0,0,.4);width:min(520px,calc(100vw - 24px));padding:14px 16px}
+.modal h2{font-size:1.1em;margin:0 0 10px}
+.modal .choice{display:flex;gap:8px;align-items:flex-start;padding:8px;border:1px solid var(--vscode-widget-border,rgba(128,128,128,.3));border-radius:4px;margin:6px 0;cursor:pointer}
+.modal .choice:hover{background:var(--vscode-list-hoverBackground)}
+.modal .btns{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
+.modal input,.modal select{width:100%;margin:4px 0}
+.warn{color:var(--vscode-editorWarning-foreground)}.ok{color:var(--vscode-gitDecoration-addedResourceForeground)}
+.empty{opacity:.7;padding:20px 10px;text-align:center}
+#tab-changes{display:flex}#tab-changes[hidden]{display:none}
+body.wide .changes{width:360px;flex:none;border-right:1px solid var(--vscode-panel-border,rgba(128,128,128,.3))}
+body:not(.wide) .changes{flex:1}
+.diff{flex:1;min-width:0;overflow:auto}
+.diff .fh{padding:6px 10px;font-family:var(--vscode-editor-font-family);border-bottom:1px solid var(--vscode-panel-border,rgba(128,128,128,.3));position:sticky;top:0;background:var(--vscode-editor-background)}
+.diff table{border-collapse:collapse;width:100%;font-family:var(--vscode-editor-font-family);font-size:var(--vscode-editor-font-size)}
+.diff td{padding:0 6px;white-space:pre;vertical-align:top}.diff td.n{width:1%;text-align:right;opacity:.55;user-select:none}.diff td.s{width:1%;user-select:none}
+.diff tr.add{background:var(--vscode-diffEditor-insertedLineBackground,rgba(155,185,85,.2))}.diff tr.del{background:var(--vscode-diffEditor-removedLineBackground,rgba(255,0,0,.2))}
+.diff tr.hunk td{color:var(--vscode-descriptionForeground);background:rgba(128,128,128,.08);padding:3px 6px}
 </style></head><body class="${wide ? 'wide' : ''}">
-<div class="bar"><span class="grow muted" id="title"></span>${wide ? '' : '<button class="link" id="openEditor" title="Open the Git client in an editor tab (full width)">⤢ open in editor</button>'}</div>
-<section id="sRepos" style="display:none"><h3><span>Repositories</span><span class="tools"><button class="link" id="fetchAll" title="Fetch every repository">⟳ fetch all</button><button class="link" id="pullAll" title="Pull every repository">↓ pull all</button></span></h3><div class="body"><div id="repos"></div></div></section>
-<div class="bar"><button class="secondary grow" id="branchBtn" title="Checkout another branch or create one"></button></div>
-<div class="bar"><button class="secondary" id="fetch" title="Fetch (all remotes, prune)">⟳ Fetch</button><button class="secondary" id="pull" title="Pull">↓ Pull</button><button class="secondary" id="push" title="Push">↑ Push</button></div>
-<div id="busy" class="busy"></div><div id="err" class="err"></div>
-<div id="cols"><div>
-<section id="sChanges"><h3><span>Changes</span><span class="tools"><button class="link" id="unstageAll" title="Unstage all">− unstage all</button><button class="link" id="discardAll" title="Discard all changes">↺ discard all</button></span></h3><div class="body">
-<textarea id="msg" placeholder="Commit message"></textarea>
-<div class="bar"><button class="secondary" id="stageAll" title="Stage every change">+ Stage all</button><button id="commit">Commit</button><button class="secondary" id="commitPush">Commit &amp; Push</button></div>
-<div id="staged"></div><div id="unstaged"></div></div></section>
-<section id="sBranches"><h3><span>Branches</span><span class="tools"><button class="link" id="newBranch" title="New branch from the current commit">+ new</button></span></h3><div class="body"><div id="branches"></div><div id="remotes"></div></div></section>
-<section id="sPulls"><h3><span>Pull requests</span><span class="tools"><button class="link" id="createPull" title="Create a pull request from the current branch">+ new</button><button class="link" id="loadPulls" title="Load from GitHub">load</button></span></h3><div class="body"><div id="pulls"></div></div></section>
-</div><div>
-<section id="sSearch"><h3><span>Search commits</span></h3><div class="body">
-<div class="bar"><select id="sBranch" title="Branch"></select><select id="sMode" title="Search in"><option value="message">message</option><option value="code">code change</option><option value="author">author</option></select></div>
-<div class="bar"><input class="full" id="sText" placeholder="Word to find (Enter)"></div></div></section>
-<section id="sGraph"><h3><span id="graphTitle">Graph</span><span class="tools"><button class="link" id="clearSearch" title="Back to the graph" style="display:none">✕ clear search</button></span></h3><div class="body"><div id="graph"></div></div></section>
-</div></div>
+<div class="top">
+  <button class="tb" id="repoBtn" title="Current repository"><span class="k">Current repository</span><span class="v" id="repoV"></span></button>
+  <button class="tb" id="branchBtn" title="Current branch: switch, create, merge"><span class="k">Current branch</span><span class="v" id="branchV"></span></button>
+  <button class="tb" id="syncBtn" title="Fetch, pull or push"><span class="k" id="syncK">Fetch origin</span><span class="v" id="syncV"></span></button>
+</div>
+<div id="busy" class="busy"></div>
+<div id="err" class="err"></div>
+<div id="banners"></div>
+<div class="tabs"><button class="tab on" data-tab="changes">Changes <span id="nChanges"></span></button><button class="tab" data-tab="history">History</button><button class="tab" data-tab="pulls">Pull requests</button>${wide ? '' : '<span style="flex:1"></span><button class="link" id="openEditor" title="Open in an editor tab (full width)">⤢</button>'}</div>
+<div class="main">
+  <div class="pane" id="tab-changes" style="padding:0"><div class="changes"><div class="list" id="changeList"></div>
+    <div class="commitBox"><input id="summary" placeholder="Summary (required)"><textarea id="desc" placeholder="Description"></textarea><button id="commitBtn" disabled>Commit</button></div></div>
+    ${wide ? '<div class="diff" id="workDiff"><div class="empty">Select a file to see its changes</div></div>' : ''}</div>
+  <div class="pane" id="tab-history" hidden>
+    <div class="bar"><input id="sText" placeholder="Search commits (Enter)"><select id="sMode" title="Search in"><option value="message">message</option><option value="code">code</option><option value="author">author</option></select></div>
+    <div class="bar"><select id="sBranch" title="Branch"></select><button class="link" id="clearSearch" style="display:none">✕ clear</button></div>
+    <div id="graphTitle" class="muted"></div><div id="graph"></div>
+  </div>
+  <div class="pane" id="tab-pulls" hidden><div class="bar"><button id="createPull">New pull request</button><button class="secondary" id="loadPulls">Refresh</button></div><div id="pulls"></div></div>
+</div>
+<div id="layer"></div>
 <script nonce="${n}">
 const vs = acquireVsCodeApi();
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 const send = (m) => vs.postMessage(m);
 const COLORS = ['var(--vscode-charts-blue)','var(--vscode-charts-orange)','var(--vscode-charts-green)','var(--vscode-charts-purple)','var(--vscode-charts-red)','var(--vscode-charts-yellow)'];
-let model = null;
-for (const s of document.querySelectorAll('section')) s.querySelector('h3').addEventListener('click', (e) => { if (e.target.tagName !== 'BUTTON') s.classList.toggle('collapsed'); });
-$('branchBtn').onclick = () => send({ type: 'switchBranch' });
-$('fetch').onclick = () => send({ type: 'fetch' });
-$('pull').onclick = () => send({ type: 'pull' });
-$('push').onclick = () => send({ type: 'push' });
-$('stageAll').onclick = () => send({ type: 'stage', paths: model.changes.filter(c => !c.staged).map(c => c.path) });
-$('unstageAll').onclick = () => send({ type: 'unstage', paths: model.changes.filter(c => c.staged).map(c => c.path) });
-$('discardAll').onclick = () => send({ type: 'discard', paths: [...new Set(model.changes.filter(c => !c.staged).map(c => c.path))] });
-// The main button: Commit while something is staged, Push once the commits wait to be pushed.
-$('commit').onclick = () => { if ($('commit').dataset.mode === 'push') send({ type: 'push' }); else send({ type: 'commit', message: $('msg').value }); };
-$('fetchAll').onclick = () => send({ type: 'fetchAll' });
-$('pullAll').onclick = () => send({ type: 'pullAll' });
-if ($('openEditor')) $('openEditor').onclick = () => send({ type: 'openEditor' });
-$('commitPush').onclick = () => send({ type: 'commit', message: $('msg').value, push: true });
-$('newBranch').onclick = () => send({ type: 'newBranch' });
-$('createPull').onclick = () => send({ type: 'createPull' });
-$('loadPulls').onclick = () => send({ type: 'loadPulls' });
-$('clearSearch').onclick = () => { $('sText').value = ''; send({ type: 'clearSearch' }); };
-$('sText').addEventListener('keydown', (e) => { if (e.key === 'Enter') send({ type: 'search', text: $('sText').value, mode: $('sMode').value, branch: $('sBranch').value }); });
-function act(label, title, fn) { const b = el('button', 'link act', label); b.title = title; b.onclick = (e) => { e.stopPropagation(); fn(); }; return b; }
-function fileRow(c) {
-  const r = el('div', 'row');
-  r.append(el('span', 'st ' + c.status, c.status === '?' ? 'U' : c.status), el('span', 'path', c.path));
-  r.title = c.path;
-  if (!c.staged) r.append(act('↺', 'Discard changes', () => send({ type: 'discard', paths: [c.path] })));
-  r.append(act(c.staged ? '−' : '+', c.staged ? 'Unstage' : 'Stage', () => send({ type: c.staged ? 'unstage' : 'stage', paths: [c.path] })));
-  r.onclick = () => send({ type: 'open', path: c.path, staged: c.staged, status: c.status });
-  return r;
+let model = null, tab = (vs.getState() || {}).tab || 'changes', selected = null;
+function renderDiff(path, lines) {
+  const pane = $('workDiff'); if (!pane) return; pane.textContent = '';
+  const h = el('div', 'fh'); h.append(document.createTextNode(path + '  '));
+  const add = lines.filter(l => l.kind === 'add').length, del = lines.filter(l => l.kind === 'del').length;
+  h.append(el('span', 'ok', '+' + add), document.createTextNode(' '), el('span', 'warn', '−' + del));
+  const open = el('button', 'link', 'open in diff editor'); open.onclick = () => { const c = model.changes.find(x => x.path === path); send({ type: 'open', path, staged: !!(c && c.staged), status: c ? c.status : 'M' }); }; h.append(open);
+  pane.append(h);
+  if (!lines.length) { pane.append(el('div', 'empty', 'No text changes (binary, or only the file mode changed).')); return; }
+  const t = el('table');
+  for (const l of lines) { const tr = el('tr', l.kind);
+    if (l.kind === 'hunk') { const td = el('td', '', l.text); td.colSpan = 4; tr.append(td); }
+    else tr.append(el('td', 'n', l.old === undefined ? '' : String(l.old)), el('td', 'n', l.new === undefined ? '' : String(l.new)), el('td', 's', l.kind === 'add' ? '+' : l.kind === 'del' ? '−' : ' '), el('td', '', l.text));
+    t.append(tr); }
+  pane.append(t);
 }
+const layer = $('layer');
+const closeLayer = () => { layer.textContent = ''; };
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeLayer(); });
+function setTab(t) { tab = t; vs.setState({ tab }); for (const b of document.querySelectorAll('.tab')) b.classList.toggle('on', b.dataset.tab === t); for (const id of ['changes','history','pulls']) $('tab-' + id).hidden = id !== t; if (t === 'pulls' && model && model.github && !model.pulls && !model.pullsError) send({ type: 'loadPulls' }); }
+for (const b of document.querySelectorAll('.tab')) b.onclick = () => setTab(b.dataset.tab);
+setTab(tab);
+if ($('openEditor')) $('openEditor').onclick = () => send({ type: 'openEditor' });
+
+// ---- popovers and dialogs
+function popover(anchor, build) {
+  closeLayer();
+  const back = el('div'); back.style.cssText = 'position:fixed;inset:0;z-index:9'; back.onclick = closeLayer;
+  const p = el('div', 'pop'); const r = anchor.getBoundingClientRect();
+  p.style.left = Math.max(8, Math.min(r.left, window.innerWidth - Math.min(420, window.innerWidth - 16) - 8)) + 'px'; p.style.top = (r.bottom + 2) + 'px';
+  build(p); layer.append(back, p);
+  const f = p.querySelector('input'); if (f) f.focus();
+}
+function modal(title, build) {
+  closeLayer();
+  const back = el('div', 'modalBack'); back.onclick = (e) => { if (e.target === back) closeLayer(); };
+  const m = el('div', 'modal'); m.append(el('h2', '', title)); build(m); back.append(m); layer.append(back);
+  const f = m.querySelector('input,button.primary'); if (f) f.focus();
+}
+function btns(m, list) { const b = el('div', 'btns'); for (const [label, cls, fn] of list) { const x = el('button', cls, label); x.onclick = fn; b.append(x); } m.append(b); }
+
+// ---- repository picker
+$('repoBtn').onclick = () => {
+  send({ type: 'states' });
+  popover($('repoBtn'), (p) => {
+    const f = el('input'); f.placeholder = 'Filter repositories'; p.append(f);
+    const list = el('div'); p.append(list);
+    const draw = () => { list.textContent = ''; const q = f.value.toLowerCase();
+      for (const s of (model.states || []).filter(s => repoName(s.path).toLowerCase().includes(q))) {
+        const r = el('div', 'row' + (s.path === model.repo ? ' sel' : ''));
+        r.append(el('span', 'path', repoName(s.path)), el('span', 'muted', s.branch || ''));
+        if (s.behind) r.append(el('span', 'in', '↓' + s.behind)); if (s.ahead) r.append(el('span', 'muted', '↑' + s.ahead)); if (s.changes) r.append(el('span', 'muted', '✎' + s.changes));
+        r.onclick = () => { closeLayer(); if (s.path !== model.repo) { $('repoV').textContent = repoName(s.path) + ' …'; send({ type: 'repo', repo: s.path }); } };
+        list.append(r);
+      } };
+    f.oninput = draw; draw(); popover.redraw = draw;
+    const foot = el('div', 'foot'); const fa = el('button', 'secondary', '⟳ Fetch all'); fa.onclick = () => { closeLayer(); send({ type: 'fetchAll' }); };
+    const pa = el('button', 'secondary', '↓ Pull all'); pa.onclick = () => { closeLayer(); send({ type: 'pullAll' }); }; foot.append(fa, pa); p.append(foot);
+  });
+};
+function repoName(p) { const r = (model.repos || []).find(x => x.path === p); return r ? r.name : p; }
+
+// ---- branch picker
+$('branchBtn').onclick = () => popover($('branchBtn'), (p) => {
+  const f = el('input'); f.placeholder = 'Filter branches'; p.append(f);
+  const list = el('div'); p.append(list);
+  const draw = () => {
+    list.textContent = ''; const q = f.value.toLowerCase();
+    const local = model.branches.filter(b => b.name.toLowerCase().includes(q));
+    const remote = model.remoteBranches.filter(r => r.toLowerCase().includes(q) && !model.branches.some(b => r.endsWith('/' + b.name)));
+    if (local.length) list.append(el('div', 'sec', 'Branches'));
+    for (const b of local) {
+      const r = el('div', 'row' + (b.current ? ' sel' : ''));
+      r.append(el('span', 'path', (b.current ? '✓ ' : '') + b.name));
+      r.append(el('span', 'muted', b.gone ? 'gone' : b.upstream ? (b.ahead || b.behind ? '↑' + b.ahead + ' ↓' + b.behind : '') : 'local'));
+      if (!b.current) {
+        const mg = el('button', 'link act', 'merge'); mg.title = 'Merge ' + b.name + ' into ' + model.head; mg.onclick = (e) => { e.stopPropagation(); mergeDialog(b.name); };
+        const del = el('button', 'link act', '✕'); del.title = 'Delete ' + b.name; del.onclick = (e) => { e.stopPropagation(); closeLayer(); send({ type: 'deleteBranch', branch: b.name }); };
+        r.append(mg, del);
+        r.onclick = () => { closeLayer(); send({ type: 'switch', branch: b.name }); };
+      }
+      list.append(r);
+    }
+    if (remote.length) list.append(el('div', 'sec', 'Remote only'));
+    for (const rb of remote) { const r = el('div', 'row'); r.append(el('span', 'path', rb)); r.title = 'Check out ' + rb + ' as a local branch'; r.onclick = () => { closeLayer(); send({ type: 'switch', branch: rb }); }; list.append(r); }
+    if (!local.length && !remote.length) list.append(el('div', 'muted', 'No branch matches.'));
+  };
+  f.oninput = draw; draw();
+  const foot = el('div', 'foot');
+  const nb = el('button', '', '+ New branch'); nb.onclick = () => newBranchDialog(f.value);
+  const mb = el('button', 'secondary', 'Merge into ' + model.head + '…'); mb.onclick = () => mergeDialog();
+  foot.append(nb, mb); p.append(foot);
+});
+function newBranchDialog(name) {
+  modal('Create a branch', (m) => {
+    const i = el('input'); i.placeholder = 'Name'; i.value = name || ''; m.append(i);
+    m.append(el('div', 'muted', 'From'));
+    const s = el('select'); for (const b of model.branches) { const o = el('option', '', b.name); o.value = b.name; o.selected = b.current; s.append(o); } m.append(s);
+    const go = () => { if (i.value.trim()) { closeLayer(); send({ type: 'createBranch', name: i.value.trim(), from: s.value }); } };
+    i.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+    btns(m, [['Cancel', 'secondary', closeLayer], ['Create branch', 'primary', go]]);
+  });
+}
+function mergeDialog(branch) {
+  modal('Merge into ' + model.head, (m) => {
+    const s = el('select'); for (const b of model.branches.filter(b => !b.current)) { const o = el('option', '', b.name); o.value = b.name; o.selected = b.name === branch; s.append(o); }
+    for (const r of model.remoteBranches) { const o = el('option', '', r); o.value = r; o.selected = r === branch; s.append(o); }
+    m.append(el('div', 'muted', 'Choose a branch to merge into ' + model.head), s);
+    const info = el('div', 'muted', 'Checking…'); info.id = 'mergeInfo'; info.style.margin = '8px 0'; m.append(info);
+    const ask = () => { info.className = 'muted'; info.textContent = 'Checking…'; send({ type: 'mergePreview', branch: s.value }); };
+    s.onchange = ask;
+    btns(m, [['Cancel', 'secondary', closeLayer], ['Merge', 'primary', () => { closeLayer(); send({ type: 'merge', branch: s.value }); }]]);
+    if (s.value) ask(); else info.textContent = 'No other branch.';
+  });
+}
+function switchChoice(d) {
+  modal('Switch to ' + d.branch, (m) => {
+    m.append(el('div', '', 'You have ' + d.changes + ' changed file(s) on ' + d.from + '.'));
+    const c1 = el('div', 'choice'); c1.append(el('div', '', '')); const t1 = el('div'); t1.append(el('b', '', 'Leave my changes on ' + d.from), el('div', 'muted', 'They are stashed; Refyntra offers them back when you switch to ' + d.from + ' again.')); c1.append(t1);
+    c1.onclick = () => { closeLayer(); send({ type: 'switch', branch: d.branch, mode: 'stash' }); };
+    const c2 = el('div', 'choice'); const t2 = el('div'); t2.append(el('b', '', 'Bring my changes to ' + d.branch), el('div', 'muted', 'Git refuses when they collide with ' + d.branch + '.')); c2.append(t2);
+    c2.onclick = () => { closeLayer(); send({ type: 'switch', branch: d.branch, mode: 'bring' }); };
+    m.append(c1, c2); btns(m, [['Cancel', 'secondary', closeLayer]]);
+  });
+}
+
+// ---- sync button: Publish / Push / Pull / Fetch
+$('syncBtn').onclick = () => { const a = $('syncBtn').dataset.action; if (a) send({ type: a }); };
+// ---- changes
+$('commitBtn').onclick = () => { const msg = $('summary').value.trim() + ($('desc').value.trim() ? '\\n\\n' + $('desc').value.trim() : ''); if ($('summary').value.trim()) send({ type: 'commit', message: msg }); };
+$('summary').addEventListener('input', () => renderCommitBtn());
+function renderCommitBtn() {
+  const staged = model ? model.changes.filter(c => c.staged).length : 0;
+  const b = $('commitBtn'); b.textContent = staged ? 'Commit ' + staged + ' file(s) to ' + model.head : 'Commit to ' + (model ? model.head : '');
+  b.disabled = !staged || !$('summary').value.trim();
+}
+function fileRows() {
+  const byPath = new Map();
+  for (const c of model.changes) { const e = byPath.get(c.path) || { path: c.path, staged: false, unstaged: false, status: c.status }; if (c.staged) e.staged = true; else { e.unstaged = true; e.status = c.status; } byPath.set(c.path, e); }
+  return [...byPath.values()];
+}
+function renderChanges() {
+  const list = $('changeList'); list.textContent = '';
+  const rows = fileRows();
+  $('nChanges').textContent = rows.length ? '(' + rows.length + ')' : '';
+  if (!rows.length) { list.append(el('div', 'empty', 'No local changes')); return; }
+  const head = el('div', 'row'); const all = el('input'); all.type = 'checkbox';
+  const nStaged = rows.filter(r => r.staged && !r.unstaged).length; all.checked = nStaged === rows.length; all.indeterminate = nStaged > 0 && nStaged < rows.length;
+  all.onclick = (e) => { e.stopPropagation(); send(all.checked ? { type: 'stage', paths: rows.map(r => r.path) } : { type: 'unstage', paths: rows.filter(r => r.staged).map(r => r.path) }); };
+  head.append(all, el('span', 'path muted', rows.length + ' changed file(s)'));
+  const da = el('button', 'link act', 'discard all'); da.onclick = (e) => { e.stopPropagation(); send({ type: 'discard', paths: rows.filter(r => r.unstaged).map(r => r.path) }); }; head.append(da);
+  list.append(head);
+  for (const f of rows) {
+    const r = el('div', 'row'); const cb = el('input'); cb.type = 'checkbox'; cb.checked = f.staged && !f.unstaged; cb.indeterminate = f.staged && f.unstaged;
+    cb.title = 'Include in the commit (stage)';
+    cb.onclick = (e) => { e.stopPropagation(); send({ type: cb.checked ? 'stage' : 'unstage', paths: [f.path] }); };
+    const slash = f.path.lastIndexOf('/');
+    const p = el('span', 'path'); if (slash > 0) p.append(el('span', 'dir', f.path.slice(0, slash + 1))); p.append(document.createTextNode(f.path.slice(slash + 1)));
+    const st = f.status === '?' ? 'A' : f.status === 'U' ? 'C' : f.status;
+    r.append(cb, p, el('span', 'st ' + st, st));
+    if (f.unstaged) { const d = el('button', 'link act', '↺'); d.title = 'Discard changes'; d.onclick = (e) => { e.stopPropagation(); send({ type: 'discard', paths: [f.path] }); }; r.insertBefore(d, r.lastChild); }
+    r.title = f.path;
+    if (f.path === selected) r.classList.add('sel');
+    // Wide: the diff next to the list; narrow: VS Code's diff editor.
+    r.onclick = () => { if (document.body.classList.contains('wide')) { selected = f.path; renderChanges(); send({ type: 'workDiff', path: f.path, staged: f.staged && !f.unstaged }); } else send({ type: 'open', path: f.path, staged: f.staged && !f.unstaged, status: f.status }); };
+    r.ondblclick = () => send({ type: 'open', path: f.path, staged: f.staged && !f.unstaged, status: f.status });
+    list.append(r);
+  }
+}
+// ---- history
+$('sText').addEventListener('keydown', (e) => { if (e.key === 'Enter') send({ type: 'search', text: $('sText').value, mode: $('sMode').value, branch: $('sBranch').value }); });
+$('clearSearch').onclick = () => { $('sText').value = ''; send({ type: 'clearSearch' }); };
 function graphRow(row, width) {
-  const W = 14, H = 22, x = (l) => l * W + 8, cy = H / 2;
-  const ns = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(ns, 'svg');
-  svg.setAttribute('width', String(width * W + 8)); svg.setAttribute('height', String(H));
+  const W = 14, H = 22, x = (l) => l * W + 8, cy = H / 2, ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg'); svg.setAttribute('width', String(width * W + 8)); svg.setAttribute('height', String(H));
   const line = (x1, y1, x2, y2, lane) => { const p = document.createElementNS(ns, 'path'); p.setAttribute('d', 'M' + x1 + ' ' + y1 + ' C ' + x1 + ' ' + (y1 + y2) / 2 + ', ' + x2 + ' ' + (y1 + y2) / 2 + ', ' + x2 + ' ' + y2); p.setAttribute('stroke', COLORS[lane % COLORS.length]); p.setAttribute('stroke-width', '1.6'); p.setAttribute('fill', 'none'); svg.append(p); };
-  for (const l of row.pass) line(x(l), 0, x(l), H, l);
-  for (const l of row.into) line(x(l), 0, x(row.lane), cy, l);
-  for (const l of row.out) line(x(row.lane), cy, x(l), H, l);
-  const dot = document.createElementNS(ns, 'circle');
-  dot.setAttribute('cx', String(x(row.lane))); dot.setAttribute('cy', String(cy)); dot.setAttribute('r', row.parents > 1 ? '3' : '4');
-  dot.setAttribute('fill', row.parents > 1 ? 'var(--vscode-editor-background)' : COLORS[row.lane % COLORS.length]);
-  dot.setAttribute('stroke', COLORS[row.lane % COLORS.length]); dot.setAttribute('stroke-width', '2');
-  svg.append(dot);
-  const g = el('div', 'g');
-  g.title = row.sha.slice(0, 8) + ' · ' + row.author + ' · ' + new Date(row.time * 1000).toLocaleString() + (row.parents > 1 ? ' · merge' : '');
+  for (const l of row.pass) line(x(l), 0, x(l), H, l); for (const l of row.into) line(x(l), 0, x(row.lane), cy, l); for (const l of row.out) line(x(row.lane), cy, x(l), H, l);
+  const dot = document.createElementNS(ns, 'circle'); dot.setAttribute('cx', String(x(row.lane))); dot.setAttribute('cy', String(cy)); dot.setAttribute('r', row.parents > 1 ? '3' : '4');
+  dot.setAttribute('fill', row.parents > 1 ? 'var(--vscode-editor-background)' : COLORS[row.lane % COLORS.length]); dot.setAttribute('stroke', COLORS[row.lane % COLORS.length]); dot.setAttribute('stroke-width', '2'); svg.append(dot);
+  const g = el('div', 'g'); g.title = row.sha.slice(0, 8) + ' · ' + row.author + ' · ' + new Date(row.time * 1000).toLocaleString() + (row.parents > 1 ? ' · merge' : '');
   const msg = el('span', 'msg');
   for (const r of row.refs) msg.append(el('span', 'ref' + (r.startsWith('HEAD') ? ' head' : r.startsWith('tag:') ? ' tag' : ''), r.replace('HEAD -> ', '● ').replace('tag: ', '')));
   msg.append(document.createTextNode(row.subject + ' '), el('span', 'muted', row.author));
-  g.append(svg, msg);
-  g.onclick = () => send({ type: 'commitDetails', sha: row.sha });
-  return g;
+  g.append(svg, msg); g.onclick = () => send({ type: 'commitDetails', sha: row.sha }); return g;
 }
-function render() {
-  $('err').textContent = model.error || '';
-  $('busy').textContent = model.busy ? model.busy + '…' : '';
-  const curRepo = model.repos.find(r => r.path === model.repo);
-  $('title').textContent = curRepo ? curRepo.name : '';
-  $('sRepos').style.display = model.states && model.states.length > 1 ? '' : 'none';
-  const rl = $('repos'); rl.textContent = '';
-  for (const s of model.states || []) {
-    const r = el('div', 'row' + (s.path === model.repo ? ' cur' : ''));
-    const name = (model.repos.find(x => x.path === s.path) || { name: s.path }).name;
-    r.append(el('span', 'path', (s.path === model.repo ? '● ' : '') + name), el('span', 'muted', s.branch));
-    if (s.behind) r.append(el('span', 'in', '↓' + s.behind));
-    if (s.ahead) r.append(el('span', 'muted', '↑' + s.ahead));
-    if (s.changes) r.append(el('span', 'muted', '✎' + s.changes));
-    r.title = name + ' · ' + s.branch + (s.upstream ? ' → ' + s.upstream : ' (no upstream)');
-    r.onclick = () => send({ type: 'repo', repo: s.path });
-    rl.append(r);
-  }
-  const cur = model.branches.find(b => b.current);
-  $('branchBtn').textContent = '⎇ ' + (model.head || '—') + (cur && cur.upstream ? '  ↑' + cur.ahead + ' ↓' + cur.behind : cur ? '  (not published)' : '');
-  $('push').textContent = '↑ Push' + (cur && cur.ahead ? ' ' + cur.ahead : '');
-  $('pull').textContent = '↓ Pull' + (cur && cur.behind ? ' ' + cur.behind : '');
-  $('pull').className = cur && cur.behind ? '' : 'secondary';
-  const st = $('staged'), un = $('unstaged'); st.textContent = ''; un.textContent = '';
-  const staged = model.changes.filter(c => c.staged), work = model.changes.filter(c => !c.staged);
-  if (staged.length) { st.append(el('div', 'muted', 'Staged (' + staged.length + ')')); staged.forEach(c => st.append(fileRow(c))); }
-  un.append(el('div', 'muted', work.length ? 'Changes (' + work.length + ')' : (staged.length ? '' : 'No changes')));
-  work.forEach(c => un.append(fileRow(c)));
-  const ahead = cur ? cur.ahead : 0, unpublished = cur && !cur.upstream;
-  const c = $('commit');
-  if (staged.length) { c.dataset.mode = 'commit'; c.textContent = 'Commit (' + staged.length + ')'; c.disabled = false; }
-  else if (model.hasRemote && (ahead || (unpublished && model.rows.length))) { c.dataset.mode = 'push'; c.textContent = unpublished ? '↑ Publish branch' : '↑ Push ' + ahead; c.disabled = false; }
-  else { c.dataset.mode = 'commit'; c.textContent = 'Commit'; c.disabled = true; }
-  $('commitPush').style.display = staged.length ? '' : 'none';
-  $('stageAll').style.display = work.length ? '' : 'none';
-  const br = $('branches'); br.textContent = '';
-  for (const b of model.branches) {
-    const r = el('div', 'row' + (b.current ? ' cur' : ''));
-    r.append(el('span', 'path', (b.current ? '● ' : '') + b.name));
-    const state = b.gone ? 'upstream gone' : b.upstream ? (b.ahead || b.behind ? '↑' + b.ahead + ' ↓' + b.behind : 'up to date') : 'local only';
-    r.append(el('span', 'muted', state));
-    r.title = b.name + (b.upstream ? ' → ' + b.upstream : '');
-    if (!b.current) {
-      r.append(act('merge', 'Merge ' + b.name + ' into ' + model.head, () => send({ type: 'mergeBranch', branch: b.name })));
-      r.append(act('✕', 'Delete ' + b.name, () => send({ type: 'deleteBranch', branch: b.name })));
-      r.onclick = () => send({ type: 'checkout', branch: b.name });
-    } else {
-      r.append(act('↑', b.upstream ? 'Push' : 'Publish to origin', () => send({ type: 'pushBranch', branch: b.name })));
-    }
-    br.append(r);
-  }
-  const rem = $('remotes'); rem.textContent = '';
-  const onlyRemote = model.remoteBranches.filter(r => !model.branches.some(b => r.endsWith('/' + b.name)));
-  if (onlyRemote.length) {
-    rem.append(el('div', 'muted', 'Remote only (' + onlyRemote.length + ')'));
-    for (const r of onlyRemote) { const row = el('div', 'row'); row.append(el('span', 'path muted', r)); row.title = 'Checkout ' + r; row.onclick = () => send({ type: 'checkout', branch: r }); rem.append(row); }
-  }
-  const pl = $('pulls'); pl.textContent = '';
-  if (!model.github) pl.append(el('div', 'muted', 'origin is not on GitHub'));
-  else if (model.pullsError) pl.append(el('div', 'err', model.pullsError));
-  else if (!model.pulls) pl.append(el('div', 'muted', model.github.owner + '/' + model.github.repo + ' — click "load" (signs in to GitHub)'));
-  else if (!model.pulls.length) pl.append(el('div', 'muted', 'No open pull requests'));
-  else for (const p of model.pulls) {
-    const r = el('div', 'row');
-    r.append(el('span', 'path', '#' + p.number + ' ' + p.title + (p.draft ? ' (draft)' : '')), el('span', 'muted', p.head + ' → ' + p.base));
-    r.title = p.author + ' · ' + p.head + ' → ' + p.base;
-    r.append(act('checkout', 'Check out the branch of #' + p.number, () => send({ type: 'checkoutPull', number: p.number })));
-    r.append(act('merge', 'Merge #' + p.number + ' on GitHub', () => send({ type: 'mergePull', number: p.number, method: 'merge' })));
-    r.onclick = () => send({ type: 'openUrl', url: p.url });
-    pl.append(r);
-  }
+function renderHistory() {
   const sb = $('sBranch'); const keep = sb.value; sb.textContent = '';
   const all = el('option', '', 'all branches'); all.value = ''; sb.append(all);
   for (const b of model.branches) { const o = el('option', '', b.name); o.value = b.name; sb.append(o); }
   for (const r of model.remoteBranches) { const o = el('option', '', r); o.value = r; sb.append(o); }
   sb.value = model.search ? (model.search.branch || '') : keep;
-  const gr = $('graph'); gr.textContent = '';
   const rows = model.search ? model.search.rows : model.rows;
-  $('graphTitle').textContent = model.search ? 'Found ' + rows.length + ' commit(s): "' + model.search.text + '" in ' + model.search.mode + (model.search.branch ? ' on ' + model.search.branch : '') : 'Graph';
+  $('graphTitle').textContent = model.search ? 'Found ' + rows.length + ' commit(s): "' + model.search.text + '" in ' + model.search.mode + (model.search.branch ? ' on ' + model.search.branch : '') : '';
   $('clearSearch').style.display = model.search ? '' : 'none';
-  const width = Math.max(1, ...rows.map(r => r.width));
+  const gr = $('graph'); gr.textContent = ''; const width = Math.max(1, ...rows.map(r => r.width));
   for (const row of rows) gr.append(graphRow(row, width));
 }
+function renderPulls() {
+  const pl = $('pulls'); pl.textContent = '';
+  $('createPull').disabled = !model.github; $('loadPulls').disabled = !model.github;
+  if (!model.github) { pl.append(el('div', 'empty', "This repository's origin is not on GitHub.")); return; }
+  if (model.pullsError) { pl.append(el('div', 'err', model.pullsError)); return; }
+  if (!model.pulls) { pl.append(el('div', 'empty', 'Loading (signs in to GitHub)…')); return; }
+  if (!model.pulls.length) { pl.append(el('div', 'empty', 'No open pull requests')); return; }
+  for (const p of model.pulls) {
+    const r = el('div', 'row'); r.append(el('span', 'path', '#' + p.number + ' ' + p.title + (p.draft ? ' (draft)' : '')), el('span', 'muted', p.head + ' → ' + p.base));
+    r.title = p.author + ' · open on GitHub';
+    const co = el('button', 'link act', 'checkout'); co.onclick = (e) => { e.stopPropagation(); send({ type: 'checkoutPull', number: p.number }); };
+    const mg = el('button', 'link act', 'merge'); mg.onclick = (e) => { e.stopPropagation(); send({ type: 'mergePull', number: p.number, method: 'merge' }); };
+    r.append(co, mg); r.onclick = () => send({ type: 'openUrl', url: p.url }); pl.append(r);
+  }
+}
+$('createPull').onclick = () => send({ type: 'createPull' });
+$('loadPulls').onclick = () => send({ type: 'loadPulls' });
+function render() {
+  $('err').textContent = model.error || '';
+  $('busy').textContent = model.busy ? model.busy + '…' : '';
+  const cur = model.branches.find(b => b.current);
+  $('repoV').textContent = model.repo ? repoName(model.repo) : '—';
+  const bv = $('branchV'); bv.textContent = model.head || '—';
+  // The sync button: what the branch needs now.
+  let k = 'Fetch origin', v = '', a = 'fetch';
+  if (!model.hasRemote) { k = 'No remote'; v = ''; a = ''; }
+  else if (cur && !cur.upstream) { k = 'Publish branch'; v = 'to origin'; a = 'push'; }
+  else if (cur && cur.behind) { k = 'Pull origin'; v = '↓ ' + cur.behind + (cur.ahead ? '  ↑ ' + cur.ahead : ''); a = 'pull'; }
+  else if (cur && cur.ahead) { k = 'Push origin'; v = '↑ ' + cur.ahead; a = 'push'; }
+  else { v = 'up to date'; }
+  $('syncK').textContent = k; $('syncV').textContent = v; $('syncBtn').dataset.action = a; $('syncBtn').disabled = !a;
+  const ban = $('banners'); ban.textContent = '';
+  if (model.stash) {
+    const b = el('div', 'banner'); b.append(el('span', 'grow', 'You have changes stashed on ' + model.stash.branch + '.'));
+    const r = el('button', '', 'Restore'); r.onclick = () => send({ type: 'restoreStash' });
+    const d = el('button', 'secondary', 'Discard'); d.onclick = () => send({ type: 'dropStash' }); b.append(r, d); ban.append(b);
+  }
+  if (selected && !model.changes.some(c => c.path === selected)) { selected = null; const pane = $('workDiff'); if (pane) { pane.textContent = ''; pane.append(el('div', 'empty', 'Select a file to see its changes')); } }
+  else if (selected) { const c = model.changes.find(x => x.path === selected); send({ type: 'workDiff', path: selected, staged: !!(c && c.staged && !model.changes.some(x => x.path === selected && !x.staged)) }); }
+  renderChanges(); renderCommitBtn(); renderHistory(); renderPulls();
+}
 window.addEventListener('message', (e) => {
-  if (e.data.type === 'model') { model = e.data.model; render(); }
-  if (e.data.type === 'committed') $('msg').value = '';
+  const d = e.data;
+  if (d.type === 'model') { model = d.model; render(); if (popover.redraw && layer.childElementCount) popover.redraw(); }
+  if (d.type === 'committed') { $('summary').value = ''; $('desc').value = ''; renderCommitBtn(); }
+  if (d.type === 'switchChoice') switchChoice(d);
+  if (d.type === 'workDiff' && d.path === selected) { try { renderDiff(d.path, d.lines || []); } catch (err) { const pane = $('workDiff'); if (pane) { pane.textContent = ''; pane.append(el('div', 'err', 'Cannot show the diff: ' + err)); } } }
+  if (d.type === 'selectFile' && model && document.body.classList.contains('wide')) { selected = d.path; renderChanges(); const c = model.changes.find(x => x.path === d.path); send({ type: 'workDiff', path: d.path, staged: !!(c && c.staged) }); }
+  if (d.type === 'mergePreview') { const info = document.getElementById('mergeInfo'); if (!info) return; const p = d.preview;
+    if (!p) { info.textContent = 'Cannot compare.'; return; }
+    if (p.upToDate) { info.className = 'ok'; info.textContent = 'This branch is up to date with ' + d.branch + ': nothing to merge.'; return; }
+    info.className = p.conflicts.length ? 'warn' : 'ok';
+    info.textContent = 'This will merge ' + p.commits + ' commit(s) from ' + d.branch + ' into ' + d.into + '. ' + (p.conflicts.length ? 'Conflicts in ' + p.conflicts.length + ' file(s): ' + p.conflicts.slice(0, 6).join(', ') + (p.conflicts.length > 6 ? '…' : '') : 'No conflicts.'); }
 });
 send({ type: 'ready' });
 </script></body></html>`;
