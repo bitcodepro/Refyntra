@@ -105,7 +105,7 @@ const common = [
         assert.match(st.description, /\(command:refyntra\.[A-Za-z.]+\)/, `${st.id} has a command button`);
       }
       assert.deepEqual(pkg.contributes.menus['refyntra.editorContext'].map((m) => m.command), ['refyntra.related', 'refyntra.git.history', 'refyntra.tests.runRelated', 'refyntra.find', 'refyntra.findHandler', 'refyntra.findEndpoint', 'refyntra.findRegistration', 'refyntra.rename', 'refyntra.extractMethod', 'refyntra.changeSignature', 'refyntra.moveTypeToFile', 'refyntra.safeDelete', 'refyntra.generateHandler', 'refyntra.cleanup', 'refyntra.taskContext.addSymbol', 'refyntra.taskContext.addFile', 'refyntra.actions']);
-      assert.match(pkg.contributes.menus['editor/context'][0].when, /csharp\|typescript/);
+      assert.match(pkg.contributes.menus['editor/context'].find((m) => m.submenu === 'refyntra.editorContext').when, /csharp\|typescript/);
       const whens = pkg.contributes.viewsWelcome.map((v) => v.when);
       for (const v of ['ready', 'untrusted', 'noSolution', 'hostFailed']) assert.equal(whens.filter((x) => x.includes(`refyntra.welcome == ${v}`)).length, 1, v);
       const all = await vscode.commands.getCommands(true);
@@ -1667,6 +1667,13 @@ scenarios['git-history'] = [
       const line = doc.getText().split(/\r?\n/).findIndex((l) => l.includes('Triple'));
       assert.ok(line > 0);
       assert.equal(await a.git.history(uri, { from: line, to: line }), 1, 'only Bob\'s commit touches the new line');
+      // The light bulb of a selection offers the history of exactly those lines.
+      const ed = await vscode.window.showTextDocument(doc);
+      ed.selection = new vscode.Selection(line, 4, line, 20);
+      const actions = await vscode.commands.executeCommand('vscode.executeCodeActionProvider', uri, ed.selection);
+      const hist = actions.find((x) => /Show Git History of Line/.test(x.title));
+      assert.ok(hist, actions.map((x) => x.title).join(' | '));
+      assert.deepEqual(hist.command.arguments.slice(1), [line, line]);
       // Opening a change: a diff of the commit against its parent.
       await a.git.history(uri, undefined, true);
       await waitFor(() => vscode.window.tabGroups.activeTabGroup.activeTab?.input instanceof vscode.TabInputTextDiff, 'the diff of the newest commit', 20000);

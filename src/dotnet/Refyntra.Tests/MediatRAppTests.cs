@@ -95,6 +95,7 @@ public sealed class MediatRAppTests : IClassFixture<MediatRAppFixture>
     private string Archive => _f.File("Orders.Api", "Controllers", "ArchiveController.cs");
     private string CustomHandlers => _f.File("Orders.Application", "Custom", "Archive.cs");
     private string CustomContracts => _f.File("Orders.Application", "Custom", "Contracts.cs");
+    private string CustomQueries => _f.File("Orders.Application", "Custom", "Queries.cs");
 
     [Fact]
     public async Task OwnHandlerInterfacesConnectControllerActionsAndHandlers()
@@ -152,6 +153,29 @@ public sealed class MediatRAppTests : IClassFixture<MediatRAppFixture>
             // Each type once, although "CreateOrder" also finds CreateOrderCommand by name.
             Assert.Single(names, n => n == "CreateOrderCommand");
         }
+    }
+
+    [Fact]
+    public async Task CqrsOverMediatRQueriesAndCommandsReachTheirHandlers()
+    {
+        var products = _f.File("Orders.Api", "Controllers", "ProductsController.cs");
+        Assert.Equal("GetProductPricesQuery → GetProductPricesQueryHandler", Label(Assert.Single(Relations(await RelatedAsync(products, "GetProductPrices(string"), "mediatr.handler"))));
+        Assert.Equal("ArchiveProductCommand → ArchiveProductCommandHandler", Label(Assert.Single(Relations(await RelatedAsync(products, "Archive(string"), "mediatr.handler"))));
+        // Not twice: the CQRS interfaces derive from MediatR's, which MediatR's module already relates.
+        Assert.Empty(Relations(await RelatedAsync(products, "GetProductPrices(string"), "handler.handler"));
+        var cqrs = _f.File("Orders.Application", "Cqrs", "Abstractions.cs");
+        var callers = Relations(await RelatedAsync(cqrs, "class GetProductPricesQueryHandler", 6), "mediatr.send").Select(Label).ToList();
+        Assert.Contains(callers, l => l.Contains("ProductsController.GetProductPrices"));
+    }
+
+    [Fact]
+    public async Task OwnQueryHandedToAMethodOfAnyNameShowsItsHandler()
+    {
+        var rates = _f.File("Orders.Api", "Controllers", "RatesController.cs");
+        var h = Assert.Single(Relations(await RelatedAsync(rates, "GetRates(string"), "handler.handler"));
+        Assert.Equal("GetRatesQuery → GetRatesQueryHandler", Label(h));
+        var callers = Relations(await RelatedAsync(CustomQueries, "class GetRatesQueryHandler", 6), "handler.dispatch").Select(Label).ToList();
+        Assert.Contains(callers, l => l.StartsWith("QueryAsync(GetRatesQuery) in") && l.Contains("RatesController.GetRates"));
     }
 
     [Fact]

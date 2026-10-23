@@ -197,6 +197,25 @@ async function showHistory(git: GitService, uri: vscode.Uri, range?: { from: num
   return items.length;
 }
 
+const SELECTION_HISTORY_KIND = vscode.CodeActionKind.Refactor.append('refyntra.gitHistory');
+
+/** The lines a selection covers (an end at column 0 of a later line does not count that line). */
+export function selectionLines(sel: vscode.Range): { from: number; to: number } {
+  return { from: sel.start.line, to: sel.end.character === 0 && sel.end.line > sel.start.line ? sel.end.line - 1 : sel.end.line };
+}
+
+class SelectionHistoryActions implements vscode.CodeActionProvider {
+  constructor(private readonly isTrusted: () => boolean) {}
+
+  provideCodeActions(doc: vscode.TextDocument, range: vscode.Range | vscode.Selection): vscode.CodeAction[] {
+    if (range.isEmpty || !this.isTrusted() || doc.uri.scheme !== 'file') return [];
+    const { from, to } = selectionLines(range);
+    const action = new vscode.CodeAction(from === to ? `Show Git History of Line ${from + 1}` : `Show Git History of Lines ${from + 1}–${to + 1}`, SELECTION_HISTORY_KIND);
+    action.command = { command: 'refyntra.git.rangeHistory', title: action.title, arguments: [doc.uri, from, to] };
+    return [action];
+  }
+}
+
 export interface GitApi {
   service: GitService;
   /** Tests: the history items (no picker; the first is opened when `open`). */
@@ -230,6 +249,8 @@ export function registerGit(context: vscode.ExtensionContext, isTrusted: () => b
       const range = sel ? { from: sel.start.line, to: sel.end.character === 0 && sel.end.line > sel.start.line ? sel.end.line - 1 : sel.end.line } : undefined;
       await showHistory(service, uri, range);
     }),
+    // In the light bulb (Ctrl+.) of a selection, any language: the history of exactly those lines.
+    vscode.languages.registerCodeActionsProvider({ scheme: 'file' }, new SelectionHistoryActions(isTrusted), { providedCodeActionKinds: [SELECTION_HISTORY_KIND] }),
     vscode.commands.registerCommand('refyntra.git.rangeHistory', async (uri: vscode.Uri, from: number, to: number) => {
       if (!needsTrust()) return;
       await showHistory(service, uri, { from, to });
