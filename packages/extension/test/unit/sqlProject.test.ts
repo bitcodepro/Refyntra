@@ -33,12 +33,22 @@ describe('database projects', () => {
       { file: '/w/Db/bin/Release/Shop.dacpac', mtime: 200 },
       { file: '/w/Db/bin/Release/master.dacpac', mtime: 300 },
     ];
-    expect(pickDacpac('Shop.dacpac', 'Debug', c)).toBe('/w/Db/bin/Debug/Shop.dacpac');
-    expect(pickDacpac('Shop.dacpac', 'release', c)).toBe('/w/Db/bin/Release/Shop.dacpac');
-    expect(pickDacpac('Shop.dacpac', 'Debug', [{ file: 'C:\\w\\Db\\bin\\x64\\Debug\\Shop.dacpac', mtime: 1 }])).toBe('C:\\w\\Db\\bin\\x64\\Debug\\Shop.dacpac');
+    expect(pickDacpac('Shop.dacpac', 'Debug', '/w/Db/bin', c)).toBe('/w/Db/bin/Debug/Shop.dacpac');
+    expect(pickDacpac('Shop.dacpac', 'release', '/w/Db/bin', c)).toBe('/w/Db/bin/Release/Shop.dacpac');
+    // Windows paths read the same on every OS (CI runs on Linux).
+    expect(pickDacpac('Shop.dacpac', 'Debug', 'C:\\w\\Db\\bin', [{ file: 'C:\\w\\Db\\bin\\x64\\Debug\\Shop.dacpac', mtime: 1 }])).toBe('C:\\w\\Db\\bin\\x64\\Debug\\Shop.dacpac');
     // Only another configuration's file: nothing (reported as not found), not the wrong artifact.
-    expect(pickDacpac('Shop.dacpac', 'Debug', c.slice(1))).toBeUndefined();
-    expect(pickDacpac('Other.dacpac', 'Debug', c)).toBeUndefined();
+    expect(pickDacpac('Shop.dacpac', 'Debug', '/w/Db/bin', c.slice(1))).toBeUndefined();
+    expect(pickDacpac('Other.dacpac', 'Debug', '/w/Db/bin', c)).toBeUndefined();
+    // A checkout under a folder named Debug: only folders below bin count, so the newer Release file is not Debug's.
+    const under = [
+      { file: '/work/Debug/Db/bin/Debug/Shop.dacpac', mtime: 50 },
+      { file: '/work/Debug/Db/bin/Release/Shop.dacpac', mtime: 200 },
+    ];
+    expect(pickDacpac('Shop.dacpac', 'Debug', '/work/Debug/Db/bin', under)).toBe('/work/Debug/Db/bin/Debug/Shop.dacpac');
+    expect(pickDacpac('Shop.dacpac', 'Debug', '/work/Debug/Db/bin', under.slice(1))).toBeUndefined();
+    // A file directly in bin or outside it is no configuration's.
+    expect(pickDacpac('Shop.dacpac', 'Debug', '/w/Db/bin', [{ file: '/w/Db/bin/Shop.dacpac', mtime: 1 }, { file: '/w/Debug/Shop.dacpac', mtime: 2 }])).toBeUndefined();
   });
 
   it('asks MSBuild for SqlTargetPath/TargetPath with the build configuration', () => {

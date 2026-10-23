@@ -85,7 +85,8 @@ export async function buildDatabase(isTrusted: () => boolean, arg: unknown, quie
   if (exitCode === 0) {
     const out = await askMsbuild(dbOutputQuery(cmd), cmd.cwd);
     const asked = out === undefined ? undefined : dacpacFromQuery(out, cmd.cwd);
-    dacpac = asked && fs.existsSync(asked) ? asked : pickDacpac(dacpacName(project, text), configuration, dacpacsUnder(path.join(path.dirname(project), 'bin')));
+    const bin = path.join(path.dirname(project), 'bin');
+    dacpac = asked && fs.existsSync(asked) ? asked : pickDacpac(dacpacName(project, text), configuration, bin, dacpacsUnder(bin));
   }
   const result: DbBuildResult = { project, exitCode, dacpac };
   if (quiet) return result;

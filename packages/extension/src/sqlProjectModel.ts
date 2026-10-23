@@ -63,14 +63,19 @@ export function dacpacFromQuery(output: string, projectDir: string): string | un
 
 /**
  * Without an answer from MSBuild (older than 17.8 has no -getProperty): the .dacpac named like the project's in a folder
- * named after the built configuration (bin/Debug, bin/x64/Debug), never another configuration's. Not filtered by the
- * build's start time: an up-to-date build does not rewrite the file.
+ * under the bin root named after the built configuration (bin/Debug, bin/x64/Debug), never another configuration's.
+ * Only folders below the bin root count (a checkout under /work/Debug does not make every file Debug's). Both path
+ * separators are read on every OS. Not filtered by the build's start time: an up-to-date build does not rewrite the file.
  */
-export function pickDacpac(name: string, configuration: string, candidates: { file: string; mtime: number }[]): string | undefined {
+export function pickDacpac(name: string, configuration: string, binRoot: string, candidates: { file: string; mtime: number }[]): string | undefined {
+  const parts = (p: string) => p.split(/[\\/]+/).filter((s) => s.length > 0).map((s) => s.toLowerCase());
+  const root = parts(binRoot);
   const config = configuration.toLowerCase();
-  const named = candidates.filter(
-    (c) => path.basename(c.file).toLowerCase() === name.toLowerCase() && c.file.split(/[\\/]/).slice(0, -1).some((d) => d.toLowerCase() === config),
-  );
+  const named = candidates.filter((c) => {
+    const p = parts(c.file);
+    if (p.length <= root.length + 1 || root.some((s, i) => p[i] !== s)) return false;
+    return p[p.length - 1] === name.toLowerCase() && p.slice(root.length, -1).includes(config);
+  });
   named.sort((a, b) => b.mtime - a.mtime);
   return named[0]?.file;
 }
