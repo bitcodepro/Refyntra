@@ -2148,6 +2148,11 @@
       ],
       "editor/context": [
         {
+          "command": "refyntra.git.history",
+          "when": "editorHasSelection && resourceScheme == file && isWorkspaceTrusted",
+          "group": "1_modification@9"
+        },
+        {
           "submenu": "refyntra.editorContext",
           "when": "editorLangId =~ /^(csharp|typescript|typescriptreact|javascript|javascriptreact|python|rust)$/ && resourceScheme == file",
           "group": "navigation@90"

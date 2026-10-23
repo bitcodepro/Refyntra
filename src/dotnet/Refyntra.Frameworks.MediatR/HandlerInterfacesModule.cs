@@ -18,9 +18,6 @@ public sealed class HandlerInterfacesModule : IFrameworkModule
     public string Id => "handlers";
     public string ProviderRouteId => "csharp.roslyn/handlers";
 
-    private static readonly string[] DispatchNames =
-        { "Send", "SendAsync", "Dispatch", "DispatchAsync", "Execute", "ExecuteAsync", "Publish", "PublishAsync", "Handle", "HandleAsync", "Process", "ProcessAsync" };
-
     private const string Limitation = "Own handler interface (not MediatR): found by its shape; which implementation runs is chosen at run time (DI registration).";
 
     public sealed record HandlerFact(INamedTypeSymbol HandlerType, ITypeSymbol Request, INamedTypeSymbol Interface);
@@ -34,14 +31,53 @@ public sealed class HandlerInterfacesModule : IFrameworkModule
         public SortedSet<string> Interfaces { get; } = new(StringComparer.Ordinal);
     }
 
-    /// <summary>A generic interface named *Handler (not MediatR's) with a method whose first parameter is its first type parameter.</summary>
+    /// <summary>
+    /// A handler interface: generic, named *Handler, and either declaring a method that takes its first type argument
+    /// (ICommandHandler&lt;T&gt; { Task Handle(T, …) }) or deriving from another *Handler interface (the CQRS layer over
+    /// MediatR: IQueryHandler&lt;TQuery, T&gt; : IRequestHandler&lt;TQuery, T&gt;). A resolved MediatR handler interface is
+    /// MediatR's module's; an unresolved one (packages not restored, so MediatR is an error type) is handled here.
+    /// </summary>
     public static bool IsHandlerInterface(INamedTypeSymbol iface)
     {
         var def = iface.OriginalDefinition;
-        if (def.TypeKind != TypeKind.Interface || def.TypeParameters.Length == 0 || !def.Name.EndsWith("Handler", StringComparison.Ordinal)) return false;
-        if (def.ContainingNamespace?.ToDisplayString() is { } ns && (ns == "MediatR" || ns.StartsWith("MediatR.", StringComparison.Ordinal))) return false;
+        if (iface.TypeArguments.Length == 0 || !def.Name.EndsWith("Handler", StringComparison.Ordinal)) return false;
+        if (def.TypeKind == TypeKind.Error) return true;
+        if (def.TypeKind != TypeKind.Interface) return false;
+        if (IsMediatR(def) || def.AllInterfaces.Any(IsMediatR)) return false;
         var first = def.TypeParameters[0];
-        return def.GetMembers().OfType<IMethodSymbol>().Any(m => m.Parameters.Length > 0 && SymbolEqualityComparer.Default.Equals(m.Parameters[0].Type, first));
+        if (def.GetMembers().OfType<IMethodSymbol>().Any(m => m.Parameters.Length > 0 && SymbolEqualityComparer.Default.Equals(m.Parameters[0].Type, first)))
+            return true;
+        return def.Interfaces.Any(b => b.Name.EndsWith("Handler", StringComparison.Ordinal) && b.TypeArguments.Length > 0);
+    }
+
+    /// <summary>A resolved MediatR type (MediatR's module relates those).</summary>
+    private static bool IsMediatR(INamedTypeSymbol t) =>
+        t.TypeKind != TypeKind.Error && t.ContainingNamespace?.ToDisplayString() is { } ns && (ns == "MediatR" || ns.StartsWith("MediatR.", StringComparison.Ordinal));
+
+    private static async Task AddFromBaseListAsync(INamedTypeSymbol type, Project project, Facts facts, HashSet<ITypeSymbol> requests, CancellationToken ct)
+    {
+        foreach (var r in type.DeclaringSyntaxReferences)
+        {
+            if (await r.GetSyntaxAsync(ct).ConfigureAwait(false) is not Microsoft.CodeAnalysis.CSharp.Syntax.TypeDeclarationSyntax decl || decl.BaseList == null) continue;
+            var doc = project.GetDocument(decl.SyntaxTree);
+            var model = doc == null ? null : await doc.GetSemanticModelAsync(ct).ConfigureAwait(false);
+            if (model == null) continue;
+            foreach (var b in decl.BaseList.Types)
+            {
+                var generic = b.Type switch
+                {
+                    Microsoft.CodeAnalysis.CSharp.Syntax.GenericNameSyntax g => g,
+                    Microsoft.CodeAnalysis.CSharp.Syntax.QualifiedNameSyntax { Right: Microsoft.CodeAnalysis.CSharp.Syntax.GenericNameSyntax g } => g,
+                    _ => null,
+                };
+                if (generic == null || !generic.Identifier.ValueText.EndsWith("Handler", StringComparison.Ordinal) || generic.TypeArgumentList.Arguments.Count == 0) continue;
+                if (model.GetTypeInfo(b.Type, ct).Type is not INamedTypeSymbol iface || iface.TypeKind != TypeKind.Error) continue;
+                if (model.GetTypeInfo(generic.TypeArgumentList.Arguments[0], ct).Type is not { } request || request is ITypeParameterSymbol || request.TypeKind == TypeKind.Error) continue;
+                if (!requests.Add(request)) continue;
+                facts.Handlers.Add(new HandlerFact(type, request, iface));
+                facts.Interfaces.Add(generic.Identifier.ValueText + "<…> (unresolved)");
+            }
+        }
     }
 
     public async Task<object> AnalyzeAsync(FrameworkContext context, CancellationToken ct)
@@ -54,44 +90,60 @@ public sealed class HandlerInterfacesModule : IFrameworkModule
             foreach (var type in SourceTypes(compilation.Assembly.GlobalNamespace))
             {
                 if (type.IsAbstract || type.TypeKind != TypeKind.Class) continue;
+                // One fact per handler and request: IQueryHandler<Q, R> and the IRequestHandler<Q, R> it derives from are
+                // the same handler; the most specific interface (the first, the project's own) names it.
+                var requests = new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default);
                 foreach (var iface in type.AllInterfaces.Where(IsHandlerInterface))
                 {
-                    if (iface.TypeArguments[0] is ITypeParameterSymbol) continue;
+                    if (iface.TypeArguments[0] is ITypeParameterSymbol || !requests.Add(iface.TypeArguments[0])) continue;
                     facts.Handlers.Add(new HandlerFact(type, iface.TypeArguments[0], iface));
                     facts.Interfaces.Add(iface.OriginalDefinition.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat));
                 }
+                // An unresolved generic base (IRequestHandler<X> while MediatR's package is not restored) keeps no type
+                // arguments in its error symbol: the request is read from the declaration's base list.
+                if (requests.Count == 0) await AddFromBaseListAsync(type, project, facts, requests, ct).ConfigureAwait(false);
             }
         }
         if (facts.Handlers.Count == 0) return facts;
 
+        // Dispatch sites, whatever the method is called (HandleRequest, QueryAsync, RunCommand…): a call through the handler
+        // interface, or any call that receives a request object whose handler is in source. Compared by identity: the
+        // request type seen from the controller's project is another symbol instance than in the handler's project.
+        string Key(ISymbol x) => (DocumentationCommentId.CreateDeclarationId(x.OriginalDefinition) ?? x.ToDisplayString()) + "|" + x.ContainingAssembly?.Identity.Name;
+        var handled = facts.Handlers.Select(h => Key(h.Request)).ToHashSet(StringComparer.Ordinal);
+        var handlerTypes = facts.Handlers.Select(h => Key(h.HandlerType)).ToHashSet(StringComparer.Ordinal);
         foreach (var project in context.Projects)
         {
-            foreach (var (_, root, model) in await SymbolIdentity.DocumentsContainingAsync(project, DispatchNames, ct).ConfigureAwait(false))
+            foreach (var doc in project.Documents)
             {
+                var root = await doc.GetSyntaxRootAsync(ct).ConfigureAwait(false);
+                if (root == null) continue;
+                SemanticModel? model = null;
                 foreach (var inv in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
                 {
-                    var name = SymbolIdentity.InvokedName(inv);
-                    if (name == null || Array.IndexOf(DispatchNames, name) < 0) continue;
+                    if (inv.ArgumentList.Arguments.Count == 0) continue;
+                    model ??= await doc.GetSemanticModelAsync(ct).ConfigureAwait(false);
+                    if (model == null) break;
                     var method = SymbolIdentity.InvokedMethod(model, inv, ct);
-                    if (method?.ContainingType == null) continue;
-                    var container = method.ContainingType;
-                    if (container.ContainingNamespace?.ToDisplayString() is { } ns && (ns == "MediatR" || ns.StartsWith("MediatR.", StringComparison.Ordinal))) continue;
+                    var container = method?.ContainingType;
+                    if (container?.ContainingNamespace?.ToDisplayString() is { } ns && (ns == "MediatR" || ns.StartsWith("MediatR.", StringComparison.Ordinal))) continue;
+                    var name = SymbolIdentity.InvokedName(inv) ?? method?.Name ?? "call";
                     ITypeSymbol? request = null;
-                    if (container.TypeKind == TypeKind.Interface && IsHandlerInterface(container))
-                    {
-                        // Through the handler interface (an injected handler): the request type from the interface.
+                    if (container is { TypeKind: TypeKind.Interface } && IsHandlerInterface(container))
                         request = container.TypeArguments[0];
-                    }
-                    else if (inv.ArgumentList.Arguments.Count > 0)
+                    else
                     {
-                        // A dispatcher (bus, command processor): its argument is a request that has a handler.
-                        var arg = model.GetTypeInfo(inv.ArgumentList.Arguments[0].Expression, ct).Type;
-                        if (arg != null && facts.Handlers.Any(h => SymbolIdentity.SameDefinition(h.Request, arg))
-                            && !facts.Handlers.Any(h => SymbolIdentity.SameDefinition(h.HandlerType, container)))
-                            request = arg;
+                        var enclosing = model.GetEnclosingSymbol(inv.SpanStart, ct)?.ContainingType;
+                        if (enclosing != null && handlerTypes.Contains(Key(enclosing))) continue;
+                        foreach (var arg in inv.ArgumentList.Arguments)
+                            if (model.GetTypeInfo(arg.Expression, ct).Type is INamedTypeSymbol t && t.TypeKind is TypeKind.Class or TypeKind.Struct && handled.Contains(Key(t)))
+                            {
+                                request = t;
+                                break;
+                            }
                     }
                     if (request == null || request.TypeKind is TypeKind.TypeParameter or TypeKind.Error) continue;
-                    var at = inv.Expression is MemberAccessExpressionSyntax ma ? ma.Name.GetLocation() : inv.GetLocation();
+                    var at = inv.Expression is MemberAccessExpressionSyntax ma ? ma.Name.GetLocation() : inv.Expression.GetLocation();
                     facts.Dispatches.Add(new DispatchFact(at, request, name, SymbolIdentity.CompositionRoot(model, inv, ct), inv.SyntaxTree, inv.Span));
                 }
             }
