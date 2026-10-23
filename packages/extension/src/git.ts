@@ -136,7 +136,7 @@ class AuthorLensProvider implements vscode.CodeLensProvider {
 
   async provideCodeLenses(doc: vscode.TextDocument): Promise<vscode.CodeLens[]> {
     const c = vscode.workspace.getConfiguration('refyntra');
-    if (!c.get<boolean>('codeLens.enabled', true) || !c.get<boolean>('codeLens.authors', true) || doc.uri.scheme !== 'file') return [];
+    if (!c.get<boolean>('codeLens.enabled', true) || !c.get<boolean>('codeLens.authors', false) || doc.uri.scheme !== 'file') return [];
     // No lens at all outside a repository (or in Restricted Mode), not an empty one.
     if (!(await this.git.blame(doc))) return [];
     const decls = scanCSharpDeclarations(doc.getText());

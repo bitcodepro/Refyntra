@@ -2830,7 +2830,7 @@
         },
         "refyntra.codeLens.authors": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "description": "CodeLens: who wrote a C# type or method (git blame: main author, last change); click for the history of its lines."
         },
         "refyntra.codeLens.efCore": {

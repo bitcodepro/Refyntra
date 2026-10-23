@@ -1682,7 +1682,10 @@ scenarios['git-history'] = [
       const after = (await vscode.workspace.openTextDocument(diff.modified)).getText();
       assert.match(after, /Triple/, 'the commit side has the new method');
       await vscode.commands.executeCommand('workbench.action.closeAllEditors');
-      // Authorship CodeLens: Bob for Triple, Alice for the class.
+      // Authorship CodeLens (off by default): Bob for Triple, Alice for the class.
+      const lensCount = async () => (await vscode.commands.executeCommand('vscode.executeCodeLensProvider', uri, 100)).filter((l) => (l.command?.title ?? '').includes('$(person)')).length;
+      assert.equal(await lensCount(), 0, 'no author lenses by default');
+      await vscode.workspace.getConfiguration('refyntra').update('codeLens.authors', true, vscode.ConfigurationTarget.Workspace);
       await vscode.window.showTextDocument(doc);
       const titles = await waitFor(async () => {
         const lenses = await vscode.commands.executeCommand('vscode.executeCodeLensProvider', uri, 100);
@@ -1692,6 +1695,7 @@ scenarios['git-history'] = [
       assert.ok(titles.every((t) => /just now|ago/.test(t)), titles.join(' | '));
       // The new method is Bob's alone: the class's closing brace (Alice's) does not count.
       assert.ok(titles.some((t) => /\$\(person\) Bob, /.test(t)), titles.join(' | '));
+      await vscode.workspace.getConfiguration('refyntra').update('codeLens.authors', undefined, vscode.ConfigurationTarget.Workspace);
     },
   ],
   [
@@ -1817,6 +1821,17 @@ scenarios['git-client'] = [
         g.hooks.confirm = true;
         assert.equal(await g.mergeBranch('feature/zoo'), true, g.lastError);
         assert.ok(fs.existsSync(nodePath.join(root, 'ConsoleApp', 'Zoo.cs')), 'merged');
+        // Cherry-pick a commit from another branch by its hash.
+        git(root, 'checkout', '-q', '-b', 'side');
+        fs.writeFileSync(nodePath.join(root, 'ConsoleApp', 'Picked.cs'), 'public static class Picked { }\n');
+        git(root, 'add', '.');
+        git(root, '-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', 'Pick me');
+        const picked = git(root, 'rev-parse', 'HEAD').trim();
+        git(root, 'checkout', '-q', 'main');
+        assert.equal(await g.cherryPick('--x'), false);
+        assert.equal(await g.cherryPick(picked), true, g.lastError);
+        assert.ok(fs.existsSync(nodePath.join(root, 'ConsoleApp', 'Picked.cs')), 'cherry-picked');
+        git(root, 'branch', '-q', '-D', 'side');
         assert.equal(await g.deleteBranch('feature/zoo'), true, g.lastError);
         assert.ok(!g.model().branches.some((b) => b.name === 'feature/zoo'));
         // Option-like names are refused before git sees them.
@@ -1895,6 +1910,12 @@ scenarios['git-client'] = [
         const editorTab = g.openInEditor();
         assert.equal(editorTab.title, 'Refyntra Git');
         editorTab.dispose();
+        // Reopened after closing: a fresh tab, not the disposed one.
+        const again = g.openInEditor();
+        assert.notEqual(again, editorTab);
+        await g.refresh();
+        again.dispose();
+        g.openInEditor().dispose();
         // Pull requests against a fake GitHub (no network): origin must be on GitHub.
         git(root, 'remote', 'set-url', 'origin', 'https://github.com/acme/shop.git');
         git(root, 'remote', 'set-url', '--push', 'origin', remote);
