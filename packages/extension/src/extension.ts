@@ -39,6 +39,7 @@ import { runCleanup, undoCleanup } from './cleanup';
 import { runChangeSignature, runDelegatedAction, runExtractMethod, runIntroduceParameter, runSafeDelete, undoCode } from './codeRefactor';
 import { CSHARP_GENERATE_HANDLER_ACTION, CSHARP_MOVE_TYPE_ACTION } from '@refyntra/contracts';
 import { runRestore } from './restore';
+import { registerDatabase } from './sqlProject';
 import { registerCodeActions } from './codeActions';
 import { registerConstructorActions } from './constructorActions';
 import { registerEditActions, runCrossFilePlan } from './editActions';
@@ -492,6 +493,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     vscode.commands.registerCommand('refyntra.statusMenu', () => statusBar.showMenu()),
     vscode.commands.registerCommand('refyntra.nativeRename', (uri?: unknown, position?: unknown) => runNativeRename(uri, position)),
     vscode.commands.registerCommand('refyntra.runRestore', (target: unknown) => runRestore(isTrusted, target)),
+    registerDatabase(isTrusted),
     vscode.commands.registerCommand('refyntra.showHealth', () => healthPage.show()),
     vscode.commands.registerCommand(HEALTH_TEXT_COMMAND, () => health.show()),
     vscode.commands.registerCommand('refyntra.restartBackend', async () => {

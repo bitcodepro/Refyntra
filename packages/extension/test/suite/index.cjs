@@ -1645,6 +1645,32 @@ scenarios.navigation.push(...require('./metadata.cjs').cases({ api, csharp, wait
 // Run and Debug on a temp copy of the Runnable fixture (bundled netcoredbg and debugpy; test/suite/runDebug.cjs).
 scenarios['run-debug'] = require('./runDebug.cjs').cases({ api, csharp, waitFor });
 
+scenarios['database'] = [
+  [
+    'Build Database Project: an SDK-style .sqlproj builds to a .dacpac; a Visual Studio (SSDT) one without Visual Studio explains why not',
+    async () => {
+      await api();
+      const fs = require('node:fs');
+      const root = vscode.workspace.workspaceFolders[0].uri.fsPath;
+      const db = nodePath.join(root, 'ShopDb');
+      fs.mkdirSync(nodePath.join(db, 'Tables'), { recursive: true });
+      fs.writeFileSync(nodePath.join(db, 'ShopDb.sqlproj'), '<Project Sdk="Microsoft.Build.Sql/2.3.0">\n  <PropertyGroup>\n    <Name>ShopDb</Name>\n    <DSP>Microsoft.Data.Tools.Schema.Sql.Sql160DatabaseSchemaProvider</DSP>\n  </PropertyGroup>\n</Project>\n');
+      fs.writeFileSync(nodePath.join(db, 'Tables', 'Orders.sql'), 'CREATE TABLE [dbo].[Orders] ([Id] INT NOT NULL PRIMARY KEY, [Total] DECIMAL(18, 2) NOT NULL);\n');
+      const built = await vscode.commands.executeCommand('refyntra.database.build', vscode.Uri.file(nodePath.join(db, 'ShopDb.sqlproj')), true);
+      assert.equal(built.exitCode, 0, JSON.stringify(built));
+      assert.ok(built.dacpac && fs.existsSync(built.dacpac), JSON.stringify(built));
+      assert.equal(nodePath.basename(built.dacpac), 'ShopDb.dacpac');
+      if (process.platform === 'win32') return;
+      const legacy = nodePath.join(root, 'OldDb', 'OldDb.sqlproj');
+      fs.mkdirSync(nodePath.dirname(legacy), { recursive: true });
+      fs.writeFileSync(legacy, '<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">\n  <Import Project="$(SQLDBExtensionsRefPath)\Microsoft.Data.Tools.Schema.SqlTasks.targets" />\n</Project>\n');
+      const old = await vscode.commands.executeCommand('refyntra.database.build', legacy, true);
+      assert.equal(old.exitCode, undefined);
+      assert.match(old.error, /Microsoft\.Build\.Sql/);
+    },
+  ],
+];
+
 scenarios['git-history'] = [
   [
     'Show History of a file and of selected lines (two authors); a change opens as a diff; the authorship CodeLens names the authors',
@@ -1682,7 +1708,10 @@ scenarios['git-history'] = [
       const after = (await vscode.workspace.openTextDocument(diff.modified)).getText();
       assert.match(after, /Triple/, 'the commit side has the new method');
       await vscode.commands.executeCommand('workbench.action.closeAllEditors');
-      // Authorship CodeLens: Bob for Triple, Alice for the class.
+      // Authorship CodeLens (off by default): Bob for Triple, Alice for the class.
+      const lensCount = async () => (await vscode.commands.executeCommand('vscode.executeCodeLensProvider', uri, 100)).filter((l) => (l.command?.title ?? '').includes('$(person)')).length;
+      assert.equal(await lensCount(), 0, 'no author lenses by default');
+      await vscode.workspace.getConfiguration('refyntra').update('codeLens.authors', true, vscode.ConfigurationTarget.Workspace);
       await vscode.window.showTextDocument(doc);
       const titles = await waitFor(async () => {
         const lenses = await vscode.commands.executeCommand('vscode.executeCodeLensProvider', uri, 100);
@@ -1692,6 +1721,7 @@ scenarios['git-history'] = [
       assert.ok(titles.every((t) => /just now|ago/.test(t)), titles.join(' | '));
       // The new method is Bob's alone: the class's closing brace (Alice's) does not count.
       assert.ok(titles.some((t) => /\$\(person\) Bob, /.test(t)), titles.join(' | '));
+      await vscode.workspace.getConfiguration('refyntra').update('codeLens.authors', undefined, vscode.ConfigurationTarget.Workspace);
     },
   ],
   [
@@ -1817,6 +1847,17 @@ scenarios['git-client'] = [
         g.hooks.confirm = true;
         assert.equal(await g.mergeBranch('feature/zoo'), true, g.lastError);
         assert.ok(fs.existsSync(nodePath.join(root, 'ConsoleApp', 'Zoo.cs')), 'merged');
+        // Cherry-pick a commit from another branch by its hash.
+        git(root, 'checkout', '-q', '-b', 'side');
+        fs.writeFileSync(nodePath.join(root, 'ConsoleApp', 'Picked.cs'), 'public static class Picked { }\n');
+        git(root, 'add', '.');
+        git(root, '-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', 'Pick me');
+        const picked = git(root, 'rev-parse', 'HEAD').trim();
+        git(root, 'checkout', '-q', 'main');
+        assert.equal(await g.cherryPick('--x'), false);
+        assert.equal(await g.cherryPick(picked), true, g.lastError);
+        assert.ok(fs.existsSync(nodePath.join(root, 'ConsoleApp', 'Picked.cs')), 'cherry-picked');
+        git(root, 'branch', '-q', '-D', 'side');
         assert.equal(await g.deleteBranch('feature/zoo'), true, g.lastError);
         assert.ok(!g.model().branches.some((b) => b.name === 'feature/zoo'));
         // Option-like names are refused before git sees them.
@@ -1895,6 +1936,12 @@ scenarios['git-client'] = [
         const editorTab = g.openInEditor();
         assert.equal(editorTab.title, 'Refyntra Git');
         editorTab.dispose();
+        // Reopened after closing: a fresh tab, not the disposed one.
+        const again = g.openInEditor();
+        assert.notEqual(again, editorTab);
+        await g.refresh();
+        again.dispose();
+        g.openInEditor().dispose();
         // Pull requests against a fake GitHub (no network): origin must be on GitHub.
         git(root, 'remote', 'set-url', 'origin', 'https://github.com/acme/shop.git');
         git(root, 'remote', 'set-url', '--push', 'origin', remote);

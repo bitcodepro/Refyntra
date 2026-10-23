@@ -193,6 +193,12 @@
         "category": "Refyntra"
       },
       {
+        "command": "refyntra.database.build",
+        "title": "Build Database Project (.dacpac)",
+        "category": "Refyntra",
+        "icon": "$(database)"
+      },
+      {
         "command": "refyntra.runRestore",
         "title": "Run dotnet restore",
         "category": "Refyntra"
@@ -2126,6 +2132,11 @@
       ],
       "explorer/context": [
         {
+          "command": "refyntra.database.build",
+          "when": "resourceExtname == .sqlproj && isWorkspaceTrusted",
+          "group": "7_refyntra@0"
+        },
+        {
           "command": "refyntra.git.history",
           "when": "!explorerResourceIsFolder && resourceScheme == file",
           "group": "7_refyntra@1"
@@ -2828,9 +2839,20 @@
           "minimum": 0,
           "markdownDescription": "Minutes between background fetches of every repository of the workspace (the Git tab then shows incoming commits, ↓N, and a badge). `0` turns it off. Never pulls by itself."
         },
+        "refyntra.database.configuration": {
+          "type": "string",
+          "default": "Debug",
+          "description": "Build configuration for database projects (.sqlproj → .dacpac)."
+        },
+        "refyntra.database.msbuildPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "MSBuild.exe for Visual Studio (SSDT) database projects. Empty: the newest Visual Studio found by vswhere. SDK-style projects (`Microsoft.Build.Sql`) build with `dotnet build` and do not need it."
+        },
         "refyntra.codeLens.authors": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "description": "CodeLens: who wrote a C# type or method (git blame: main author, last change); click for the history of its lines."
         },
         "refyntra.codeLens.efCore": {

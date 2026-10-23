@@ -161,9 +161,10 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
     view.onDidChangeVisibility(() => {
       if (view.visible) void this.refresh();
     });
+    const webview = view.webview;
     view.onDidDispose(() => {
-      this.webviews.delete(view.webview);
-      this.sideView = undefined;
+      this.webviews.delete(webview);
+      if (this.sideView === view) this.sideView = undefined;
     });
     this.updateBadge();
   }
@@ -184,10 +185,13 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
     }
     const panel = vscode.window.createWebviewPanel('refyntra.gitClient', 'Refyntra Git', vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true });
     this.editorPanel = panel;
-    this.attach(panel.webview, true);
+    // Kept now: a disposed panel's .webview throws "Webview is disposed" (the dispose handler would fail, the panel be
+    // remembered and the next Open in Editor reveal a disposed panel).
+    const webview = panel.webview;
+    this.attach(webview, true);
     panel.onDidDispose(() => {
-      this.webviews.delete(panel.webview);
-      this.editorPanel = undefined;
+      this.webviews.delete(webview);
+      if (this.editorPanel === panel) this.editorPanel = undefined;
     });
     return panel;
   }
@@ -509,6 +513,15 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
     if (!safeRef(name)) return false;
     if (!confirmed && !(await this.confirm(`Merge ${name} into ${this.current.head}?`, 'Merge'))) return false;
     const ok = (await this.git(['merge', '--no-edit', name], `merge ${name}`)).ok;
+    await this.refresh();
+    return ok;
+  }
+
+  /** Applies one commit onto the current branch (git cherry-pick); a conflict is left for the user to resolve. */
+  async cherryPick(sha: string, confirmed = false): Promise<boolean> {
+    if (!/^[0-9a-f]{7,40}$/i.test(sha)) return false;
+    if (!confirmed && !(await this.confirm(`Cherry-pick ${sha.slice(0, 8)} onto ${this.current.head}?`, 'Cherry-pick'))) return false;
+    const ok = (await this.git(['cherry-pick', sha], `cherry-pick ${sha.slice(0, 8)}`)).ok;
     await this.refresh();
     return ok;
   }
@@ -851,6 +864,15 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
       case 'clearSearch':
         await this.clearSearch();
         break;
+      case 'copySha':
+        if (str('sha')) {
+          await vscode.env.clipboard.writeText(str('sha')!);
+          void vscode.window.setStatusBarMessage(`Copied ${str('sha')!.slice(0, 8)}`, 3000);
+        }
+        break;
+      case 'cherryPick':
+        if (str('sha')) await this.cherryPick(str('sha')!);
+        break;
       case 'commitDetails':
         if (str('sha')) await this.commits.show(str('sha')!);
         break;
@@ -990,6 +1012,7 @@ input[type=checkbox]{margin:0;flex:none}
 .changes .list{flex:1;overflow:auto;padding:6px 10px}
 .g{display:flex;align-items:center;height:22px;cursor:pointer}.g:hover{background:var(--vscode-list-hoverBackground)}
 .g svg{flex:none}.g .msg{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.g .sha{flex:none;font-family:var(--vscode-editor-font-family);opacity:.7;margin:0 4px}.g .act{flex:none;visibility:hidden}.g:hover .act{visibility:visible}
 .bar{display:flex;gap:4px;align-items:center;flex-wrap:wrap;margin:4px 0}.bar input{flex:1;min-width:80px}
 .in{color:var(--vscode-charts-blue,var(--vscode-textLink-foreground));font-weight:600}
 .pop{position:fixed;z-index:10;background:var(--vscode-quickInput-background,var(--vscode-editorWidget-background));color:var(--vscode-quickInput-foreground,var(--vscode-foreground));border:1px solid var(--vscode-widget-border,rgba(128,128,128,.4));box-shadow:0 4px 16px rgba(0,0,0,.35);border-radius:4px;padding:6px;max-height:70vh;overflow:auto;width:min(420px,calc(100vw - 16px))}
@@ -1225,7 +1248,10 @@ function graphRow(row, width) {
   const msg = el('span', 'msg');
   for (const r of row.refs) msg.append(el('span', 'ref' + (r.startsWith('HEAD') ? ' head' : r.startsWith('tag:') ? ' tag' : ''), r.replace('HEAD -> ', '● ').replace('tag: ', '')));
   msg.append(document.createTextNode(row.subject + ' '), el('span', 'muted', row.author));
-  g.append(svg, msg); g.onclick = () => send({ type: 'commitDetails', sha: row.sha }); return g;
+  const sha = el('span', 'sha', row.sha.slice(0, 8)); sha.title = row.sha;
+  const cp = el('button', 'link act', 'copy'); cp.title = 'Copy the full hash'; cp.onclick = (e) => { e.stopPropagation(); send({ type: 'copySha', sha: row.sha }); };
+  const pick = el('button', 'link act', 'cherry-pick'); pick.title = 'Apply this commit onto the current branch'; pick.onclick = (e) => { e.stopPropagation(); send({ type: 'cherryPick', sha: row.sha }); };
+  g.append(svg, msg, sha, cp, pick); g.onclick = () => send({ type: 'commitDetails', sha: row.sha }); return g;
 }
 function renderHistory() {
   const sb = $('sBranch'); const keep = sb.value; sb.textContent = '';
