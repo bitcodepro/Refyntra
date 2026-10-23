@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { runVisible } from './dotnetCli';
-import { dacpacName, dbBuildCommand, pickDacpac, sqlProjectKind } from './sqlProjectModel';
+import { dacpacFromQuery, dacpacName, dbBuildCommand, dbOutputQuery, pickDacpac, sqlProjectKind } from './sqlProjectModel';
 
 const EXCLUDE = '**/{node_modules,bin,obj,.git}/**';
 
@@ -26,6 +26,13 @@ async function visualStudioMsbuild(): Promise<string | undefined> {
     execFile(vswhere, ['-latest', '-products', '*', '-requires', 'Microsoft.Component.MSBuild', '-find', 'MSBuild\\**\\Bin\\MSBuild.exe'], { timeout: 15000, windowsHide: true }, (err, out) => {
       resolve(err ? undefined : String(out).split(/\r?\n/).map((l) => l.trim()).find((l) => l.toLowerCase().endsWith('msbuild.exe')));
     });
+  });
+}
+
+/** Where MSBuild put the .dacpac (SqlTargetPath/TargetPath, evaluated with the build's configuration). */
+function askMsbuild(query: { command: string; args: string[] }, cwd: string): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    execFile(query.command, query.args, { cwd, timeout: 120000, windowsHide: true, maxBuffer: 1 << 20 }, (err, out) => resolve(err ? undefined : String(out)));
   });
 }
 
@@ -73,9 +80,13 @@ export async function buildDatabase(isTrusted: () => boolean, arg: unknown, quie
     if (!quiet) void vscode.window.showWarningMessage(`Refyntra: ${error}`);
     return { project, exitCode: undefined, dacpac: undefined, error };
   }
-  const started = Date.now() - 2000;
   const exitCode = await runVisible(cmd);
-  const dacpac = exitCode === 0 ? pickDacpac(dacpacName(project, text), dacpacsUnder(path.join(path.dirname(project), 'bin')), started) : undefined;
+  let dacpac: string | undefined;
+  if (exitCode === 0) {
+    const out = await askMsbuild(dbOutputQuery(cmd), cmd.cwd);
+    const asked = out === undefined ? undefined : dacpacFromQuery(out, cmd.cwd);
+    dacpac = asked && fs.existsSync(asked) ? asked : pickDacpac(dacpacName(project, text), dacpacsUnder(path.join(path.dirname(project), 'bin')));
+  }
   const result: DbBuildResult = { project, exitCode, dacpac };
   if (quiet) return result;
   if (exitCode !== 0) void vscode.window.showErrorMessage(`Refyntra: building ${path.basename(project)} failed (exit code ${exitCode ?? '?'}); see the terminal.`);

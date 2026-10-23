@@ -39,9 +39,34 @@ export function dbBuildCommand(kind: SqlProjectKind, projectFile: string, config
   return { title, command: msbuild, args: [projectFile, '/t:Build', `/p:Configuration=${configuration}`, '/nologo', '/v:minimal'], cwd };
 }
 
-/** Among candidate .dacpac paths (with modification times), the one this build wrote: the newest named like the project's. */
-export function pickDacpac(name: string, candidates: { file: string; mtime: number }[], since: number): string | undefined {
-  const fresh = candidates.filter((c) => path.basename(c.file).toLowerCase() === name.toLowerCase() && c.mtime >= since);
-  fresh.sort((a, b) => b.mtime - a.mtime);
-  return fresh[0]?.file;
+/**
+ * The command that asks MSBuild where the build puts the .dacpac (the same configuration as the build): any OutputPath,
+ * UseArtifactsOutput or SqlTargetName is evaluated by MSBuild itself.
+ */
+export function dbOutputQuery(build: DbBuildCommand): { command: string; args: string[] } {
+  const props = ['-getProperty:SqlTargetPath', '-getProperty:TargetPath'];
+  if (build.command === 'dotnet') return { command: 'dotnet', args: ['msbuild', build.args[1]!, ...props, `-p:Configuration=${build.args[3]!}`] };
+  return { command: build.command, args: [build.args[0]!, ...props, build.args[2]!.replace(/^\//, '-')] };
+}
+
+/** The .dacpac from the query's output ({"Properties": {...}}): SqlTargetPath, else a TargetPath ending in .dacpac. */
+export function dacpacFromQuery(output: string, projectDir: string): string | undefined {
+  let props: Record<string, string> = {};
+  try {
+    props = (JSON.parse(output.slice(output.indexOf('{'))) as { Properties?: Record<string, string> }).Properties ?? {};
+  } catch {
+    return undefined;
+  }
+  const file = [props['SqlTargetPath'], props['TargetPath']].find((p) => p && /\.dacpac$/i.test(p.trim()));
+  return file ? path.resolve(projectDir, file.trim()) : undefined;
+}
+
+/**
+ * Without an answer from MSBuild: the newest .dacpac named like the project's under its bin folder. Not filtered by the
+ * build's start time: an up-to-date build does not rewrite the file.
+ */
+export function pickDacpac(name: string, candidates: { file: string; mtime: number }[]): string | undefined {
+  const named = candidates.filter((c) => path.basename(c.file).toLowerCase() === name.toLowerCase());
+  named.sort((a, b) => b.mtime - a.mtime);
+  return named[0]?.file;
 }

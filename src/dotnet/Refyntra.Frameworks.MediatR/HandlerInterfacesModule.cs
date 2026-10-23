@@ -100,8 +100,10 @@ public sealed class HandlerInterfacesModule : IFrameworkModule
                     facts.Interfaces.Add(iface.OriginalDefinition.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat));
                 }
                 // An unresolved generic base (IRequestHandler<X> while MediatR's package is not restored) keeps no type
-                // arguments in its error symbol: the request is read from the declaration's base list.
-                if (requests.Count == 0) await AddFromBaseListAsync(type, project, facts, requests, ct).ConfigureAwait(false);
+                // arguments in its error symbol: the request is read from the declaration's base list. Also when another
+                // interface of the same handler resolved (a resolved IQueryHandler<A> next to an unresolved IRequestHandler<B>);
+                // an unresolved first base is taken for a base class, so BaseType counts too.
+                if (type.BaseType?.TypeKind == TypeKind.Error || type.Interfaces.Any(i => i.TypeKind == TypeKind.Error)) await AddFromBaseListAsync(type, project, facts, requests, ct).ConfigureAwait(false);
             }
         }
         if (facts.Handlers.Count == 0) return facts;
@@ -111,7 +113,10 @@ public sealed class HandlerInterfacesModule : IFrameworkModule
         // request type seen from the controller's project is another symbol instance than in the handler's project.
         string Key(ISymbol x) => (DocumentationCommentId.CreateDeclarationId(x.OriginalDefinition) ?? x.ToDisplayString()) + "|" + x.ContainingAssembly?.Identity.Name;
         var handled = facts.Handlers.Select(h => Key(h.Request)).ToHashSet(StringComparer.Ordinal);
-        var handlerTypes = facts.Handlers.Select(h => Key(h.HandlerType)).ToHashSet(StringComparer.Ordinal);
+        // What each handler handles: inside a handler, passing its own request on (to a validator, a mapper, a logger) is no
+        // dispatch; sending another request (handler A → dispatcher → handler B) is.
+        var ownRequests = facts.Handlers.GroupBy(h => Key(h.HandlerType), StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.Select(h => Key(h.Request)).ToHashSet(StringComparer.Ordinal), StringComparer.Ordinal);
         foreach (var project in context.Projects)
         {
             foreach (var doc in project.Documents)
@@ -134,9 +139,10 @@ public sealed class HandlerInterfacesModule : IFrameworkModule
                     else
                     {
                         var enclosing = model.GetEnclosingSymbol(inv.SpanStart, ct)?.ContainingType;
-                        if (enclosing != null && handlerTypes.Contains(Key(enclosing))) continue;
+                        var own = enclosing != null && ownRequests.TryGetValue(Key(enclosing), out var o) ? o : null;
                         foreach (var arg in inv.ArgumentList.Arguments)
-                            if (model.GetTypeInfo(arg.Expression, ct).Type is INamedTypeSymbol t && t.TypeKind is TypeKind.Class or TypeKind.Struct && handled.Contains(Key(t)))
+                            if (model.GetTypeInfo(arg.Expression, ct).Type is INamedTypeSymbol t && t.TypeKind is TypeKind.Class or TypeKind.Struct && handled.Contains(Key(t))
+                                && own?.Contains(Key(t)) != true)
                             {
                                 request = t;
                                 break;
