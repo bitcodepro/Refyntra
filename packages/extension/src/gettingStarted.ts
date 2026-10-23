@@ -73,6 +73,7 @@ export const MAIN_MENU: readonly MenuEntry[] = [
   { label: '$(file-binary) Go to Metadata / Decompiled Source', detail: 'The read-only C# of a library or framework symbol at the cursor: the source embedded in its PDB, else decompiled (F12 and Shift+F12 work inside it)', command: 'refyntra.goToMetadata' },
   { label: '$(history) Recent Files', detail: 'Recently opened files of this workspace, the previous one first (Ctrl+E)', command: 'refyntra.recentFiles' },
   { label: '$(location) Recent Locations', detail: 'Places where you edited or the cursor rested, with the member and the code line (Ctrl+Shift+E)', command: 'refyntra.recentLocations' },
+  { label: '$(database) Build Database Project (.dacpac)', detail: 'Build a .sqlproj into a .dacpac: SDK-style (Microsoft.Build.Sql) with dotnet, Visual Studio (SSDT) projects with the MSBuild of Visual Studio', command: 'refyntra.database.build' },
   { label: '$(list-tree) File Structure', detail: 'Members of the current file grouped by type and #region, with filters and inherited members for C# (Ctrl+F12)', command: 'refyntra.fileStructure' },
   { label: '$(search-fuzzy) Structural Search…', detail: 'Find C# code by its shape with $placeholders$ (type, count, regex constraints) and replace it: preview first, compile-checked', command: 'refyntra.structuralSearch' },
   { label: '$(pulse) Show Change Impact', detail: 'What a change reaches: handlers, endpoints, DI registrations, implementations, uses and tests (symbol, file or uncommitted changes)', command: 'refyntra.changeImpact' },
