@@ -26,14 +26,19 @@ describe('database projects', () => {
     expect(dbBuildCommand('legacy', '/w/Db/Shop.sqlproj', 'Debug', 'C:/VS/MSBuild.exe')?.args).toEqual(['/w/Db/Shop.sqlproj', '/t:Build', '/p:Configuration=Debug', '/nologo', '/v:minimal']);
   });
 
-  it('falls back to the newest .dacpac named like the project, however old (an up-to-date build does not rewrite it)', () => {
+  it("falls back to the requested configuration's .dacpac, however old, never a newer one of another configuration", () => {
+    // An older Debug build, a newer Release build, then an unchanged Debug rebuild whose property query failed.
     const c = [
       { file: '/w/Db/bin/Debug/Shop.dacpac', mtime: 50 },
       { file: '/w/Db/bin/Release/Shop.dacpac', mtime: 200 },
       { file: '/w/Db/bin/Release/master.dacpac', mtime: 300 },
     ];
-    expect(pickDacpac('Shop.dacpac', c)).toBe('/w/Db/bin/Release/Shop.dacpac');
-    expect(pickDacpac('Other.dacpac', c)).toBeUndefined();
+    expect(pickDacpac('Shop.dacpac', 'Debug', c)).toBe('/w/Db/bin/Debug/Shop.dacpac');
+    expect(pickDacpac('Shop.dacpac', 'release', c)).toBe('/w/Db/bin/Release/Shop.dacpac');
+    expect(pickDacpac('Shop.dacpac', 'Debug', [{ file: 'C:\\w\\Db\\bin\\x64\\Debug\\Shop.dacpac', mtime: 1 }])).toBe('C:\\w\\Db\\bin\\x64\\Debug\\Shop.dacpac');
+    // Only another configuration's file: nothing (reported as not found), not the wrong artifact.
+    expect(pickDacpac('Shop.dacpac', 'Debug', c.slice(1))).toBeUndefined();
+    expect(pickDacpac('Other.dacpac', 'Debug', c)).toBeUndefined();
   });
 
   it('asks MSBuild for SqlTargetPath/TargetPath with the build configuration', () => {

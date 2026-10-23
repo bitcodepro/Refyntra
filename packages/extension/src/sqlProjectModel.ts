@@ -62,11 +62,15 @@ export function dacpacFromQuery(output: string, projectDir: string): string | un
 }
 
 /**
- * Without an answer from MSBuild: the newest .dacpac named like the project's under its bin folder. Not filtered by the
+ * Without an answer from MSBuild (older than 17.8 has no -getProperty): the .dacpac named like the project's in a folder
+ * named after the built configuration (bin/Debug, bin/x64/Debug), never another configuration's. Not filtered by the
  * build's start time: an up-to-date build does not rewrite the file.
  */
-export function pickDacpac(name: string, candidates: { file: string; mtime: number }[]): string | undefined {
-  const named = candidates.filter((c) => path.basename(c.file).toLowerCase() === name.toLowerCase());
+export function pickDacpac(name: string, configuration: string, candidates: { file: string; mtime: number }[]): string | undefined {
+  const config = configuration.toLowerCase();
+  const named = candidates.filter(
+    (c) => path.basename(c.file).toLowerCase() === name.toLowerCase() && c.file.split(/[\\/]/).slice(0, -1).some((d) => d.toLowerCase() === config),
+  );
   named.sort((a, b) => b.mtime - a.mtime);
   return named[0]?.file;
 }
