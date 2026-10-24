@@ -136,7 +136,7 @@ public sealed class PackageFallbackTests : IAsyncLifetime
         var result = PackageFallback.Resolve(Path.Combine(_root, "App", "App.csproj"), "net10.0");
         Assert.Equal(new[] { "Acme.Billing.dll", "Acme.Core.dll" }, result.Assemblies.Select(Path.GetFileName).OrderBy(x => x).ToArray());
         Assert.Contains("Acme.Billing/1.2.0", result.Resolved);
-        Assert.Equal(new[] { "Acme.Missing/3.0.0" }, result.Unresolved);
+        Assert.Equal(new[] { "Acme.Missing [3.0.0, )" }, result.Unresolved);
     }
 
     [Fact]
@@ -146,5 +146,138 @@ public sealed class PackageFallbackTests : IAsyncLifetime
         Assert.Equal("netstandard2.0", PackageFallback.BestFramework(new[] { "net462", "netstandard2.0" }, "net10.0"));
         Assert.Equal("net472", PackageFallback.BestFramework(new[] { "net462", "net472", "netstandard2.0", "net8.0" }, "net48"));
         Assert.Null(PackageFallback.BestFramework(new[] { "net9.0" }, "net8.0"));
+    }
+}
+
+/// <summary>NuGet's own rules in the fallback: version ranges, the selected assets target and its exclusions, platform frameworks, .NETFramework nuspec groups.</summary>
+public sealed class PackageFallbackRulesTests : IDisposable
+{
+    private readonly string _root = Path.Combine(Path.GetTempPath(), "refyntra-fallback-rules-" + Guid.NewGuid().ToString("N")[..8]);
+    private string Cache => Path.Combine(_root, "cache");
+
+    public PackageFallbackRulesTests()
+    {
+        // NuGet.Frameworks/NuGet.Versioning come from the SDK's MSBuild folder at run time (Microsoft.Build.Locator).
+        MsBuildBootstrap.EnsureRegistered(Directory.GetCurrentDirectory());
+        Directory.CreateDirectory(Cache);
+        File.WriteAllText(Path.Combine(_root, "NuGet.Config"), "<configuration><config><add key=\"globalPackagesFolder\" value=\"cache\" /></config></configuration>");
+    }
+
+    public void Dispose()
+    {
+        try { Directory.Delete(_root, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+    }
+
+    /// <summary>A package folder with empty dll files (only their presence matters here) and a nuspec.</summary>
+    private void Pkg(string id, string version, string[] files, string? nuspecDependencies = null)
+    {
+        var dir = Path.Combine(Cache, id.ToLowerInvariant(), version);
+        Directory.CreateDirectory(dir);
+        foreach (var f in files)
+        {
+            var p = Path.Combine(dir, f.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(p)!);
+            File.WriteAllText(p, "");
+        }
+        File.WriteAllText(Path.Combine(dir, id.ToLowerInvariant() + ".nuspec"),
+            $"<package><metadata><id>{id}</id><version>{version}</version>{nuspecDependencies}</metadata></package>");
+    }
+
+    private string Project(string name, string tfm, string items)
+    {
+        var dir = Path.Combine(_root, name);
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, name + ".csproj");
+        File.WriteAllText(path, $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>{tfm}</TargetFramework></PropertyGroup><ItemGroup>{items}</ItemGroup></Project>");
+        return path;
+    }
+
+    private string? Find(string? range) =>
+        PackageFallback.FindPackage(PackageFallback.PackageFolders(_root, Array.Empty<string>()), "Range.Lib", range == null ? null : NuGet.Versioning.VersionRange.Parse(range)) is { } d
+            ? Path.GetFileName(d) : null;
+
+    [Fact]
+    public void AVersionOutsideTheRangeIsNeverSubstituted()
+    {
+        Pkg("Range.Lib", "1.0.0", new[] { "lib/net8.0/Range.Lib.dll" });
+        Pkg("Range.Lib", "1.5.0", new[] { "lib/net8.0/Range.Lib.dll" });
+        Pkg("Range.Lib", "2.0.0", new[] { "lib/net8.0/Range.Lib.dll" });
+        Assert.Null(Find("[3.0.0]"));                 // exact and not cached: unresolved, never 2.0.0
+        Assert.Equal("2.0.0", Find("[2.0.0]"));
+        Assert.Equal("1.5.0", Find("(1.0.0,2.0.0)")); // exclusive bounds: neither 1.0.0 nor 2.0.0
+        Assert.Equal("1.5.0", Find("1.2.0"));         // "1.2.0" means 1.2.0 or higher: NuGet's lowest applicable
+        Assert.Null(Find("[2.5.0,3.0.0)"));
+        Assert.Equal("2.0.0", Find(null));            // no version at all: the highest cached
+    }
+
+    [Fact]
+    public void AssetsUseTheSelectedTargetItsCompileEntriesAndExactVersions()
+    {
+        Pkg("Both", "1.0.0", new[] { "lib/net8.0/Both.dll", "lib/net48/Both.dll" });
+        Pkg("OnlyNet48", "1.0.0", new[] { "lib/net48/OnlyNet48.dll" });
+        Pkg("NoCompile", "1.0.0", new[] { "lib/net8.0/NoCompile.dll" });
+        Pkg("Placeholder", "1.0.0", new[] { "lib/net8.0/_._" });
+        Pkg("WrongVersion", "1.0.0", new[] { "lib/net8.0/WrongVersion.dll" });
+        var project = Project("Multi", "net8.0", "");
+        static string Lib(string id, string v) => $"\"{id}/{v}\": {{ \"type\": \"package\", \"path\": \"{id.ToLowerInvariant()}/{v}\" }}";
+        var missingFolder = JsonSerializer.Serialize(Path.Combine(_root, "missing-folder"));
+        var assets = "{ \"version\": 3, \"targets\": {"
+            + " \"net8.0\": {"
+            + "   \"Both/1.0.0\": { \"type\": \"package\", \"compile\": { \"lib/net8.0/Both.dll\": {} } },"
+            + "   \"NoCompile/1.0.0\": { \"type\": \"package\" },"            // ExcludeAssets=compile: no compile section
+            + "   \"Placeholder/1.0.0\": { \"type\": \"package\", \"compile\": { \"lib/net8.0/_._\": {} } },"
+            + "   \"WrongVersion/2.0.0\": { \"type\": \"package\", \"compile\": { \"lib/net8.0/WrongVersion.dll\": {} } } },"
+            + " \"net8.0/win-x64\": { \"OnlyNet48/1.0.0\": { \"type\": \"package\", \"compile\": { \"lib/net48/OnlyNet48.dll\": {} } } },"
+            + " \".NETFramework,Version=v4.8\": {"
+            + "   \"Both/1.0.0\": { \"type\": \"package\", \"compile\": { \"lib/net48/Both.dll\": {} } },"
+            + "   \"OnlyNet48/1.0.0\": { \"type\": \"package\", \"compile\": { \"lib/net48/OnlyNet48.dll\": {} } } } },"
+            + " \"libraries\": { " + string.Join(", ", Lib("Both", "1.0.0"), Lib("OnlyNet48", "1.0.0"), Lib("NoCompile", "1.0.0"), Lib("Placeholder", "1.0.0"), Lib("WrongVersion", "2.0.0")) + " },"
+            + " \"packageFolders\": { " + missingFolder + ": {} } }";
+        Directory.CreateDirectory(Path.Combine(_root, "Multi", "obj"));
+        File.WriteAllText(Path.Combine(_root, "Multi", "obj", "project.assets.json"), assets);
+
+        var net8 = PackageFallback.Resolve(project, "net8.0");
+        Assert.Equal(Path.GetFullPath(Path.Combine(Cache, "both", "1.0.0", "lib", "net8.0", "Both.dll")), Path.GetFullPath(Assert.Single(net8.Assemblies)));
+        Assert.Equal(new[] { "Both/1.0.0", "NoCompile/1.0.0", "Placeholder/1.0.0" }, net8.Resolved.OrderBy(x => x, StringComparer.Ordinal).ToArray());
+        Assert.Equal(new[] { "WrongVersion/2.0.0" }, net8.Unresolved); // only 1.0.0 is cached: not substituted
+        var net48 = PackageFallback.Resolve(project, "net48");
+        Assert.Equal(new[] { "Both.dll", "OnlyNet48.dll" }, net48.Assemblies.Select(Path.GetFileName).OrderBy(x => x, StringComparer.Ordinal).ToArray());
+        Assert.All(net48.Assemblies, a => Assert.Contains(Path.Combine("lib", "net48"), a));
+    }
+
+    [Fact]
+    public void ExcludedCompileAssetsOfAPackageReferenceStayExcluded()
+    {
+        Pkg("Analyzer.Only", "1.0.0", new[] { "lib/net8.0/Analyzer.Only.dll" });
+        var r = PackageFallback.Resolve(Project("Excl", "net8.0", "<PackageReference Include=\"Analyzer.Only\" Version=\"1.0.0\" ExcludeAssets=\"compile\" />"), "net8.0");
+        Assert.Empty(r.Assemblies);
+        Assert.Equal(new[] { "Analyzer.Only/1.0.0" }, r.Resolved);
+    }
+
+    [Fact]
+    public void PlatformFrameworksKeepTheirPlatform()
+    {
+        Assert.Equal("net8.0", PackageFallback.BestFramework(new[] { "net8.0-windows7.0", "net8.0" }, "net8.0"));
+        Assert.Equal("net8.0-windows7.0", PackageFallback.BestFramework(new[] { "net8.0", "net8.0-windows7.0" }, "net8.0-windows7.0"));
+        Assert.Null(PackageFallback.BestFramework(new[] { "net8.0-android" }, "net8.0"));
+        Assert.Null(PackageFallback.BestFramework(new[] { "net8.0-windows7.0" }, "net8.0"));
+        Assert.Equal("net8.0-ios", PackageFallback.BestFramework(new[] { "net8.0-android", "net8.0-ios", "netstandard2.0" }, "net8.0-ios"));
+    }
+
+    [Fact]
+    public void DotNetFrameworkNuspecGroupsPickTheRightTransitiveDependencies()
+    {
+        Pkg("Host.Lib", "1.0.0", new[] { "lib/net472/Host.Lib.dll", "lib/netstandard2.0/Host.Lib.dll" },
+            "<dependencies><group targetFramework=\".NETFramework4.7.2\"><dependency id=\"Desktop.Dep\" version=\"1.0.0\" /></group>"
+            + "<group targetFramework=\".NETStandard2.0\"><dependency id=\"Standard.Dep\" version=\"1.0.0\" /></group></dependencies>");
+        Pkg("Desktop.Dep", "1.0.0", new[] { "lib/net472/Desktop.Dep.dll" });
+        Pkg("Standard.Dep", "1.0.0", new[] { "lib/netstandard2.0/Standard.Dep.dll" });
+        const string item = "<PackageReference Include=\"Host.Lib\" Version=\"1.0.0\" />";
+        var net48 = PackageFallback.Resolve(Project("Desk", "net48", item), "net48");
+        Assert.Equal(new[] { "Desktop.Dep/1.0.0", "Host.Lib/1.0.0" }, net48.Resolved.OrderBy(x => x, StringComparer.Ordinal).ToArray());
+        Assert.Contains(net48.Assemblies, a => a.EndsWith(Path.Combine("net472", "Host.Lib.dll"), StringComparison.Ordinal));
+        var net8 = PackageFallback.Resolve(Project("Core", "net8.0", item), "net8.0");
+        Assert.Equal(new[] { "Host.Lib/1.0.0", "Standard.Dep/1.0.0" }, net8.Resolved.OrderBy(x => x, StringComparer.Ordinal).ToArray());
+        Assert.Contains(net8.Assemblies, a => a.EndsWith(Path.Combine("netstandard2.0", "Host.Lib.dll"), StringComparison.Ordinal));
     }
 }
