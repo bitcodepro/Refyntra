@@ -917,6 +917,27 @@ public sealed partial class Engine : IRpcHandler, IDisposable
         return result;
     }
 
+    /// <summary>Compiler errors of a reference that is not there: type or namespace not found, type from an unreferenced assembly.</summary>
+    private static readonly HashSet<string> UnresolvedReferenceCodes = new(StringComparer.Ordinal) { "CS0246", "CS0234", "CS0012", "CS0400" };
+
+    /// <summary>
+    /// An error that follows from a type that did not resolve (`thing == null` on an unknown type, a member of it): the code
+    /// at the error, or an expression inside it, has an error type.
+    /// </summary>
+    private static async Task<bool> InvolvesUnresolvedTypeAsync(SemanticModel model, Microsoft.CodeAnalysis.Text.TextSpan span, CancellationToken ct)
+    {
+        var root = await model.SyntaxTree.GetRootAsync(ct).ConfigureAwait(false);
+        if (span.End > root.FullSpan.End) return false;
+        var node = root.FindNode(span, getInnermostNodeForTie: true);
+        foreach (var n in node.DescendantNodesAndSelf().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.ExpressionSyntax>().Take(40))
+        {
+            var info = model.GetTypeInfo(n, ct);
+            if (info.Type is { TypeKind: TypeKind.Error } || info.ConvertedType is { TypeKind: TypeKind.Error }) return true;
+            if (info.Type is INamedTypeSymbol { IsGenericType: true } g && g.TypeArguments.Any(t => t.TypeKind == TypeKind.Error)) return true;
+        }
+        return false;
+    }
+
     private async Task<DocumentDiagnosticsResultDto> DocumentDiagnosticsAsync(DocumentDiagnosticsParams p, CancellationToken ct)
     {
         var snap = RequireSnapshot(p.WorkspaceId, p.SnapshotId);
@@ -929,16 +950,21 @@ public sealed partial class Engine : IRpcHandler, IDisposable
         }
         var model = await doc.GetSemanticModelAsync(ct).ConfigureAwait(false);
         if (model == null) return result;
+        // In a project whose packages are not (all) restored, "type or namespace not found" is most likely a package's type
+        // (a private feed, no network), not a mistake in the code: shown as information that says so, not as an error.
+        var unrestored = snap.Session.Projects.Any(c => c.ProjectId == doc.Project.Id && c.Diagnostics.Any(x => x.RestoreRecommended));
         foreach (var d in model.GetDiagnostics(cancellationToken: ct))
         {
             if (d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Hidden && !d.Descriptor.CustomTags.Contains(Microsoft.CodeAnalysis.WellKnownDiagnosticTags.Unnecessary)) continue;
             if (!d.Location.IsInSource) continue;
+            var softened = unrestored && d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error
+                && (UnresolvedReferenceCodes.Contains(d.Id) || await InvolvesUnresolvedTypeAsync(model, d.Location.SourceSpan, ct).ConfigureAwait(false));
             result.Diagnostics.Add(new CompilerDiagnosticDto
             {
                 Range = ToRange(d.Location.GetLineSpan().Span),
-                Severity = d.Severity switch { Microsoft.CodeAnalysis.DiagnosticSeverity.Error => "error", Microsoft.CodeAnalysis.DiagnosticSeverity.Warning => "warning", _ => "info" },
+                Severity = softened ? "info" : d.Severity switch { Microsoft.CodeAnalysis.DiagnosticSeverity.Error => "error", Microsoft.CodeAnalysis.DiagnosticSeverity.Warning => "warning", _ => "info" },
                 Code = d.Id,
-                Message = d.GetMessage(),
+                Message = softened ? d.GetMessage() + " (packages of this project are not restored: probably a type of a package that is missing locally; run a restore with access to its feed)" : d.GetMessage(),
                 Unnecessary = d.Descriptor.CustomTags.Contains(Microsoft.CodeAnalysis.WellKnownDiagnosticTags.Unnecessary),
             });
             if (result.Diagnostics.Count >= 1000) break;
