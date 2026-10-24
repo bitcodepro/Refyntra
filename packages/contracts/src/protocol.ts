@@ -1605,9 +1605,9 @@ export interface RpcErrorData {
 /** Rule ids `analysis/run` can report. */
 export const ANALYSIS_RULE_IDS = ['OR1001', 'OR1002', 'OR1003', 'OR1004', 'OR1005', 'OR1006', 'OR1007', 'OR1008', 'OR1009', 'OR1010', 'OR1011'] as const;
 export type AnalysisRuleId = (typeof ANALYSIS_RULE_IDS)[number];
-export const OR1001_HELP_URI = 'https://github.com/refyntra/refyntra/blob/main/docs/rules/OR1001.md';
+export const OR1001_HELP_URI = 'https://github.com/bitcodepro/Refyntra/blob/main/docs/rules/OR1001.md';
 /** The documentation page of a rule (docs/rules/ORxxxx.md). */
-export const ruleHelpUri = (id: string): string => `https://github.com/refyntra/refyntra/blob/main/docs/rules/${id}.md`;
+export const ruleHelpUri = (id: string): string => `https://github.com/bitcodepro/Refyntra/blob/main/docs/rules/${id}.md`;
 
 export interface AnalysisRunParams extends WorkspaceParams {
   snapshotId: string;

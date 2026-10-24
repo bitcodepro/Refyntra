@@ -71,7 +71,7 @@ public static class CodeInspections
         [FixAddInclude] = "Add .Include(...) to the query",
     };
 
-    public static string HelpUri(string id) => $"https://github.com/refyntra/refyntra/blob/main/docs/rules/{id}.md";
+    public static string HelpUri(string id) => $"https://github.com/bitcodepro/Refyntra/blob/main/docs/rules/{id}.md";
 
     // ------------------------------------------------------------------ cache
 

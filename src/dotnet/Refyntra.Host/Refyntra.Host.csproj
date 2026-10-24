@@ -3,7 +3,7 @@
     <OutputType>Exe</OutputType>
     <AssemblyName>Refyntra.Host</AssemblyName>
     <InvariantGlobalization>true</InvariantGlobalization>
-    <Version>0.1.0</Version>
+    <Version>0.2.11</Version>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Refyntra.Refactorings/Refyntra.Refactorings.csproj" />

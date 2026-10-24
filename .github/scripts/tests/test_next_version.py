@@ -43,6 +43,20 @@ class VersionTests(unittest.TestCase):
             self.assertEqual(json.loads(path.read_text())['version'], '1.2.3')
 
 
+    def test_stamp_host_changes_only_the_version_element(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'Refyntra.Host.csproj'
+            template = '<Project>\n  <PropertyGroup>\n    <Version>{}</Version>\n    <LangVersion>latest</LangVersion>\n  </PropertyGroup>\n</Project>\n'
+            path.write_text(template.format('0.1.0'))
+            v.stamp_host(path, '1.2.3')
+            self.assertEqual(path.read_text(), template.format('1.2.3'))
+            with self.assertRaises(ValueError):
+                v.stamp_host(path, '1.2')
+            path.write_text('<Project />')
+            with self.assertRaises(ValueError):
+                v.stamp_host(path, '1.2.4')
+
+
 class VersionCliTests(unittest.TestCase):
     def test_git_subject_outputs_stamp_and_untrusted_context(self):
         import os

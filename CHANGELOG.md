@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes are listed here. The project is alpha; nothing has been released yet.
+All notable changes are listed here. The project is in preview; every merge to main is published as a GitHub release (vX.Y.Z).
 
 ## Unreleased
 
