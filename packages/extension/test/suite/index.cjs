@@ -1660,6 +1660,25 @@ scenarios['database'] = [
       assert.equal(built.exitCode, 0, JSON.stringify(built));
       assert.ok(built.dacpac && fs.existsSync(built.dacpac), JSON.stringify(built));
       assert.equal(nodePath.basename(built.dacpac), 'ShopDb.dacpac');
+      // Built again without changes: the up-to-date .dacpac is still reported.
+      const again = await vscode.commands.executeCommand('refyntra.database.build', vscode.Uri.file(nodePath.join(db, 'ShopDb.sqlproj')), true);
+      assert.equal(again.exitCode, 0, JSON.stringify(again));
+      assert.equal(again.dacpac, built.dacpac);
+      // A custom OutputPath outside bin, and artifacts output (UseArtifactsOutput in Directory.Build.props).
+      const sqlproj = (props) => '<Project Sdk="Microsoft.Build.Sql/2.3.0">\n  <PropertyGroup>\n    <DSP>Microsoft.Data.Tools.Schema.Sql.Sql160DatabaseSchemaProvider</DSP>\n' + props + '  </PropertyGroup>\n</Project>\n';
+      const custom = nodePath.join(root, 'CustomDb');
+      fs.mkdirSync(custom, { recursive: true });
+      fs.writeFileSync(nodePath.join(custom, 'CustomDb.sqlproj'), sqlproj('    <OutputPath>../dist/db/</OutputPath>\n'));
+      fs.writeFileSync(nodePath.join(custom, 'Items.sql'), 'CREATE TABLE [dbo].[Items] ([Id] INT NOT NULL PRIMARY KEY);\n');
+      const c = await vscode.commands.executeCommand('refyntra.database.build', nodePath.join(custom, 'CustomDb.sqlproj'), true);
+      assert.equal(nodePath.resolve(c.dacpac ?? ''), nodePath.join(root, 'dist', 'db', 'CustomDb.dacpac'), JSON.stringify(c));
+      const art = nodePath.join(root, 'ArtRepo', 'ArtDb');
+      fs.mkdirSync(art, { recursive: true });
+      fs.writeFileSync(nodePath.join(root, 'ArtRepo', 'Directory.Build.props'), '<Project>\n  <PropertyGroup>\n    <UseArtifactsOutput>true</UseArtifactsOutput>\n  </PropertyGroup>\n</Project>\n');
+      fs.writeFileSync(nodePath.join(art, 'ArtDb.sqlproj'), sqlproj(''));
+      fs.writeFileSync(nodePath.join(art, 'Items.sql'), 'CREATE TABLE [dbo].[Items] ([Id] INT NOT NULL PRIMARY KEY);\n');
+      const a = await vscode.commands.executeCommand('refyntra.database.build', nodePath.join(art, 'ArtDb.sqlproj'), true);
+      assert.ok(a.dacpac && fs.existsSync(a.dacpac) && a.dacpac.includes(nodePath.join('ArtRepo', 'artifacts')), JSON.stringify(a));
       if (process.platform === 'win32') return;
       const legacy = nodePath.join(root, 'OldDb', 'OldDb.sqlproj');
       fs.mkdirSync(nodePath.dirname(legacy), { recursive: true });

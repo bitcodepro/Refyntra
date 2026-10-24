@@ -1,5 +1,6 @@
+import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { dacpacName, dbBuildCommand, pickDacpac, sqlProjectKind } from '../../src/sqlProjectModel';
+import { dacpacFromQuery, dacpacName, dbBuildCommand, dbOutputQuery, pickDacpac, sqlProjectKind } from '../../src/sqlProjectModel';
 
 const SDK = '<Project Sdk="Microsoft.Build.Sql/2.3.0">\n  <PropertyGroup><Name>Shop</Name></PropertyGroup>\n</Project>';
 const LEGACY =
@@ -25,13 +26,44 @@ describe('database projects', () => {
     expect(dbBuildCommand('legacy', '/w/Db/Shop.sqlproj', 'Debug', 'C:/VS/MSBuild.exe')?.args).toEqual(['/w/Db/Shop.sqlproj', '/t:Build', '/p:Configuration=Debug', '/nologo', '/v:minimal']);
   });
 
-  it('picks the newest matching .dacpac written by this build', () => {
+  it("falls back to the requested configuration's .dacpac, however old, never a newer one of another configuration", () => {
+    // An older Debug build, a newer Release build, then an unchanged Debug rebuild whose property query failed.
     const c = [
       { file: '/w/Db/bin/Debug/Shop.dacpac', mtime: 50 },
       { file: '/w/Db/bin/Release/Shop.dacpac', mtime: 200 },
       { file: '/w/Db/bin/Release/master.dacpac', mtime: 300 },
     ];
-    expect(pickDacpac('Shop.dacpac', c, 100)).toBe('/w/Db/bin/Release/Shop.dacpac');
-    expect(pickDacpac('Shop.dacpac', c, 250)).toBeUndefined();
+    expect(pickDacpac('Shop.dacpac', 'Debug', '/w/Db/bin', c)).toBe('/w/Db/bin/Debug/Shop.dacpac');
+    expect(pickDacpac('Shop.dacpac', 'release', '/w/Db/bin', c)).toBe('/w/Db/bin/Release/Shop.dacpac');
+    // Windows paths read the same on every OS (CI runs on Linux).
+    expect(pickDacpac('Shop.dacpac', 'Debug', 'C:\\w\\Db\\bin', [{ file: 'C:\\w\\Db\\bin\\x64\\Debug\\Shop.dacpac', mtime: 1 }])).toBe('C:\\w\\Db\\bin\\x64\\Debug\\Shop.dacpac');
+    // Only another configuration's file: nothing (reported as not found), not the wrong artifact.
+    expect(pickDacpac('Shop.dacpac', 'Debug', '/w/Db/bin', c.slice(1))).toBeUndefined();
+    expect(pickDacpac('Other.dacpac', 'Debug', '/w/Db/bin', c)).toBeUndefined();
+    // A checkout under a folder named Debug: only folders below bin count, so the newer Release file is not Debug's.
+    const under = [
+      { file: '/work/Debug/Db/bin/Debug/Shop.dacpac', mtime: 50 },
+      { file: '/work/Debug/Db/bin/Release/Shop.dacpac', mtime: 200 },
+    ];
+    expect(pickDacpac('Shop.dacpac', 'Debug', '/work/Debug/Db/bin', under)).toBe('/work/Debug/Db/bin/Debug/Shop.dacpac');
+    expect(pickDacpac('Shop.dacpac', 'Debug', '/work/Debug/Db/bin', under.slice(1))).toBeUndefined();
+    // A file directly in bin or outside it is no configuration's.
+    expect(pickDacpac('Shop.dacpac', 'Debug', '/w/Db/bin', [{ file: '/w/Db/bin/Shop.dacpac', mtime: 1 }, { file: '/w/Debug/Shop.dacpac', mtime: 2 }])).toBeUndefined();
+  });
+
+  it('asks MSBuild for SqlTargetPath/TargetPath with the build configuration', () => {
+    const sdk = dbBuildCommand('sdk', '/w/Db/Shop.sqlproj', 'Release', undefined)!;
+    expect(dbOutputQuery(sdk)).toEqual({ command: 'dotnet', args: ['msbuild', '/w/Db/Shop.sqlproj', '-getProperty:SqlTargetPath', '-getProperty:TargetPath', '-p:Configuration=Release'] });
+    const legacy = dbBuildCommand('legacy', '/w/Db/Shop.sqlproj', 'Debug', 'C:/VS/MSBuild.exe')!;
+    expect(dbOutputQuery(legacy)).toEqual({ command: 'C:/VS/MSBuild.exe', args: ['/w/Db/Shop.sqlproj', '-getProperty:SqlTargetPath', '-getProperty:TargetPath', '-p:Configuration=Debug'] });
+  });
+
+  it('reads the .dacpac from MSBuild: a custom OutputPath, artifacts output, a relative path', () => {
+    const json = (sql: string, target: string) => JSON.stringify({ Properties: { SqlTargetPath: sql, TargetPath: target } });
+    expect(dacpacFromQuery(json('/w/dist/db/Shop.dacpac', '/w/dist/db/Shop.dacpac'), '/w/Db')).toBe(path.resolve('/w/dist/db/Shop.dacpac'));
+    expect(dacpacFromQuery(json('/w/artifacts/bin/Shop/debug/Shop.dacpac', ''), '/w/Db')).toBe(path.resolve('/w/artifacts/bin/Shop/debug/Shop.dacpac'));
+    expect(dacpacFromQuery(json('', 'out/Shop.dacpac'), '/w/Db')).toBe(path.resolve('/w/Db', 'out/Shop.dacpac'));
+    expect(dacpacFromQuery('MSBuild version 17\n' + json('', '/w/Db/bin/Debug/Shop.dll'), '/w/Db')).toBeUndefined();
+    expect(dacpacFromQuery('error MSB1001', '/w/Db')).toBeUndefined();
   });
 });

@@ -39,9 +39,43 @@ export function dbBuildCommand(kind: SqlProjectKind, projectFile: string, config
   return { title, command: msbuild, args: [projectFile, '/t:Build', `/p:Configuration=${configuration}`, '/nologo', '/v:minimal'], cwd };
 }
 
-/** Among candidate .dacpac paths (with modification times), the one this build wrote: the newest named like the project's. */
-export function pickDacpac(name: string, candidates: { file: string; mtime: number }[], since: number): string | undefined {
-  const fresh = candidates.filter((c) => path.basename(c.file).toLowerCase() === name.toLowerCase() && c.mtime >= since);
-  fresh.sort((a, b) => b.mtime - a.mtime);
-  return fresh[0]?.file;
+/**
+ * The command that asks MSBuild where the build puts the .dacpac (the same configuration as the build): any OutputPath,
+ * UseArtifactsOutput or SqlTargetName is evaluated by MSBuild itself.
+ */
+export function dbOutputQuery(build: DbBuildCommand): { command: string; args: string[] } {
+  const props = ['-getProperty:SqlTargetPath', '-getProperty:TargetPath'];
+  if (build.command === 'dotnet') return { command: 'dotnet', args: ['msbuild', build.args[1]!, ...props, `-p:Configuration=${build.args[3]!}`] };
+  return { command: build.command, args: [build.args[0]!, ...props, build.args[2]!.replace(/^\//, '-')] };
+}
+
+/** The .dacpac from the query's output ({"Properties": {...}}): SqlTargetPath, else a TargetPath ending in .dacpac. */
+export function dacpacFromQuery(output: string, projectDir: string): string | undefined {
+  let props: Record<string, string> = {};
+  try {
+    props = (JSON.parse(output.slice(output.indexOf('{'))) as { Properties?: Record<string, string> }).Properties ?? {};
+  } catch {
+    return undefined;
+  }
+  const file = [props['SqlTargetPath'], props['TargetPath']].find((p) => p && /\.dacpac$/i.test(p.trim()));
+  return file ? path.resolve(projectDir, file.trim()) : undefined;
+}
+
+/**
+ * Without an answer from MSBuild (older than 17.8 has no -getProperty): the .dacpac named like the project's in a folder
+ * under the bin root named after the built configuration (bin/Debug, bin/x64/Debug), never another configuration's.
+ * Only folders below the bin root count (a checkout under /work/Debug does not make every file Debug's). Both path
+ * separators are read on every OS. Not filtered by the build's start time: an up-to-date build does not rewrite the file.
+ */
+export function pickDacpac(name: string, configuration: string, binRoot: string, candidates: { file: string; mtime: number }[]): string | undefined {
+  const parts = (p: string) => p.split(/[\\/]+/).filter((s) => s.length > 0).map((s) => s.toLowerCase());
+  const root = parts(binRoot);
+  const config = configuration.toLowerCase();
+  const named = candidates.filter((c) => {
+    const p = parts(c.file);
+    if (p.length <= root.length + 1 || root.some((s, i) => p[i] !== s)) return false;
+    return p[p.length - 1] === name.toLowerCase() && p.slice(root.length, -1).includes(config);
+  });
+  named.sort((a, b) => b.mtime - a.mtime);
+  return named[0]?.file;
 }

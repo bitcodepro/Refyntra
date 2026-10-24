@@ -68,4 +68,29 @@ public sealed class CqrsUnrestoredTests : IClassFixture<CqrsUnrestoredFixture>
         var callers = Relations(await RelatedAsync("class GetTicketQueryHandler", 6), "handler.dispatch").Select(Label).ToList();
         Assert.Contains(callers, l => l.StartsWith("Send(GetTicketQuery) in") && l.Contains("TicketsController.Get"));
     }
+    [Fact]
+    public async Task AHandlerDispatchingAnotherRequestLeadsToItsHandler()
+    {
+        static string All(JsonElement r) => string.Join(" | ", r.GetProperty("relations").EnumerateArray().Select(x => x.GetProperty("relationKind").GetString() + ":" + Label(x)));
+        var chains = _f.File("Billing.Api", "Chains.cs");
+        var handle = await RelatedAsync("Handle(CloseTicketCommand", 0, chains);
+        var next = Relations(handle, "handler.handler").Select(Label).ToList();
+        Assert.True(next.Contains("NotifyWatchersCommand → NotifyWatchersCommandHandler"), All(handle));
+        // Validate(request) passes the handler's own request on: no dispatch of CloseTicketCommand.
+        Assert.DoesNotContain(next, l => l.StartsWith("CloseTicketCommand", StringComparison.Ordinal));
+        var callers = Relations(await RelatedAsync("class NotifyWatchersCommandHandler", 6, chains), "handler.dispatch").Select(Label).ToList();
+        Assert.Contains(callers, l => l.Contains("CloseTicketCommandHandler"));
+    }
+
+    [Fact]
+    public async Task AResolvedAndAnUnresolvedHandlerInterfaceOnOneClassBothCount()
+    {
+        static string All(JsonElement r) => string.Join(" | ", r.GetProperty("relations").EnumerateArray().Select(x => x.GetProperty("relationKind").GetString() + ":" + Label(x)));
+        var chains = _f.File("Billing.Api", "Chains.cs");
+        var hide = await RelatedAsync("Hide(int commentId)", 0, chains);
+        Assert.True(Relations(hide, "handler.handler").Select(Label).Contains("HideCommentCommand → HideCommentHandler"), All(hide));
+        var handler = await RelatedAsync("class HideCommentHandler", 6, chains);
+        var requests = Relations(handler, "handler.request").Select(Label).ToList();
+        Assert.True(requests.Contains("CommentAudit") && requests.Contains("HideCommentCommand"), All(handler));
+    }
 }
