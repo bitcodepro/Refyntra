@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { gitUri, runGit } from './git';
+import { watchWebview } from './webviewWatchdog';
 import {
   BRANCH_FORMAT,
   type Branch,
@@ -172,6 +173,7 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
   private attach(webview: vscode.Webview, wide: boolean): void {
     webview.options = { enableScripts: true };
     webview.html = sidebarHtml(webview, wide);
+    watchWebview(webview, 'Git');
     webview.onDidReceiveMessage((m: { type: string; [k: string]: unknown }) => void this.onMessage(m));
     this.webviews.add(webview);
     void this.refresh();
@@ -913,6 +915,7 @@ export class CommitPanels {
     this.open.set(d.sha, panel);
     panel.onDidDispose(() => this.open.delete(d.sha));
     panel.webview.html = commitHtml(panel.webview);
+    panel.onDidDispose(watchWebview(panel.webview, 'commit').dispose);
     panel.webview.onDidReceiveMessage(async (m: { type: string; path?: string; from?: string }) => {
       if (m.type === 'ready') void panel.webview.postMessage({ type: 'details', details: d });
       if (m.type === 'patch' && typeof m.path === 'string' && d.files.some((f) => f.path === m.path)) {

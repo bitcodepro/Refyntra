@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
+import { watchWebview } from './webviewWatchdog';
 import type { SignatureInfo } from '@refyntra/contracts';
 import { type SignatureRow, initialRows } from './codeRefactorSummary';
 import { type SignatureView, parseSignatureMessage, reduceSignature, renderSignatureHtml, signatureView } from './changeSignatureModel';
@@ -29,7 +30,11 @@ export class ChangeSignatureDialog implements vscode.Disposable {
     const nonce = randomBytes(16).toString('base64');
     this.panel.webview.html = renderSignatureHtml({ nonce, cspSource: this.panel.webview.cspSource, title });
     this.panel.webview.onDidReceiveMessage((m: unknown) => this.dispatch(m));
-    this.panel.onDidDispose(() => this.finish(undefined));
+    const watch = watchWebview(this.panel.webview, 'Change Signature');
+    this.panel.onDidDispose(() => {
+      watch.dispose();
+      this.finish(undefined);
+    });
     ChangeSignatureDialog.current = this;
   }
 
