@@ -280,4 +280,37 @@ public sealed class PackageFallbackRulesTests : IDisposable
         Assert.Equal(new[] { "Host.Lib/1.0.0", "Standard.Dep/1.0.0" }, net8.Resolved.OrderBy(x => x, StringComparer.Ordinal).ToArray());
         Assert.Contains(net8.Assemblies, a => a.EndsWith(Path.Combine("netstandard2.0", "Host.Lib.dll"), StringComparison.Ordinal));
     }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ASharedDependencyTakesTheVersionThatSatisfiesEveryRangeInEitherReferenceOrder(bool aFirst)
+    {
+        Pkg("Diamond.A", "1.0.0", new[] { "lib/net8.0/Diamond.A.dll" }, "<dependencies><dependency id=\"Diamond.Shared\" version=\"1.0.0\" /></dependencies>");
+        Pkg("Diamond.B", "1.0.0", new[] { "lib/net8.0/Diamond.B.dll" }, "<dependencies><dependency id=\"Diamond.Shared\" version=\"2.0.0\" /></dependencies>");
+        Pkg("Diamond.Shared", "1.0.0", new[] { "lib/net8.0/Diamond.Shared.dll" });
+        Pkg("Diamond.Shared", "2.0.0", new[] { "lib/net8.0/Diamond.Shared.dll" });
+        Pkg("Diamond.Shared", "3.0.0", new[] { "lib/net8.0/Diamond.Shared.dll" });
+        const string a = "<PackageReference Include=\"Diamond.A\" Version=\"1.0.0\" />", b = "<PackageReference Include=\"Diamond.B\" Version=\"1.0.0\" />";
+        var r = PackageFallback.Resolve(Project("Diamond" + aFirst, "net8.0", aFirst ? a + b : b + a), "net8.0");
+        Assert.Contains("Diamond.Shared/2.0.0", r.Resolved); // >= 1.0.0 and >= 2.0.0: the lowest satisfying both
+        Assert.Single(r.Assemblies, x => Path.GetFileName(x) == "Diamond.Shared.dll" && x.Contains(Path.Combine("2.0.0", "lib")));
+    }
+
+    [Fact]
+    public void ConflictingDependencyRangesLeaveThePackageUnresolvedAndADirectReferenceWins()
+    {
+        Pkg("Conflict.A", "1.0.0", new[] { "lib/net8.0/Conflict.A.dll" }, "<dependencies><dependency id=\"Conflict.Shared\" version=\"[1.0.0]\" /></dependencies>");
+        Pkg("Conflict.B", "1.0.0", new[] { "lib/net8.0/Conflict.B.dll" }, "<dependencies><dependency id=\"Conflict.Shared\" version=\"[2.0.0]\" /></dependencies>");
+        Pkg("Conflict.Shared", "1.0.0", new[] { "lib/net8.0/Conflict.Shared.dll" });
+        Pkg("Conflict.Shared", "2.0.0", new[] { "lib/net8.0/Conflict.Shared.dll" });
+        const string items = "<PackageReference Include=\"Conflict.A\" Version=\"1.0.0\" /><PackageReference Include=\"Conflict.B\" Version=\"1.0.0\" />";
+        var conflict = PackageFallback.Resolve(Project("Conflict", "net8.0", items), "net8.0");
+        Assert.DoesNotContain(conflict.Resolved, x => x.StartsWith("Conflict.Shared/", StringComparison.Ordinal));
+        Assert.DoesNotContain(conflict.Assemblies, x => Path.GetFileName(x) == "Conflict.Shared.dll");
+        Assert.Contains("Conflict.Shared (dependency)", conflict.Unresolved);
+        // Direct-dependency-wins: the project's own reference decides.
+        var direct = PackageFallback.Resolve(Project("ConflictDirect", "net8.0", items + "<PackageReference Include=\"Conflict.Shared\" Version=\"[2.0.0]\" />"), "net8.0");
+        Assert.Contains("Conflict.Shared/2.0.0", direct.Resolved);
+    }
 }

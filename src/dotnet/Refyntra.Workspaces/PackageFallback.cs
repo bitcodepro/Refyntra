@@ -35,27 +35,66 @@ public static class PackageFallback
         if (File.Exists(assets)) return FromAssets(assets, framework, dir);
 
         var folders = PackageFolders(dir, Array.Empty<string>());
+        var direct = PackageReferences(projectPath).ToDictionary(p => p.Id, StringComparer.OrdinalIgnoreCase);
+        // NuGet's graph rules, simplified: a direct reference wins; a transitive package takes the lowest cached version
+        // that satisfies every dependency range on it (cousin dependencies). The graph is walked again until the choices
+        // settle (a newer choice can bring other dependencies). A package whose ranges no cached version satisfies stays
+        // unresolved rather than getting an incompatible version.
+        var chosen = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        for (var round = 0; round < 10; round++)
+        {
+            var ranges = new Dictionary<string, List<VersionRange?>>(StringComparer.OrdinalIgnoreCase);
+            var queue = new Queue<string>(direct.Keys);
+            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var next = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+            while (queue.Count > 0 && visited.Count < 500)
+            {
+                var id = queue.Dequeue();
+                if (!visited.Add(id)) continue;
+                var packageDir = direct.TryGetValue(id, out var d)
+                    ? FindPackage(folders, id, d.Range)
+                    : FindPackage(folders, id, ranges.TryGetValue(id, out var r) ? r : new List<VersionRange?>());
+                next[id] = packageDir;
+                if (packageDir == null) continue;
+                foreach (var dep in Dependencies(packageDir, id, framework))
+                {
+                    if (!ranges.TryGetValue(dep.Id, out var list)) ranges[dep.Id] = list = new List<VersionRange?>();
+                    list.Add(dep.Range);
+                    // A dependency already chosen this round is chosen again with the range just added.
+                    if (visited.Contains(dep.Id) && !direct.ContainsKey(dep.Id)) next[dep.Id] = FindPackage(folders, dep.Id, list);
+                    queue.Enqueue(dep.Id);
+                }
+            }
+            var settled = next.Count == chosen.Count && next.All(kv => chosen.TryGetValue(kv.Key, out var v) && v == kv.Value);
+            chosen = next;
+            if (settled) break;
+        }
+
         var dlls = new List<string>();
         var resolved = new List<string>();
         var unresolved = new List<string>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var queue = new Queue<(PackageItem item, bool direct)>(PackageReferences(projectPath).Select(p => (p, true)));
-        while (queue.Count > 0 && seen.Count < 500)
+        foreach (var (id, packageDir) in chosen)
         {
-            var (item, direct) = queue.Dequeue();
-            if (!seen.Add(item.Id)) continue;
-            var packageDir = FindPackage(folders, item.Id, item.Range);
+            var isDirect = direct.TryGetValue(id, out var item);
             if (packageDir == null)
             {
-                if (direct) unresolved.Add(item.Id + (item.Range == null ? "" : " " + item.Range.ToNormalizedString()));
+                if (isDirect) unresolved.Add(id + (item!.Range == null ? "" : " " + item.Range.ToNormalizedString()));
+                else unresolved.Add(id + " (dependency)");
                 continue;
             }
-            resolved.Add(item.Id + "/" + Path.GetFileName(packageDir));
-            if (!item.ExcludeCompile) dlls.AddRange(CompileAssemblies(packageDir, framework));
-            foreach (var d in Dependencies(packageDir, item.Id, framework))
-                if (!seen.Contains(d.Id)) queue.Enqueue((d, false));
+            resolved.Add(id + "/" + Path.GetFileName(packageDir));
+            if (!(isDirect && item!.ExcludeCompile)) dlls.AddRange(CompileAssemblies(packageDir, framework));
         }
         return new Result(dlls.Distinct(StringComparer.OrdinalIgnoreCase).ToList(), resolved, unresolved);
+    }
+
+    /// <summary>The lowest cached version that satisfies every range on a transitive package (none given: the highest cached).</summary>
+    public static string? FindPackage(IReadOnlyList<string> folders, string id, IReadOnlyList<VersionRange?> ranges)
+    {
+        var applicable = ranges.OfType<VersionRange>().ToList();
+        if (applicable.Count == 0) return FindPackage(folders, id, (VersionRange?)null);
+        var candidates = CachedVersions(folders, id).Where(c => applicable.All(r => r.Satisfies(c.version))).ToList();
+        return candidates.Count == 0 ? null : candidates.MinBy(c => c.version).dir;
     }
 
     /// <summary>
@@ -217,6 +256,16 @@ public static class PackageFallback
     /// </summary>
     public static string? FindPackage(IReadOnlyList<string> folders, string id, VersionRange? range)
     {
+        var candidates = CachedVersions(folders, id);
+        if (candidates.Count == 0) return null;
+        if (range == null) return candidates.MaxBy(c => c.version).dir;
+        var best = range.FindBestMatch(candidates.Select(c => c.version));
+        return best == null ? null : candidates.First(c => c.version == best).dir;
+    }
+
+    /// <summary>The cached versions of a package across the folders (the first folder wins for a version found twice).</summary>
+    private static List<(NuGetVersion version, string dir)> CachedVersions(IReadOnlyList<string> folders, string id)
+    {
         var candidates = new List<(NuGetVersion version, string dir)>();
         foreach (var folder in folders)
         {
@@ -225,10 +274,7 @@ public static class PackageFallback
             foreach (var v in Directory.EnumerateDirectories(root))
                 if (NuGetVersion.TryParse(Path.GetFileName(v), out var parsed) && candidates.All(c => c.version != parsed)) candidates.Add((parsed, v));
         }
-        if (candidates.Count == 0) return null;
-        if (range == null) return candidates.MaxBy(c => c.version).dir;
-        var best = range.FindBestMatch(candidates.Select(c => c.version));
-        return best == null ? null : candidates.First(c => c.version == best).dir;
+        return candidates;
     }
 
     /// <summary>The compile assemblies of a package for a framework: ref/ before lib/, the nearest compatible framework folder.</summary>
