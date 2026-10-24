@@ -37,37 +37,41 @@ public static class PackageFallback
         var folders = PackageFolders(dir, Array.Empty<string>());
         var direct = PackageReferences(projectPath).ToDictionary(p => p.Id, StringComparer.OrdinalIgnoreCase);
         // NuGet's graph rules, simplified: a direct reference wins; a transitive package takes the lowest cached version
-        // that satisfies every dependency range on it (cousin dependencies). The graph is walked again until the choices
-        // settle (a newer choice can bring other dependencies). A package whose ranges no cached version satisfies stays
-        // unresolved rather than getting an incompatible version.
-        var chosen = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
-        for (var round = 0; round < 10; round++)
+        // that satisfies every dependency range on it (cousin dependencies). Iterated to a fixed point: each round walks
+        // the graph of the previous round's choices (so only the dependencies of the versions actually chosen count, and
+        // the edges of a version given up disappear), collects the ranges on every package it reaches, and chooses again
+        // from them; it stops when the choices it walked equal the choices it computes. A package whose ranges no cached
+        // version satisfies stays unresolved rather than getting an incompatible version.
+        var previous = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        var chosen = previous;
+        for (var round = 0; round < 20; round++)
         {
             var ranges = new Dictionary<string, List<VersionRange?>>(StringComparer.OrdinalIgnoreCase);
+            var walked = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
             var queue = new Queue<string>(direct.Keys);
-            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var next = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
-            while (queue.Count > 0 && visited.Count < 500)
+            while (queue.Count > 0 && walked.Count < 500)
             {
                 var id = queue.Dequeue();
-                if (!visited.Add(id)) continue;
-                var packageDir = direct.TryGetValue(id, out var d)
-                    ? FindPackage(folders, id, d.Range)
+                if (walked.ContainsKey(id)) continue;
+                // The previous round's choice; a package reached for the first time is chosen from the ranges seen so far.
+                var packageDir = direct.TryGetValue(id, out var d) ? FindPackage(folders, id, d.Range)
+                    : previous.TryGetValue(id, out var p) ? p
                     : FindPackage(folders, id, ranges.TryGetValue(id, out var r) ? r : new List<VersionRange?>());
-                next[id] = packageDir;
+                walked[id] = packageDir;
                 if (packageDir == null) continue;
                 foreach (var dep in Dependencies(packageDir, id, framework))
                 {
                     if (!ranges.TryGetValue(dep.Id, out var list)) ranges[dep.Id] = list = new List<VersionRange?>();
                     list.Add(dep.Range);
-                    // A dependency already chosen this round is chosen again with the range just added.
-                    if (visited.Contains(dep.Id) && !direct.ContainsKey(dep.Id)) next[dep.Id] = FindPackage(folders, dep.Id, list);
                     queue.Enqueue(dep.Id);
                 }
             }
-            var settled = next.Count == chosen.Count && next.All(kv => chosen.TryGetValue(kv.Key, out var v) && v == kv.Value);
-            chosen = next;
-            if (settled) break;
+            var next = walked.ToDictionary(kv => kv.Key,
+                kv => direct.ContainsKey(kv.Key) ? kv.Value : FindPackage(folders, kv.Key, ranges.TryGetValue(kv.Key, out var r) ? r : new List<VersionRange?>()),
+                StringComparer.OrdinalIgnoreCase);
+            chosen = walked;
+            if (next.Count == walked.Count && next.All(kv => walked.TryGetValue(kv.Key, out var v) && v == kv.Value)) break;
+            previous = next;
         }
 
         var dlls = new List<string>();

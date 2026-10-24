@@ -313,4 +313,26 @@ public sealed class PackageFallbackRulesTests : IDisposable
         var direct = PackageFallback.Resolve(Project("ConflictDirect", "net8.0", items + "<PackageReference Include=\"Conflict.Shared\" Version=\"[2.0.0]\" />"), "net8.0");
         Assert.Contains("Conflict.Shared/2.0.0", direct.Resolved);
     }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void AnUpgradeReachedDeeperBringsTheDependenciesOfTheNewVersionAndDropsTheOldOnes(bool aFirst)
+    {
+        // A -> Shared >= 1; B -> Middle -> Shared >= 2; Shared 1 -> Old, Shared 2 -> New.
+        Pkg("Deep.A", "1.0.0", new[] { "lib/net8.0/Deep.A.dll" }, "<dependencies><dependency id=\"Deep.Shared\" version=\"1.0.0\" /></dependencies>");
+        Pkg("Deep.B", "1.0.0", new[] { "lib/net8.0/Deep.B.dll" }, "<dependencies><dependency id=\"Deep.Middle\" version=\"1.0.0\" /></dependencies>");
+        Pkg("Deep.Middle", "1.0.0", new[] { "lib/net8.0/Deep.Middle.dll" }, "<dependencies><dependency id=\"Deep.Shared\" version=\"2.0.0\" /></dependencies>");
+        Pkg("Deep.Shared", "1.0.0", new[] { "lib/net8.0/Deep.Shared.dll" }, "<dependencies><dependency id=\"Deep.Old\" version=\"1.0.0\" /></dependencies>");
+        Pkg("Deep.Shared", "2.0.0", new[] { "lib/net8.0/Deep.Shared.dll" }, "<dependencies><dependency id=\"Deep.New\" version=\"1.0.0\" /></dependencies>");
+        Pkg("Deep.Old", "1.0.0", new[] { "lib/net8.0/Deep.Old.dll" });
+        Pkg("Deep.New", "1.0.0", new[] { "lib/net8.0/Deep.New.dll" });
+        const string a = "<PackageReference Include=\"Deep.A\" Version=\"1.0.0\" />", b = "<PackageReference Include=\"Deep.B\" Version=\"1.0.0\" />";
+        var r = PackageFallback.Resolve(Project("Deep" + aFirst, "net8.0", aFirst ? a + b : b + a), "net8.0");
+        Assert.Equal(new[] { "Deep.A/1.0.0", "Deep.B/1.0.0", "Deep.Middle/1.0.0", "Deep.New/1.0.0", "Deep.Shared/2.0.0" },
+            r.Resolved.OrderBy(x => x, StringComparer.Ordinal).ToArray());
+        Assert.DoesNotContain(r.Assemblies, x => Path.GetFileName(x) == "Deep.Old.dll");
+        Assert.Contains(r.Assemblies, x => Path.GetFileName(x) == "Deep.New.dll");
+        Assert.Empty(r.Unresolved);
+    }
 }
