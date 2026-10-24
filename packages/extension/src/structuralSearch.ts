@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
+import { watchWebview } from './webviewWatchdog';
 import { CancelledError, type EngineClient, type RenameOutcome } from '@refyntra/application';
 import { CSHARP_STRUCTURAL_REPLACE_ACTION, type StructuralMatch, type StructuralPattern, type StructuralSearchResult } from '@refyntra/contracts';
 import { fromRange, shortPath } from './convert';
@@ -270,7 +271,9 @@ class StructuralSearchPanel implements vscode.Disposable {
     const nonce = randomBytes(16).toString('base64');
     panel.webview.html = renderStructuralHtml({ nonce, cspSource: panel.webview.cspSource, title: TITLE, severities: PATTERN_SEVERITIES });
     panel.webview.onDidReceiveMessage((m: unknown) => void this.dispatch(m));
+    const watch = watchWebview(panel.webview, 'Structural Search');
     panel.onDidDispose(() => {
+      watch.dispose();
       if (this.panel === panel) this.panel = undefined;
     });
   }

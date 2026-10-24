@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { watchWebview } from './webviewWatchdog';
 import { randomBytes } from 'node:crypto';
 import { IMMEDIATE_DEBUG_TYPES, type ImmediateEntry, type ImmediateNode, completionPrefix, normaliseInput, parseAssignment, parsePageMessage, renderImmediateHtml, toNode } from './immediateModel';
 
@@ -32,7 +33,11 @@ export class ImmediateViewProvider implements vscode.WebviewViewProvider, vscode
     this.view = view;
     view.webview.options = { enableScripts: true, localResourceRoots: [] };
     view.webview.html = renderImmediateHtml({ nonce: randomBytes(16).toString('base64'), cspSource: view.webview.cspSource });
-    this.subs.push(view.webview.onDidReceiveMessage((m) => void this.onMessage(m)), view.onDidDispose(() => (this.view = undefined)));
+    const watch = watchWebview(view.webview, 'Immediate');
+    this.subs.push(view.webview.onDidReceiveMessage((m) => void this.onMessage(m)), watch, view.onDidDispose(() => {
+      watch.dispose();
+      this.view = undefined;
+    }));
   }
 
   /** The selected frame (Call Stack selection), else the first stopped thread's top frame is left to the adapter. */
