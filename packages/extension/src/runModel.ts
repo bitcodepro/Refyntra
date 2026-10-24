@@ -204,10 +204,29 @@ export function browserUrl(profile: LaunchProfile | undefined, listening?: strin
   return `${host.replace(/\/$/, '')}/${profile.launchUrl.replace(/^\//, '')}`;
 }
 
-/** ASP.NET Core's start-up line ("Now listening on: http://localhost:5187"); returns the URL. */
+/** ASP.NET Core's start-up line ("Now listening on: http://localhost:5187"; Serilog quotes it: "http://…"); returns the URL. */
 export function listeningUrl(text: string): string | undefined {
-  const m = /Now listening on:\s+(https?:\/\/\S+)/.exec(text);
+  const m = /Now listening on:\s+["']?(https?:\/\/[^\s"']+)/.exec(text);
   return m?.[1];
+}
+
+/** refyntra.run.openBrowser: as the launch profile says (Visual Studio's behaviour), for every web project, or never. */
+export type OpenBrowserMode = 'launchSettings' | 'always' | 'never';
+
+/**
+ * The launchBrowser of a .NET debug configuration as it starts (F5, the Run and Debug dropdown, launch.json, the Run
+ * view alike): "never" and "always" override what the configuration says; "launchSettings" keeps it. Not a web
+ * configuration (no launchBrowser): unchanged.
+ */
+export function effectiveLaunchBrowser(mode: OpenBrowserMode, launchBrowser: { enabled: boolean; url?: string } | undefined): { enabled: boolean; url?: string } | undefined {
+  if (!launchBrowser || mode === 'launchSettings') return launchBrowser;
+  return { ...launchBrowser, enabled: mode === 'always' };
+}
+
+/** Whether starting a target opens the browser: web projects only; the profile's launchBrowser unless the setting overrides it. */
+export function opensBrowser(mode: OpenBrowserMode, kind: string | undefined, profile: LaunchProfile | undefined): boolean {
+  if (!isWebKind(kind) || mode === 'never') return false;
+  return mode === 'always' || !!profile?.launchBrowser;
 }
 
 export const TARGET_FRAMEWORK_WINDOWS = /-windows/i;
@@ -289,14 +308,26 @@ export function parseRunGroups(value: unknown): RunGroup[] {
   return out;
 }
 
-/** The host and port a web target listens on (its launch profile's first URL), for the readiness check. */
+/**
+ * The host and port a web target listens on (its launch profile's first URL), for the readiness check. Parsed as a URL
+ * (IPv6 literals and their ports included); a wildcard binding (+, *, 0.0.0.0, [::]) is reached on localhost, an IPv6
+ * literal is returned without brackets (as net.connect wants it).
+ */
 export function readinessEndpoint(applicationUrl: string | undefined): { host: string; port: number } | undefined {
-  const url = firstUrl(applicationUrl);
-  if (!url) return undefined;
-  const m = /^(https?):\/\/([^/:]+)(?::(\d+))?/i.exec(url);
-  if (!m) return undefined;
-  const host = /^(\+|\*|0\.0\.0\.0|\[::\])$/.test(m[2]!) ? 'localhost' : m[2]!;
-  return { host, port: m[3] ? Number(m[3]) : m[1]!.toLowerCase() === 'https' ? 443 : 80 };
+  const first = firstUrl(applicationUrl);
+  if (!first) return undefined;
+  // Kestrel's "+" and "*" wildcards are no valid URL hosts.
+  const normalized = first.replace(/^(https?:\/\/)(\+|\*)(?=[:/]|$)/i, '$1localhost');
+  let url: URL;
+  try {
+    url = new URL(normalized);
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return undefined;
+  const raw = url.hostname.replace(/^\[(.*)\]$/, '$1');
+  const host = raw === '0.0.0.0' || raw === '::' ? 'localhost' : raw;
+  return { host, port: url.port ? Number(url.port) : url.protocol === 'https:' ? 443 : 80 };
 }
 
 /**
@@ -397,7 +428,7 @@ export interface DotnetDebugConfiguration {
 }
 
 /** A debug configuration for a .NET target (dynamic configuration, F5 without launch.json, Generate launch.json). */
-export function dotnetDebugConfiguration(t: RunTarget, choice: RunChoice, platform: string, workspaceFolder?: string): DotnetDebugConfiguration {
+export function dotnetDebugConfiguration(t: RunTarget, choice: RunChoice, platform: string, workspaceFolder?: string, browserMode: OpenBrowserMode = 'launchSettings'): DotnetDebugConfiguration {
   const d = t.dotnet!;
   const fw = pickFramework(d.project, platform, choice.framework) ?? d.project.targetFrameworks[0] ?? 'net10.0';
   const profile = d.profiles.find((p) => p.name === choice.profile) ?? d.profiles[0];
@@ -423,7 +454,7 @@ export function dotnetDebugConfiguration(t: RunTarget, choice: RunChoice, platfo
     justMyCode: true,
   };
   if (profile) cfg.launchProfile = profile.name;
-  if (isWebKind(d.project.kind)) cfg.launchBrowser = { enabled: !!profile?.launchBrowser, ...(profile?.launchUrl ? { url: profile.launchUrl } : {}) };
+  if (isWebKind(d.project.kind)) cfg.launchBrowser = { enabled: opensBrowser(browserMode, d.project.kind, profile), ...(profile?.launchUrl ? { url: profile.launchUrl } : {}) };
   return cfg;
 }
 

@@ -25,6 +25,13 @@ describe('run groups', async () => {
     expect(readinessEndpoint('https://localhost:7001;http://localhost:5001')).toEqual({ host: 'localhost', port: 7001 });
     expect(readinessEndpoint('http://*:8080')).toEqual({ host: 'localhost', port: 8080 });
     expect(readinessEndpoint(undefined)).toBeUndefined();
+    // IPv6 literals and their ports; wildcards are reached on localhost.
+    expect(readinessEndpoint('http://[::]:5189')).toEqual({ host: 'localhost', port: 5189 });
+    expect(readinessEndpoint('http://[::1]:5189')).toEqual({ host: '::1', port: 5189 });
+    expect(readinessEndpoint('https://[::1]')).toEqual({ host: '::1', port: 443 });
+    expect(readinessEndpoint('http://0.0.0.0:5000')).toEqual({ host: 'localhost', port: 5000 });
+    expect(readinessEndpoint('http://+:5000')).toEqual({ host: 'localhost', port: 5000 });
+    expect(readinessEndpoint('not a url')).toBeUndefined();
   });
   it('names debug sessions after the group', () => {
     expect(groupSessionName('Backend', 'Api')).toBe('Backend › Api');

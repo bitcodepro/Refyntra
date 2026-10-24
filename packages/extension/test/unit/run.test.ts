@@ -13,6 +13,8 @@ import {
   firstUrl,
   isPythonEntry,
   listeningUrl,
+  opensBrowser,
+  effectiveLaunchBrowser,
   lldbDebugConfiguration,
   lldbEnv,
   netcoredbgLaunchArguments,
@@ -89,6 +91,31 @@ describe('launchSettings.json', () => {
     expect(listeningUrl('info: Microsoft.Hosting.Lifetime[14]\n      Now listening on: http://localhost:5187\n')).toBe('http://localhost:5187');
     expect(browserUrl(parseLaunchSettings(LAUNCH)[1])).toBe('https://localhost:7001/swagger');
     expect(browserUrl(undefined, 'http://[::]:5000')).toBe('http://localhost:5000');
+  });
+
+  it('reads the start-up line of Serilog (quoted URL) too', () => {
+    expect(listeningUrl('[12:00:01 INF] Now listening on: "https://localhost:7001"')).toBe('https://localhost:7001');
+    expect(listeningUrl('{"@mt":"Now listening on: {address}","address":"http://localhost:5000"}')).toBeUndefined();
+  });
+
+  it('opens the browser as the launch profile says, for every web project or never (refyntra.run.openBrowser)', () => {
+    const on = { name: 'https', environmentVariables: {}, launchBrowser: true };
+    const off = { name: 'http', environmentVariables: {}, launchBrowser: false };
+    expect(opensBrowser('launchSettings', 'web', on)).toBe(true);
+    expect(opensBrowser('launchSettings', 'web', off)).toBe(false);
+    expect(opensBrowser('launchSettings', 'web', undefined)).toBe(false);
+    expect(opensBrowser('always', 'web', undefined)).toBe(true);
+    expect(opensBrowser('always', 'web', off)).toBe(true);
+    expect(opensBrowser('never', 'web', on)).toBe(false);
+    expect(opensBrowser('always', 'console', on)).toBe(false);
+    expect(opensBrowser('launchSettings', 'blazor-wasm', on)).toBe(true);
+  });
+
+  it('applies the browser setting to a debug configuration as it starts, whatever produced it', () => {
+    expect(effectiveLaunchBrowser('launchSettings', { enabled: false, url: 'health' })).toEqual({ enabled: false, url: 'health' });
+    expect(effectiveLaunchBrowser('always', { enabled: false, url: 'health' })).toEqual({ enabled: true, url: 'health' });
+    expect(effectiveLaunchBrowser('never', { enabled: true })).toEqual({ enabled: false });
+    expect(effectiveLaunchBrowser('always', undefined)).toBeUndefined(); // not a web configuration
   });
 });
 
