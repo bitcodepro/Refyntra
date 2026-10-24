@@ -213,6 +213,16 @@ export function listeningUrl(text: string): string | undefined {
 /** refyntra.run.openBrowser: as the launch profile says (Visual Studio's behaviour), for every web project, or never. */
 export type OpenBrowserMode = 'launchSettings' | 'always' | 'never';
 
+/**
+ * The launchBrowser of a .NET debug configuration as it starts (F5, the Run and Debug dropdown, launch.json, the Run
+ * view alike): "never" and "always" override what the configuration says; "launchSettings" keeps it. Not a web
+ * configuration (no launchBrowser): unchanged.
+ */
+export function effectiveLaunchBrowser(mode: OpenBrowserMode, launchBrowser: { enabled: boolean; url?: string } | undefined): { enabled: boolean; url?: string } | undefined {
+  if (!launchBrowser || mode === 'launchSettings') return launchBrowser;
+  return { ...launchBrowser, enabled: mode === 'always' };
+}
+
 /** Whether starting a target opens the browser: web projects only; the profile's launchBrowser unless the setting overrides it. */
 export function opensBrowser(mode: OpenBrowserMode, kind: string | undefined, profile: LaunchProfile | undefined): boolean {
   if (!isWebKind(kind) || mode === 'never') return false;

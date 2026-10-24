@@ -23,6 +23,7 @@ import {
   dotnetDebugConfiguration,
   dotnetRunCommand,
   dotnetTargets,
+  effectiveLaunchBrowser,
   firstUrl,
   isPythonEntry,
   listeningUrl,
@@ -859,22 +860,6 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
     if (!cfg) return false;
     if (sessionName) cfg.name = sessionName;
     const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(r.target.cwd)) ?? vscode.workspace.workspaceFolders?.[0];
-    const browser = (cfg as Partial<DotnetDebugConfiguration>).launchBrowser;
-    if (browser?.enabled) {
-      // The tracker opens the browser on "Now listening on"; the port check is the fallback for apps that do not print it.
-      const key = `debug:${r.target.id}:${Date.now()}`;
-      cfg.__refyntraBrowser = key;
-      const urls = (cfg as Partial<DotnetDebugConfiguration>).env?.ASPNETCORE_URLS;
-      let finished!: () => void;
-      const done = new Promise<void>((res) => (finished = res));
-      const sub = vscode.debug.onDidTerminateDebugSession((s) => {
-        if (s.configuration.__refyntraBrowser === key) {
-          sub.dispose();
-          finished();
-        }
-      });
-      this.openWhenPortAnswers(key, urls, (u) => browserUrl({ name: '', environmentVariables: {}, launchBrowser: true, ...(browser.url ? { launchUrl: browser.url } : {}) }, u), done);
-    }
     return vscode.debug.startDebugging(folder, cfg);
   }
 
@@ -1353,6 +1338,9 @@ export function registerRun(context: vscode.ExtensionContext, engine: EngineClie
             return null as unknown as undefined; // null: VS Code opens launch.json
           }
           if (c.request === 'attach') return { ...config, processId: Number(c.processId) };
+          // refyntra.run.openBrowser applies to every way a configuration starts (F5, the dropdown, launch.json, the Run view).
+          const launchBrowser = effectiveLaunchBrowser(browserMode(), c.launchBrowser);
+          if (launchBrowser) c.launchBrowser = launchBrowser;
           // Build first (the preLaunch step), unless "build": false.
           if (c.project && c.build !== false) {
             const ok = await buildDotnet(c.project, c.framework, c.configuration ?? 'Debug', folder);
@@ -1369,7 +1357,10 @@ export function registerRun(context: vscode.ExtensionContext, engine: EngineClie
           if (c.noDebug) {
             const t: RunTarget = { id: `dotnet:${c.project ?? c.program}`, language: 'dotnet', label: c.name, kindLabel: '.NET', cwd: c.cwd ?? path.dirname(c.program!), runnable: true };
             const program = c.program!;
-            await service.startSession(t, [{ command: program.endsWith('.dll') ? 'dotnet' : program, args: [...(program.endsWith('.dll') ? [program] : []), ...(c.args ?? [])], cwd: t.cwd, env: c.env ?? {} }], `Run: ${c.name}`, c.launchBrowser?.enabled ? (u) => service.openBrowser(browserUrl({ name: '', environmentVariables: {}, launchBrowser: true, ...(c.launchBrowser?.url ? { launchUrl: c.launchBrowser.url } : {}) }, u)) : undefined);
+            const key = c.launchBrowser?.enabled ? `run:${t.id}:${Date.now()}` : undefined;
+            const url = (u: string | undefined) => browserUrl({ name: '', environmentVariables: {}, launchBrowser: true, ...(c.launchBrowser?.url ? { launchUrl: c.launchBrowser.url } : {}) }, u);
+            const session = await service.startSession(t, [{ command: program.endsWith('.dll') ? 'dotnet' : program, args: [...(program.endsWith('.dll') ? [program] : []), ...(c.args ?? [])], cwd: t.cwd, env: c.env ?? {} }], `Run: ${c.name}`, key ? (u) => service.openBrowserOnce(key, url(u)) : undefined);
+            if (key) service.openWhenPortAnswers(key, c.env?.ASPNETCORE_URLS, url, session.done);
             return undefined;
           }
           return { ...config, ...netcoredbgLaunchArguments(c) };
@@ -1462,26 +1453,33 @@ export function registerRun(context: vscode.ExtensionContext, engine: EngineClie
   // ---- web: open the browser when the app is listening; exit codes; running state
   subs.push(
     vscode.debug.registerDebugAdapterTrackerFactory(DOTNET_DEBUG_TYPE, {
+      // Every debug session of a .NET web configuration, however it started (the tracker exists only once the session does:
+      // a failed build or a cancelled start never gets here). The browser opens once per session: on "Now listening on",
+      // or once the application URL answers (apps that do not print it); the port check ends with the session.
       createDebugAdapterTracker: (session) => {
         const cfg = session.configuration as DotnetDebugConfiguration;
+        const browser = cfg.request === 'launch' && cfg.launchBrowser?.enabled ? cfg.launchBrowser : undefined;
+        const url = (u: string | undefined) => browserUrl({ name: '', environmentVariables: {}, launchBrowser: true, ...(browser?.url ? { launchUrl: browser.url } : {}) }, u);
         let buffer = '';
-        let opened = false;
+        let finished!: () => void;
+        const done = new Promise<void>((res) => (finished = res));
         return {
+          onWillStartSession: () => {
+            if (browser) service.openWhenPortAnswers(session.id, cfg.env?.ASPNETCORE_URLS, url, done);
+          },
           onDidSendMessage: (m: { type?: string; event?: string; body?: { output?: string; exitCode?: number } }) => {
             if (m.type !== 'event') return;
-            if (m.event === 'output' && cfg.launchBrowser?.enabled && !opened && m.body?.output) {
+            if (m.event === 'output' && browser && m.body?.output) {
               buffer = (buffer + m.body.output).slice(-4000);
-              const url = listeningUrl(buffer);
-              if (url) {
-                opened = true;
-                const target = browserUrl({ name: '', environmentVariables: {}, launchBrowser: true, ...(cfg.launchBrowser.url ? { launchUrl: cfg.launchBrowser.url } : {}) }, url);
-                const key = (session.configuration as { __refyntraBrowser?: string }).__refyntraBrowser;
-                if (key) service.openBrowserOnce(key, target);
-                else service.openBrowser(target);
-              }
+              const listening = listeningUrl(buffer);
+              if (listening) service.openBrowserOnce(session.id, url(listening));
             }
             if (m.event === 'exited' && typeof m.body?.exitCode === 'number') service.hooks.debugExitCodes.set(session.id, m.body.exitCode);
+            if (m.event === 'terminated' || m.event === 'exited') finished();
           },
+          onWillStopSession: () => finished(),
+          onExit: () => finished(),
+          onError: () => finished(),
         };
       },
     }),

@@ -14,6 +14,7 @@ import {
   isPythonEntry,
   listeningUrl,
   opensBrowser,
+  effectiveLaunchBrowser,
   lldbDebugConfiguration,
   lldbEnv,
   netcoredbgLaunchArguments,
@@ -108,6 +109,13 @@ describe('launchSettings.json', () => {
     expect(opensBrowser('never', 'web', on)).toBe(false);
     expect(opensBrowser('always', 'console', on)).toBe(false);
     expect(opensBrowser('launchSettings', 'blazor-wasm', on)).toBe(true);
+  });
+
+  it('applies the browser setting to a debug configuration as it starts, whatever produced it', () => {
+    expect(effectiveLaunchBrowser('launchSettings', { enabled: false, url: 'health' })).toEqual({ enabled: false, url: 'health' });
+    expect(effectiveLaunchBrowser('always', { enabled: false, url: 'health' })).toEqual({ enabled: true, url: 'health' });
+    expect(effectiveLaunchBrowser('never', { enabled: true })).toEqual({ enabled: false });
+    expect(effectiveLaunchBrowser('always', undefined)).toBeUndefined(); // not a web configuration
   });
 });
 
