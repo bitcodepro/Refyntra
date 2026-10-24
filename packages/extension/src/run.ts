@@ -23,11 +23,14 @@ import {
   dotnetDebugConfiguration,
   dotnetRunCommand,
   dotnetTargets,
+  firstUrl,
   isPythonEntry,
   listeningUrl,
   lldbDebugConfiguration,
   lldbEnv,
   netcoredbgLaunchArguments,
+  type OpenBrowserMode,
+  opensBrowser,
   nodeDebugConfigurations,
   nodeScriptTarget,
   nodeTargets,
@@ -171,6 +174,11 @@ export interface RunSession {
 }
 
 const HIDDEN_KEY = 'refyntra.run.hidden';
+
+function browserMode(): OpenBrowserMode {
+  const v = vscode.workspace.getConfiguration('refyntra').get<string>('run.openBrowser', 'launchSettings');
+  return v === 'always' || v === 'never' ? v : 'launchSettings';
+}
 
 /** The targets of a command argument: a Run view row, several selected rows, or a target id. */
 function targetsOf(arg: unknown): RunTarget[] {
@@ -700,10 +708,34 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
       return undefined;
     }
     const profile = r.target.dotnet?.profiles.find((p) => p.name === r.choice.profile);
-    const browser = isWebKind(r.target.dotnet?.project.kind) && profile?.launchBrowser ? profile : undefined;
+    const key = opensBrowser(browserMode(), r.target.dotnet?.project.kind, profile) ? `run:${r.target.id}:${Date.now()}` : undefined;
     const steps = this.runSteps(r.target, r.choice, watch);
     if (watch && r.target.language === 'dotnet') steps[0] = { ...steps[0]!, args: watchArgs(steps[0]!.args, rudeEditPolicy()) };
-    return this.startSession(r.target, steps, `${watch ? 'Watch' : 'Run'}: ${r.target.label}`, browser ? (url) => this.openBrowser(browserUrl(browser, url)) : undefined, watch && r.target.language === 'dotnet');
+    const session = await this.startSession(r.target, steps, `${watch ? 'Watch' : 'Run'}: ${r.target.label}`,
+      key ? (url) => this.openBrowserOnce(key, browserUrl(profile, url)) : undefined, watch && r.target.language === 'dotnet');
+    // An app that does not print "Now listening on" (its own logger, JSON logs): the browser opens once the port answers.
+    if (key) this.openWhenPortAnswers(key, profile?.applicationUrl ?? steps.at(-1)?.env.ASPNETCORE_URLS, (u) => browserUrl(profile, u), session.done);
+    return session;
+  }
+
+  private readonly browserOpened = new Set<string>();
+
+  /** Opens the browser once per start (the start-up line and the port check race; the first one wins). */
+  openBrowserOnce(key: string, url: string | undefined): void {
+    if (!url || this.browserOpened.has(key)) return;
+    this.browserOpened.add(key);
+    this.openBrowser(url);
+  }
+
+  /** Waits (up to 2 minutes) for the first application URL to accept connections, unless the app exits first. */
+  openWhenPortAnswers(key: string, applicationUrls: string | undefined, url: (listening: string | undefined) => string | undefined, done: Promise<unknown>): void {
+    const endpoint = readinessEndpoint(applicationUrls);
+    if (!endpoint) return;
+    let ended = false;
+    void done.then(() => (ended = true));
+    void waitForPort(endpoint.host, endpoint.port, 120000).then((ok) => {
+      if (ok && !ended) this.openBrowserOnce(key, url(firstUrl(applicationUrls)));
+    });
   }
 
   /** Starts a target in a Refyntra terminal (a VS Code task with a custom execution): output, input, exit code. */
@@ -827,6 +859,22 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
     if (!cfg) return false;
     if (sessionName) cfg.name = sessionName;
     const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(r.target.cwd)) ?? vscode.workspace.workspaceFolders?.[0];
+    const browser = (cfg as Partial<DotnetDebugConfiguration>).launchBrowser;
+    if (browser?.enabled) {
+      // The tracker opens the browser on "Now listening on"; the port check is the fallback for apps that do not print it.
+      const key = `debug:${r.target.id}:${Date.now()}`;
+      cfg.__refyntraBrowser = key;
+      const urls = (cfg as Partial<DotnetDebugConfiguration>).env?.ASPNETCORE_URLS;
+      let finished!: () => void;
+      const done = new Promise<void>((res) => (finished = res));
+      const sub = vscode.debug.onDidTerminateDebugSession((s) => {
+        if (s.configuration.__refyntraBrowser === key) {
+          sub.dispose();
+          finished();
+        }
+      });
+      this.openWhenPortAnswers(key, urls, (u) => browserUrl({ name: '', environmentVariables: {}, launchBrowser: true, ...(browser.url ? { launchUrl: browser.url } : {}) }, u), done);
+    }
     return vscode.debug.startDebugging(folder, cfg);
   }
 
@@ -860,7 +908,7 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
           void vscode.window.showWarningMessage(`Refyntra: .NET debugging is unavailable on ${process.platform}-${process.arch} (no netcoredbg build). Use Run (Ctrl+F5) instead.`, 'Show Health').then((p) => p && vscode.commands.executeCommand('refyntra.showHealth'));
           return undefined;
         }
-        return { ...dotnetDebugConfiguration(t, choice, process.platform), __refyntraTarget: t.id };
+        return { ...dotnetDebugConfiguration(t, choice, process.platform, undefined, browserMode()), __refyntraTarget: t.id };
       }
       case 'python':
         return { ...pythonDebugConfiguration(t, this.debuggers.python()), __refyntraTarget: t.id };
@@ -1426,7 +1474,10 @@ export function registerRun(context: vscode.ExtensionContext, engine: EngineClie
               const url = listeningUrl(buffer);
               if (url) {
                 opened = true;
-                service.openBrowser(browserUrl({ name: '', environmentVariables: {}, launchBrowser: true, ...(cfg.launchBrowser.url ? { launchUrl: cfg.launchBrowser.url } : {}) }, url));
+                const target = browserUrl({ name: '', environmentVariables: {}, launchBrowser: true, ...(cfg.launchBrowser.url ? { launchUrl: cfg.launchBrowser.url } : {}) }, url);
+                const key = (session.configuration as { __refyntraBrowser?: string }).__refyntraBrowser;
+                if (key) service.openBrowserOnce(key, target);
+                else service.openBrowser(target);
               }
             }
             if (m.event === 'exited' && typeof m.body?.exitCode === 'number') service.hooks.debugExitCodes.set(session.id, m.body.exitCode);

@@ -204,10 +204,19 @@ export function browserUrl(profile: LaunchProfile | undefined, listening?: strin
   return `${host.replace(/\/$/, '')}/${profile.launchUrl.replace(/^\//, '')}`;
 }
 
-/** ASP.NET Core's start-up line ("Now listening on: http://localhost:5187"); returns the URL. */
+/** ASP.NET Core's start-up line ("Now listening on: http://localhost:5187"; Serilog quotes it: "http://…"); returns the URL. */
 export function listeningUrl(text: string): string | undefined {
-  const m = /Now listening on:\s+(https?:\/\/\S+)/.exec(text);
+  const m = /Now listening on:\s+["']?(https?:\/\/[^\s"']+)/.exec(text);
   return m?.[1];
+}
+
+/** refyntra.run.openBrowser: as the launch profile says (Visual Studio's behaviour), for every web project, or never. */
+export type OpenBrowserMode = 'launchSettings' | 'always' | 'never';
+
+/** Whether starting a target opens the browser: web projects only; the profile's launchBrowser unless the setting overrides it. */
+export function opensBrowser(mode: OpenBrowserMode, kind: string | undefined, profile: LaunchProfile | undefined): boolean {
+  if (!isWebKind(kind) || mode === 'never') return false;
+  return mode === 'always' || !!profile?.launchBrowser;
 }
 
 export const TARGET_FRAMEWORK_WINDOWS = /-windows/i;
@@ -397,7 +406,7 @@ export interface DotnetDebugConfiguration {
 }
 
 /** A debug configuration for a .NET target (dynamic configuration, F5 without launch.json, Generate launch.json). */
-export function dotnetDebugConfiguration(t: RunTarget, choice: RunChoice, platform: string, workspaceFolder?: string): DotnetDebugConfiguration {
+export function dotnetDebugConfiguration(t: RunTarget, choice: RunChoice, platform: string, workspaceFolder?: string, browserMode: OpenBrowserMode = 'launchSettings'): DotnetDebugConfiguration {
   const d = t.dotnet!;
   const fw = pickFramework(d.project, platform, choice.framework) ?? d.project.targetFrameworks[0] ?? 'net10.0';
   const profile = d.profiles.find((p) => p.name === choice.profile) ?? d.profiles[0];
@@ -423,7 +432,7 @@ export function dotnetDebugConfiguration(t: RunTarget, choice: RunChoice, platfo
     justMyCode: true,
   };
   if (profile) cfg.launchProfile = profile.name;
-  if (isWebKind(d.project.kind)) cfg.launchBrowser = { enabled: !!profile?.launchBrowser, ...(profile?.launchUrl ? { url: profile.launchUrl } : {}) };
+  if (isWebKind(d.project.kind)) cfg.launchBrowser = { enabled: opensBrowser(browserMode, d.project.kind, profile), ...(profile?.launchUrl ? { url: profile.launchUrl } : {}) };
   return cfg;
 }
 

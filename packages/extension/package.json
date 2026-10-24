@@ -2833,6 +2833,21 @@
           "default": true,
           "description": "CodeLens: ASP.NET Core endpoints (\"GET /api/... · N frontend calls\")."
         },
+        "refyntra.run.openBrowser": {
+          "type": "string",
+          "enum": [
+            "launchSettings",
+            "always",
+            "never"
+          ],
+          "enumDescriptions": [
+            "As Visual Studio: when the launch profile has \"launchBrowser\": true (launchSettings.json).",
+            "For every web project, also without launchSettings.json or with launchBrowser false.",
+            "Never open the browser."
+          ],
+          "default": "launchSettings",
+          "markdownDescription": "Open the browser when a web project (ASP.NET Core, Blazor) starts from Run or Debug: at its `launchUrl` once the app prints *Now listening on*, or once its port answers (apps with their own logging)."
+        },
         "refyntra.git.autoFetch": {
           "type": "number",
           "default": 5,

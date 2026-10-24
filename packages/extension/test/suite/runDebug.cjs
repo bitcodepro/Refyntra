@@ -263,6 +263,57 @@ exports.cases = ({ api, csharp, waitFor }) => {
       },
     ],
     [
+      'run: a web app that does not print "Now listening" opens the browser once its port answers; refyntra.run.openBrowser always/never',
+      async () => {
+        const a = await ready();
+        const settingsPath = file('WebApp/Properties/launchSettings.json');
+        const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+        // Its own logging: the host's start-up lines are filtered out, so only the port tells that the app is up.
+        settings.profiles.quiet = { commandName: 'Project', launchBrowser: false, launchUrl: 'health', applicationUrl: 'http://localhost:5189',
+          environmentVariables: { ASPNETCORE_ENVIRONMENT: 'Development', 'Logging__LogLevel__Microsoft.Hosting.Lifetime': 'None' } };
+        fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+        await waitFor(async () => (await a.run.refresh()).some((t) => t.label === 'WebApp' && t.dotnet?.profiles.some((p) => p.name === 'quiet')), 'the quiet profile', 30000);
+        const cfg = vscode.workspace.getConfiguration('refyntra');
+        const web = target(a, 'WebApp');
+        const start = async () => {
+          a.run.hooks.openedUrls.length = 0;
+          const session = await a.run.run(web.id);
+          assert.ok(session, 'a run session');
+          return session;
+        };
+        const stop = async (session) => {
+          a.run.stop(web.id);
+          await Promise.race([session.done, new Promise((_, rej) => setTimeout(() => rej(new Error('run did not stop')), 30000))]);
+        };
+        try {
+          // launchBrowser false: no browser as in Visual Studio; "always" opens it anyway, at the launchUrl.
+          await cfg.update('run.openBrowser', 'always', vscode.ConfigurationTarget.Workspace);
+          await a.run.select(web, { profile: 'quiet', configuration: 'Debug' });
+          let session = await start();
+          try {
+            await waitFor(async () => (await get('http://localhost:5189/').catch(() => undefined))?.status === 200, 'the quiet app answering', 240000);
+            assert.doesNotMatch(session.output, /Now listening on/);
+            await waitFor(() => a.run.hooks.openedUrls.includes('http://localhost:5189/health'), 'the browser URL from the port check', 15000);
+            assert.equal(a.run.hooks.openedUrls.length, 1, a.run.hooks.openedUrls.join(', '));
+          } finally {
+            await stop(session);
+          }
+          await cfg.update('run.openBrowser', 'never', vscode.ConfigurationTarget.Workspace);
+          await a.run.select(web, { profile: 'http', configuration: 'Debug' });
+          session = await start();
+          try {
+            await waitFor(() => /Now listening on: http:\/\/localhost:5187/.test(session.output), 'Now listening on', 240000);
+            await new Promise((r) => setTimeout(r, 2000));
+            assert.deepEqual(a.run.hooks.openedUrls, [], 'never: no browser although launchBrowser is true');
+          } finally {
+            await stop(session);
+          }
+        } finally {
+          await cfg.update('run.openBrowser', undefined, vscode.ConfigurationTarget.Workspace);
+        }
+      },
+    ],
+    [
       'run group: the web app starts first and is waited for, then the console app; the group node counts them; Stop Group ends them',
       async () => {
         const a = await ready();
