@@ -308,14 +308,26 @@ export function parseRunGroups(value: unknown): RunGroup[] {
   return out;
 }
 
-/** The host and port a web target listens on (its launch profile's first URL), for the readiness check. */
+/**
+ * The host and port a web target listens on (its launch profile's first URL), for the readiness check. Parsed as a URL
+ * (IPv6 literals and their ports included); a wildcard binding (+, *, 0.0.0.0, [::]) is reached on localhost, an IPv6
+ * literal is returned without brackets (as net.connect wants it).
+ */
 export function readinessEndpoint(applicationUrl: string | undefined): { host: string; port: number } | undefined {
-  const url = firstUrl(applicationUrl);
-  if (!url) return undefined;
-  const m = /^(https?):\/\/([^/:]+)(?::(\d+))?/i.exec(url);
-  if (!m) return undefined;
-  const host = /^(\+|\*|0\.0\.0\.0|\[::\])$/.test(m[2]!) ? 'localhost' : m[2]!;
-  return { host, port: m[3] ? Number(m[3]) : m[1]!.toLowerCase() === 'https' ? 443 : 80 };
+  const first = firstUrl(applicationUrl);
+  if (!first) return undefined;
+  // Kestrel's "+" and "*" wildcards are no valid URL hosts.
+  const normalized = first.replace(/^(https?:\/\/)(\+|\*)(?=[:/]|$)/i, '$1localhost');
+  let url: URL;
+  try {
+    url = new URL(normalized);
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return undefined;
+  const raw = url.hostname.replace(/^\[(.*)\]$/, '$1');
+  const host = raw === '0.0.0.0' || raw === '::' ? 'localhost' : raw;
+  return { host, port: url.port ? Number(url.port) : url.protocol === 'https:' ? 443 : 80 };
 }
 
 /**
