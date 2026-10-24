@@ -366,6 +366,30 @@ public sealed class WorkspaceSession : IDisposable
             throw;
         }
 
+        // Packages a restore could not bring (a private feed that needs credentials, no network): their assemblies from the
+        // package folders that already hold them, so their types resolve and can be decompiled.
+        var fallbacks = new Dictionary<string, PackageFallback.Result>(UriPaths.PathComparer);
+        foreach (var project in solution.Projects.Where(p => p.Language == LanguageNames.CSharp && p.FilePath != null).ToList())
+        {
+            var assetsFile = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(project.FilePath!) ?? "", "obj", "project.assets.json");
+            if (!File.Exists(project.FilePath!) || File.Exists(assetsFile) && RestoreDiagnostics.MissingPackages(assetsFile).Count == 0) continue;
+            PackageFallback.Result fallback;
+            try { fallback = PackageFallback.Resolve(project.FilePath!, GuessTfm(project)); }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Log.Warn("workspace", $"package fallback skipped for {System.IO.Path.GetFileName(project.FilePath)}: {ex.GetType().Name}");
+                continue;
+            }
+            var have = project.MetadataReferences.OfType<PortableExecutableReference>().Select(r => System.IO.Path.GetFileName(r.FilePath ?? ""))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var add = fallback.Assemblies.Where(a => have.Add(System.IO.Path.GetFileName(a)))
+                .Select(a => (MetadataReference)MetadataReference.CreateFromFile(a,
+                    documentation: File.Exists(System.IO.Path.ChangeExtension(a, ".xml")) ? XmlDocumentationProvider.CreateFromFile(System.IO.Path.ChangeExtension(a, ".xml")) : null))
+                .ToList();
+            if (add.Count > 0) solution = solution.AddMetadataReferences(project.Id, add);
+            fallbacks[project.FilePath!] = fallback;
+        }
+
         var wsDiagnostics = workspace.Diagnostics
             .Select(d => new LoadDiagnosticModel(d.Kind == WorkspaceDiagnosticKind.Failure && !RestoreDiagnostics.IsAdvisory(d.Message) ? "error" : "warning", d.Message, null, RestoreDiagnostics.MentionsRestore(d.Message)))
             .ToList();
@@ -407,6 +431,10 @@ public sealed class WorkspaceSession : IDisposable
                 ctx.Diagnostics.Add(new LoadDiagnosticModel("error",
                     $"{missingPackages.Count} package(s) listed in project.assets.json are missing from the package folders (e.g. {string.Join(", ", missingPackages.Take(3))}). Recovery: Run dotnet restore.",
                     path, RestoreRecommended: true, Cause: LoadCauses.MissingPackages));
+            if (fallbacks.TryGetValue(path, out var fb) && fb.Resolved.Count > 0)
+                ctx.Diagnostics.Add(new LoadDiagnosticModel("warning",
+                    $"{fb.Resolved.Count} package(s) not restored were taken from the local NuGet cache (e.g. {string.Join(", ", fb.Resolved.Take(3))}): their types resolve, a build still needs a restore."
+                    + (fb.Unresolved.Count > 0 ? $" Not found in any package folder: {string.Join(", ", fb.Unresolved.Take(3))}." : ""), path));
             if (ctx.Diagnostics.Any(d => d.Severity == "error")) ctx.State = ProjectStates.Partial;
             contexts.Add(ctx);
         }
