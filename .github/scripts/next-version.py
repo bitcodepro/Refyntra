@@ -46,6 +46,16 @@ def stamp(path, version):
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 
 
+def stamp_host(path, version):
+    """The .NET host reports its assembly version (Health page, logs): the same version as the VSIX."""
+    stable(version)
+    text = path.read_text(encoding='utf-8')
+    stamped, count = re.subn(r'<Version>[^<]*</Version>', f'<Version>{version}</Version>', text, count=1)
+    if count != 1:
+        raise ValueError(f'{path} has no <Version> element.')
+    path.write_text(stamped, encoding='utf-8')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--stamp', metavar='VERSION')
@@ -53,6 +63,9 @@ def main():
     path = Path('packages/extension/package.json')
     if args.stamp:
         stamp(path, args.stamp)
+        host = Path('src/dotnet/Refyntra.Host/Refyntra.Host.csproj')
+        if host.exists():
+            stamp_host(host, args.stamp)
         return
     current = json.loads(path.read_text(encoding='utf-8'))['version']
     stable(current)

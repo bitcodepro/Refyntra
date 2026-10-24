@@ -2,20 +2,33 @@
   "name": "refyntra",
   "displayName": "Refyntra",
   "description": "A free code companion for writing, analysing and navigating code: find anything, see how code is connected (callers, implementations, tests, request handlers, endpoints, DI registrations), get focused diagnostics and rename safely with a preview. C# is analysed with Roslyn; TypeScript and JavaScript use VS Code's built-in language features; Python and Rust use the Pyright and rust-analyzer language servers bundled with Refyntra, so no other extension is needed.",
-  "version": "0.1.0",
+  "version": "0.2.11",
   "preview": true,
   "publisher": "refyntra",
   "license": "MIT",
   "private": true,
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#2B5FD9",
+    "theme": "dark"
+  },
+  "homepage": "https://github.com/bitcodepro/Refyntra#readme",
+  "bugs": {
+    "url": "https://github.com/bitcodepro/Refyntra/issues"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/refyntra/refyntra.git"
+    "url": "https://github.com/bitcodepro/Refyntra.git"
   },
   "engines": {
     "vscode": "^1.90.0"
   },
   "categories": [
     "Programming Languages",
+    "Debuggers",
+    "Testing",
+    "Linters",
+    "Snippets",
     "Other"
   ],
   "keywords": [
@@ -30,7 +43,19 @@
     "rust",
     "dependency injection",
     "aspnetcore",
-    "mediatr"
+    "mediatr",
+    "c#",
+    "dotnet",
+    ".net",
+    "roslyn",
+    "decompiler",
+    "go to definition",
+    "find usages",
+    "git",
+    "entity framework",
+    "nuget",
+    "asp.net core",
+    "unit tests"
   ],
   "main": "./dist/extension.js",
   "activationEvents": [
@@ -2595,7 +2620,7 @@
             "Publish OR1001 as a warning (default)."
           ],
           "default": "warning",
-          "markdownDescription": "Experimental rule OR1001 \"scoped service captured by a singleton\": reported only for a proven constructor path inside one composition root ([docs](https://github.com/refyntra/refyntra/blob/main/docs/rules/OR1001.md)). When it cannot prove a path it stays silent; the reason is shown by the code action *Refyntra: why OR1001 did not check this registration*, never in Problems."
+          "markdownDescription": "Experimental rule OR1001 \"scoped service captured by a singleton\": reported only for a proven constructor path inside one composition root ([docs](https://github.com/bitcodepro/Refyntra/blob/main/docs/rules/OR1001.md)). When it cannot prove a path it stays silent; the reason is shown by the code action *Refyntra: why OR1001 did not check this registration*, never in Problems."
         },
         "refyntra.rules.OR1002": {
           "type": "string",
@@ -2614,7 +2639,7 @@
             "Report OR1002 as an error."
           ],
           "default": "warning",
-          "markdownDescription": "Inspection OR1002 \"sync over async\" in open C# files: `.Result`, `.Wait()` or `.GetAwaiter().GetResult()` on a task blocks the thread; quick fix *Use 'await'* (also makes a Task-returning method async). Suppress with `#pragma warning disable OR1002` or `[SuppressMessage(\"…\", \"OR1002\")]` ([docs](https://github.com/refyntra/refyntra/blob/main/docs/rules/OR1002.md))."
+          "markdownDescription": "Inspection OR1002 \"sync over async\" in open C# files: `.Result`, `.Wait()` or `.GetAwaiter().GetResult()` on a task blocks the thread; quick fix *Use 'await'* (also makes a Task-returning method async). Suppress with `#pragma warning disable OR1002` or `[SuppressMessage(\"…\", \"OR1002\")]` ([docs](https://github.com/bitcodepro/Refyntra/blob/main/docs/rules/OR1002.md))."
         },
         "refyntra.rules.OR1003": {
           "type": "string",
@@ -2633,7 +2658,7 @@
             "Report OR1003 as an error."
           ],
           "default": "warning",
-          "markdownDescription": "Inspection OR1003 \"async void\" in open C# files: an `async void` method that is not an event handler; quick fix *Change 'async void' to 'async Task'* (refused when the method is used as a delegate). Suppress with `#pragma warning disable OR1003` or `[SuppressMessage(\"…\", \"OR1003\")]` ([docs](https://github.com/refyntra/refyntra/blob/main/docs/rules/OR1003.md))."
+          "markdownDescription": "Inspection OR1003 \"async void\" in open C# files: an `async void` method that is not an event handler; quick fix *Change 'async void' to 'async Task'* (refused when the method is used as a delegate). Suppress with `#pragma warning disable OR1003` or `[SuppressMessage(\"…\", \"OR1003\")]` ([docs](https://github.com/bitcodepro/Refyntra/blob/main/docs/rules/OR1003.md))."
         },
         "refyntra.rules.OR1004": {
           "type": "string",
@@ -2652,7 +2677,7 @@
             "Report OR1004 as an error."
           ],
           "default": "warning",
-          "markdownDescription": "Inspection OR1004 \"discarded task\" in open C# files: a task that is neither awaited nor stored where the compiler's CS4014 does not report it (methods that are not async, `?.` calls); quick fix *Discard the task explicitly*. *Add 'await'* is also offered on CS4014. Suppress with `#pragma warning disable OR1004` or `[SuppressMessage(\"…\", \"OR1004\")]` ([docs](https://github.com/refyntra/refyntra/blob/main/docs/rules/OR1004.md))."
+          "markdownDescription": "Inspection OR1004 \"discarded task\" in open C# files: a task that is neither awaited nor stored where the compiler's CS4014 does not report it (methods that are not async, `?.` calls); quick fix *Discard the task explicitly*. *Add 'await'* is also offered on CS4014. Suppress with `#pragma warning disable OR1004` or `[SuppressMessage(\"…\", \"OR1004\")]` ([docs](https://github.com/bitcodepro/Refyntra/blob/main/docs/rules/OR1004.md))."
         },
         "refyntra.rules.OR1005": {
           "type": "string",
@@ -2671,7 +2696,7 @@
             "Report OR1005 as an error."
           ],
           "default": "info",
-          "markdownDescription": "Inspection OR1005 \"undisposed local\" in open C# files: a disposable created in a method (`new`, `File.Open*`) that is never disposed, returned, stored or passed on; quick fix *Dispose with a 'using' declaration*. Suppress with `#pragma warning disable OR1005` or `[SuppressMessage(\"…\", \"OR1005\")]` ([docs](https://github.com/refyntra/refyntra/blob/main/docs/rules/OR1005.md))."
+          "markdownDescription": "Inspection OR1005 \"undisposed local\" in open C# files: a disposable created in a method (`new`, `File.Open*`) that is never disposed, returned, stored or passed on; quick fix *Dispose with a 'using' declaration*. Suppress with `#pragma warning disable OR1005` or `[SuppressMessage(\"…\", \"OR1005\")]` ([docs](https://github.com/bitcodepro/Refyntra/blob/main/docs/rules/OR1005.md))."
         },
         "refyntra.rules.OR1006": {
           "type": "string",
@@ -2690,7 +2715,7 @@
             "Report OR1006 as an error."
           ],
           "default": "info",
-          "markdownDescription": "Inspection OR1006 \"possible multiple enumeration\" in open C# files: an `IEnumerable<T>` parameter or lazy local enumerated twice on the same path; quick fix *Materialize once with 'ToList()'*. Suppress with `#pragma warning disable OR1006` or `[SuppressMessage(\"…\", \"OR1006\")]` ([docs](https://github.com/refyntra/refyntra/blob/main/docs/rules/OR1006.md))."
+          "markdownDescription": "Inspection OR1006 \"possible multiple enumeration\" in open C# files: an `IEnumerable<T>` parameter or lazy local enumerated twice on the same path; quick fix *Materialize once with 'ToList()'*. Suppress with `#pragma warning disable OR1006` or `[SuppressMessage(\"…\", \"OR1006\")]` ([docs](https://github.com/bitcodepro/Refyntra/blob/main/docs/rules/OR1006.md))."
         },
         "refyntra.rules.OR1007": {
           "type": "string",
@@ -2709,7 +2734,7 @@
             "Report OR1007 as an error."
           ],
           "default": "info",
-          "markdownDescription": "Inspection OR1007 \"string concatenation in a loop\" in open C# files: `s += x` on a string local inside a loop; quick fix *Use a StringBuilder*. Suppress with `#pragma warning disable OR1007` or `[SuppressMessage(\"…\", \"OR1007\")]` ([docs](https://github.com/refyntra/refyntra/blob/main/docs/rules/OR1007.md))."
+          "markdownDescription": "Inspection OR1007 \"string concatenation in a loop\" in open C# files: `s += x` on a string local inside a loop; quick fix *Use a StringBuilder*. Suppress with `#pragma warning disable OR1007` or `[SuppressMessage(\"…\", \"OR1007\")]` ([docs](https://github.com/bitcodepro/Refyntra/blob/main/docs/rules/OR1007.md))."
         },
         "refyntra.rules.OR1008": {
           "type": "string",
@@ -2728,7 +2753,7 @@
             "Report OR1008 as an error."
           ],
           "default": "hint",
-          "markdownDescription": "Inspection OR1008 \"Where(…) before an operator with a predicate\" in open C# files: `Where(p).First()` / `Any()` / `Count()` …; quick fix *Pass the predicate to the operator*. Suppress with `#pragma warning disable OR1008` or `[SuppressMessage(\"…\", \"OR1008\")]` ([docs](https://github.com/refyntra/refyntra/blob/main/docs/rules/OR1008.md))."
+          "markdownDescription": "Inspection OR1008 \"Where(…) before an operator with a predicate\" in open C# files: `Where(p).First()` / `Any()` / `Count()` …; quick fix *Pass the predicate to the operator*. Suppress with `#pragma warning disable OR1008` or `[SuppressMessage(\"…\", \"OR1008\")]` ([docs](https://github.com/bitcodepro/Refyntra/blob/main/docs/rules/OR1008.md))."
         },
         "refyntra.rules.OR1009": {
           "type": "string",
@@ -2747,7 +2772,7 @@
             "Report OR1009 as an error."
           ],
           "default": "hint",
-          "markdownDescription": "Inspection OR1009 \"redundant ToList()/ToArray()\" in open C# files: a copy enumerated once right away (`ToList().Any()`) or a `foreach` over a copy of an in-memory collection the loop does not change; quick fix *Remove the redundant copy*. Suppress with `#pragma warning disable OR1009` or `[SuppressMessage(\"…\", \"OR1009\")]` ([docs](https://github.com/refyntra/refyntra/blob/main/docs/rules/OR1009.md))."
+          "markdownDescription": "Inspection OR1009 \"redundant ToList()/ToArray()\" in open C# files: a copy enumerated once right away (`ToList().Any()`) or a `foreach` over a copy of an in-memory collection the loop does not change; quick fix *Remove the redundant copy*. Suppress with `#pragma warning disable OR1009` or `[SuppressMessage(\"…\", \"OR1009\")]` ([docs](https://github.com/bitcodepro/Refyntra/blob/main/docs/rules/OR1009.md))."
         },
         "refyntra.rules.OR1010": {
           "type": "string",
@@ -2766,7 +2791,7 @@
             "Report OR1010 as an error."
           ],
           "default": "info",
-          "markdownDescription": "Inspection OR1010 \"string.Format without arguments\" in open C# files: `string.Format(\"text\")` (or a format that would throw); quick fix *Use the string directly*. Suppress with `#pragma warning disable OR1010` or `[SuppressMessage(\"…\", \"OR1010\")]` ([docs](https://github.com/refyntra/refyntra/blob/main/docs/rules/OR1010.md))."
+          "markdownDescription": "Inspection OR1010 \"string.Format without arguments\" in open C# files: `string.Format(\"text\")` (or a format that would throw); quick fix *Use the string directly*. Suppress with `#pragma warning disable OR1010` or `[SuppressMessage(\"…\", \"OR1010\")]` ([docs](https://github.com/bitcodepro/Refyntra/blob/main/docs/rules/OR1010.md))."
         },
         "refyntra.rules.OR1011": {
           "type": "string",
@@ -2785,7 +2810,7 @@
             "Report OR1011 as an error."
           ],
           "default": "hint",
-          "markdownDescription": "Inspection OR1011 \"possible N+1\" (heuristic) in open C# files: a navigation property read in a `foreach` or an in-memory `Select` over the results of an EF Core query that neither includes nor projects it, when lazy loading is not configured; quick fix *Add .Include(x => x.Nav)*. Suppress with `#pragma warning disable OR1011` or `[SuppressMessage(\"…\", \"OR1011\")]` ([docs](https://github.com/refyntra/refyntra/blob/main/docs/rules/OR1011.md))."
+          "markdownDescription": "Inspection OR1011 \"possible N+1\" (heuristic) in open C# files: a navigation property read in a `foreach` or an in-memory `Select` over the results of an EF Core query that neither includes nor projects it, when lazy loading is not configured; quick fix *Add .Include(x => x.Nav)*. Suppress with `#pragma warning disable OR1011` or `[SuppressMessage(\"…\", \"OR1011\")]` ([docs](https://github.com/bitcodepro/Refyntra/blob/main/docs/rules/OR1011.md))."
         },
         "refyntra.preview.style": {
           "type": "string",

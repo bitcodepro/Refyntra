@@ -1258,7 +1258,7 @@ public sealed partial class Engine : IRpcHandler, IDisposable
 
     // ------------------------------------------------------------------ analysis
 
-    public const string Or1001HelpUri = "https://github.com/refyntra/refyntra/blob/main/docs/rules/OR1001.md";
+    public const string Or1001HelpUri = "https://github.com/bitcodepro/Refyntra/blob/main/docs/rules/OR1001.md";
 
     private async Task<AnalysisRunResultDto> AnalysisRunAsync(AnalysisRunParams p, CancellationToken ct)
     {
