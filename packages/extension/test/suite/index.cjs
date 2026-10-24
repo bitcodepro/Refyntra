@@ -1961,6 +1961,13 @@ scenarios['git-client'] = [
         await g.refresh();
         again.dispose();
         g.openInEditor().dispose();
+        // Closed before their page could answer: no exception, no watchdog left, no delayed "did not load" notice.
+        const notices = g.watchdogState().notices;
+        g.openInEditor().dispose();
+        (await g.commits.show(zoo))?.dispose();
+        assert.equal(g.watchdogState().live, 0, 'no watchdog left after closing the Git tab and a commit panel');
+        await new Promise((r) => setTimeout(r, 11000));
+        assert.equal(g.watchdogState().notices, notices, 'no delayed notice for closed views');
         // Pull requests against a fake GitHub (no network): origin must be on GitHub.
         git(root, 'remote', 'set-url', 'origin', 'https://github.com/acme/shop.git');
         git(root, 'remote', 'set-url', '--push', 'origin', remote);

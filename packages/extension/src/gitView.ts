@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { gitUri, runGit } from './git';
-import { watchWebview } from './webviewWatchdog';
+import { liveWatchdogs, watchWebview, webviewNotices } from './webviewWatchdog';
 import {
   BRANCH_FORMAT,
   type Branch,
@@ -164,16 +164,30 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
     });
     const webview = view.webview;
     view.onDidDispose(() => {
-      this.webviews.delete(webview);
+      this.detach(webview);
       if (this.sideView === view) this.sideView = undefined;
     });
     this.updateBadge();
   }
 
+  /** The load watchdog of each attached page (ended when the page answers or its view closes). */
+  private readonly watchdogs = new Map<vscode.Webview, vscode.Disposable>();
+
+  /** Test hook: watchdogs still waiting and notices that would have been shown. */
+  watchdogState(): { live: number; notices: number } {
+    return { live: liveWatchdogs(), notices: webviewNotices.length };
+  }
+
+  private detach(webview: vscode.Webview): void {
+    this.webviews.delete(webview);
+    this.watchdogs.get(webview)?.dispose();
+    this.watchdogs.delete(webview);
+  }
+
   private attach(webview: vscode.Webview, wide: boolean): void {
     webview.options = { enableScripts: true };
     webview.html = sidebarHtml(webview, wide);
-    watchWebview(webview, 'Git');
+    this.watchdogs.set(webview, watchWebview(webview, 'Git'));
     webview.onDidReceiveMessage((m: { type: string; [k: string]: unknown }) => void this.onMessage(m));
     this.webviews.add(webview);
     void this.refresh();
@@ -192,7 +206,7 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
     const webview = panel.webview;
     this.attach(webview, true);
     panel.onDidDispose(() => {
-      this.webviews.delete(webview);
+      this.detach(webview);
       if (this.editorPanel === panel) this.editorPanel = undefined;
     });
     return panel;
@@ -915,7 +929,8 @@ export class CommitPanels {
     this.open.set(d.sha, panel);
     panel.onDidDispose(() => this.open.delete(d.sha));
     panel.webview.html = commitHtml(panel.webview);
-    panel.onDidDispose(watchWebview(panel.webview, 'commit').dispose);
+    const watch = watchWebview(panel.webview, 'commit');
+    panel.onDidDispose(() => watch.dispose());
     panel.webview.onDidReceiveMessage(async (m: { type: string; path?: string; from?: string }) => {
       if (m.type === 'ready') void panel.webview.postMessage({ type: 'details', details: d });
       if (m.type === 'patch' && typeof m.path === 'string' && d.files.some((f) => f.path === m.path)) {

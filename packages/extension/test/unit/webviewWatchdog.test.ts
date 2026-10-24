@@ -20,7 +20,7 @@ vi.mock('vscode', () => ({
   commands: { executeCommand: (c: string) => (commands.push(c), Promise.resolve()) },
 }));
 
-import { watchWebview, webviewNotices } from '../../src/webviewWatchdog';
+import { liveWatchdogs, watchWebview, webviewNotices } from '../../src/webviewWatchdog';
 
 /** A webview whose page may or may not send messages. */
 function fakeWebview() {
@@ -80,5 +80,19 @@ describe('webview watchdog (a page VS Code did not load, e.g. the service worker
     vi.advanceTimersByTime(1000);
     expect(webviewNotices).toHaveLength(2);
     expect(shown).toHaveLength(1);
+  });
+
+  it('a disposer passed without its receiver still ends the watchdog (panel.onDidDispose(() => watch.dispose()))', () => {
+    const w = fakeWebview();
+    const before = liveWatchdogs();
+    const watch = watchWebview(w as never, 'commit', undefined, 1000);
+    expect(liveWatchdogs()).toBe(before + 1);
+    const onClose = () => watch.dispose();
+    onClose();
+    onClose();
+    expect(liveWatchdogs()).toBe(before);
+    expect(w.listeners.size).toBe(0);
+    vi.advanceTimersByTime(5000);
+    expect(webviewNotices).toEqual([]);
   });
 });

@@ -8,6 +8,13 @@ let noticeShown = false;
 /** Test hook: the notices that would have been shown (none are shown in tests). */
 export const webviewNotices: string[] = [];
 
+let live = 0;
+
+/** Test hook: watchdogs still waiting for their page (a disposed or answered one no longer counts). */
+export function liveWatchdogs(): number {
+  return live;
+}
+
 /**
  * Watches one webview until its page sends its first message ("ready"). A page that never does was not loaded by VS Code
  * itself (for example "Could not register service worker: InvalidStateError" after VS Code updated in the background
@@ -18,6 +25,15 @@ export const webviewNotices: string[] = [];
 export function watchWebview(webview: vscode.Webview, name: string, retry?: () => void, timeoutMs = WEBVIEW_LOAD_TIMEOUT_MS): vscode.Disposable {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let retried = false;
+  let ended = false;
+  live++;
+  const end = () => {
+    if (timer) clearTimeout(timer);
+    timer = undefined;
+    sub.dispose();
+    if (!ended) live--;
+    ended = true;
+  };
   const arm = () => {
     timer = setTimeout(() => {
       timer = undefined;
@@ -27,19 +43,13 @@ export function watchWebview(webview: vscode.Webview, name: string, retry?: () =
         arm();
         return;
       }
+      end();
       notLoaded(name);
     }, timeoutMs);
   };
-  const sub = webview.onDidReceiveMessage(() => {
-    if (timer) clearTimeout(timer);
-    timer = undefined;
-    sub.dispose();
-  });
+  const sub = webview.onDidReceiveMessage(() => end());
   arm();
-  return new vscode.Disposable(() => {
-    if (timer) clearTimeout(timer);
-    sub.dispose();
-  });
+  return new vscode.Disposable(() => end());
 }
 
 function notLoaded(name: string): void {
