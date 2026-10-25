@@ -1,5 +1,103 @@
 import { describe, expect, it } from 'vitest';
-import { type GraphCommit, layoutGraph, parseBranches, parseGraphLog, parseStatus } from '../../src/gitGraphModel';
+import { type GraphCommit, layoutGraph, parseBranches, parseGraphLog, parseStatus, pullHead, pushDestination, pushPlan } from '../../src/gitGraphModel';
+
+describe('push destination: the push URL, not the fetch URL', () => {
+  it('one push URL: its GitHub repository, verified when git pushes to a GitHub URL of it (https or ssh)', () => {
+    expect(pushDestination('origin', ['https://github.com/dana/app-fork.git'], ['git@github.com:dana/app-fork.git'])).toEqual({ ok: true, url: 'git@github.com:dana/app-fork.git', github: { owner: 'dana', repo: 'app-fork' }, verified: true });
+    expect(pushDestination('origin', ['gh:acme/app'], ['https://github.com/acme/app'])).toEqual({ ok: true, url: 'https://github.com/acme/app', github: { owner: 'acme', repo: 'app' }, verified: true });
+  });
+  it('a rewrite to another host (a mirror) only claims the repository: not verified', () => {
+    expect(pushDestination('origin', ['https://github.com/dana/app-fork.git'], ['/srv/mirror/app.git'])).toEqual({ ok: true, url: '/srv/mirror/app.git', github: { owner: 'dana', repo: 'app-fork' }, verified: false });
+  });
+  it('not on GitHub: no repository', () => {
+    expect(pushDestination('origin', ['/srv/git/app.git'], ['/srv/git/app.git'])).toEqual({ ok: true, url: '/srv/git/app.git', verified: false });
+  });
+  it('several push URLs, none, or a rewrite to another GitHub repository are refused', () => {
+    expect(pushDestination('origin', ['https://github.com/a/x', 'https://github.com/b/x'], ['https://github.com/a/x', 'https://github.com/b/x'])).toMatchObject({ ok: false, reason: expect.stringContaining('2 URLs') });
+    expect(pushDestination('origin', [], [])).toMatchObject({ ok: false, reason: expect.stringContaining('no URL') });
+    expect(pushDestination('origin', ['https://github.com/acme/app'], ['https://github.com/eve/app'])).toMatchObject({ ok: false, reason: expect.stringContaining('eve/app') });
+  });
+});
+
+describe('pull request head: where the branch was pushed', () => {
+  const base = { owner: 'acme', repo: 'app' };
+  it('the same repository: the remote branch name (not the local one)', () => {
+    expect(pullHead(base, { owner: 'Acme', repo: 'App' }, 'review', 'origin')).toEqual({ ok: true, head: 'review' });
+  });
+  it("another owner's repository: owner:branch with its repository, to be confirmed as a fork through GitHub", () => {
+    expect(pullHead(base, { owner: 'dana', repo: 'app-fork' }, 'feature', 'fork')).toEqual({ ok: true, head: 'dana:feature', headRepo: 'app-fork', fork: { owner: 'dana', repo: 'app-fork' } });
+  });
+  it('another repository of the same owner, or a remote not on GitHub, is refused', () => {
+    expect(pullHead(base, { owner: 'acme', repo: 'other' }, 'feature', 'mirror')).toMatchObject({ ok: false, reason: expect.stringContaining('acme/other') });
+    expect(pullHead(base, undefined, 'feature', 'local')).toMatchObject({ ok: false, reason: expect.stringContaining('not a GitHub repository') });
+  });
+});
+
+describe('push.default=nothing: Publish names its target, a push without one is refused', () => {
+  it.each([
+    [{}, 'origin'],
+    [{ remote: 'origin' }, 'origin'],
+    [{ merge: 'refs/heads/topic' }, 'origin'],
+    [{ pushRemote: 'upstream' }, 'upstream'],
+  ])('a branch without a complete upstream (%j) is published to %s, as git push -u <remote> <branch> is', (config, remote) => {
+    expect(pushPlan({ branch: 'topic', remotes: ['origin', 'upstream'], pushDefault: 'nothing', ...config })).toEqual({
+      ok: true,
+      args: ['push', '-u', remote, 'refs/heads/topic:refs/heads/topic'],
+      label: `Publish topic to ${remote}`,
+      remote,
+      target: 'refs/heads/topic',
+    });
+  });
+
+  it('a branch with an upstream is not pushed (git push without a target does nothing)', () => {
+    expect(pushPlan({ branch: 'topic', remote: 'origin', merge: 'refs/heads/topic', remotes: ['origin'], pushDefault: 'nothing' })).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining('push.default is "nothing"'),
+    });
+  });
+});
+
+describe('push target from the git configuration', () => {
+  const tracking = { branch: 'feature', remote: 'upstream', merge: 'refs/heads/review', remotes: ['origin', 'upstream'] };
+
+  it('a differently named upstream: refused with push.default simple (git default), pushed to it with upstream', () => {
+    const simple = pushPlan(tracking);
+    expect(simple.ok).toBe(false);
+    expect(!simple.ok && simple.reason).toMatch(/upstream\/review/);
+    expect(pushPlan({ ...tracking, pushDefault: 'upstream' })).toEqual({ ok: true, args: ['push', 'upstream', 'refs/heads/feature:refs/heads/review'], label: 'Push feature to upstream/review', remote: 'upstream', target: 'refs/heads/review' });
+    expect(pushPlan({ ...tracking, pushDefault: 'tracking' })).toMatchObject({ ok: true, args: ['push', 'upstream', 'refs/heads/feature:refs/heads/review'] });
+  });
+
+  it('never origin just because it exists: the upstream remote of a same-named branch', () => {
+    expect(pushPlan({ ...tracking, merge: 'refs/heads/feature' })).toMatchObject({ ok: true, args: ['push', 'upstream', 'refs/heads/feature:refs/heads/feature'] });
+  });
+
+  it('pushRemote, then remote.pushDefault, take the push (triangular: the local name)', () => {
+    expect(pushPlan({ ...tracking, pushRemote: 'origin', pushDefaultRemote: 'upstream' })).toMatchObject({ ok: true, args: ['push', 'origin', 'refs/heads/feature:refs/heads/feature'] });
+    expect(pushPlan({ ...tracking, pushDefaultRemote: 'origin' })).toMatchObject({ ok: true, args: ['push', 'origin', 'refs/heads/feature:refs/heads/feature'] });
+    expect(pushPlan({ ...tracking, pushDefaultRemote: 'origin', pushDefault: 'upstream' }).ok).toBe(false);
+  });
+
+  it('push.default current and nothing', () => {
+    expect(pushPlan({ ...tracking, pushDefault: 'current' })).toMatchObject({ ok: true, args: ['push', 'upstream', 'refs/heads/feature:refs/heads/feature'] });
+    expect(pushPlan({ ...tracking, pushDefault: 'current' })).not.toHaveProperty('existingOnly');
+    expect(pushPlan({ ...tracking, pushDefault: 'nothing' }).ok).toBe(false);
+  });
+
+  it('push.default matching: the same-named branch, only if the remote already has it (never created)', () => {
+    expect(pushPlan({ ...tracking, pushDefault: 'matching' })).toMatchObject({ ok: true, args: ['push', 'upstream', 'refs/heads/feature:refs/heads/feature'], remote: 'upstream', target: 'refs/heads/feature', existingOnly: true });
+    // Publish (no upstream) names its target: not limited to existing branches.
+    expect(pushPlan({ branch: 'solo', remotes: ['origin'], pushDefault: 'matching' })).not.toHaveProperty('existingOnly');
+  });
+
+  it('no upstream: published to pushRemote, origin or the only remote; refused when none fits', () => {
+    expect(pushPlan({ branch: 'solo', remotes: ['origin', 'fork'] })).toEqual({ ok: true, args: ['push', '-u', 'origin', 'refs/heads/solo:refs/heads/solo'], label: 'Publish solo to origin', remote: 'origin', target: 'refs/heads/solo' });
+    expect(pushPlan({ branch: 'solo', remotes: ['fork'] })).toMatchObject({ ok: true, args: ['push', '-u', 'fork', 'refs/heads/solo:refs/heads/solo'] });
+    expect(pushPlan({ branch: 'solo', pushDefaultRemote: 'fork', remotes: ['origin', 'fork'] })).toMatchObject({ ok: true, args: ['push', '-u', 'fork', 'refs/heads/solo:refs/heads/solo'] });
+    expect(pushPlan({ branch: 'solo', remotes: ['a', 'b'] }).ok).toBe(false);
+    expect(pushPlan({ branch: 'solo', remotes: [] }).ok).toBe(false);
+  });
+});
 
 const c = (sha: string, parents: string[], refs: string[] = []): GraphCommit => ({ sha, parents, refs, author: 'a', time: 0, subject: sha });
 

@@ -1,4 +1,7 @@
+using System.Reflection;
 using System.Text.Json;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Refyntra.Tests.Infrastructure;
 using Refyntra.Workspaces;
 using static Refyntra.Tests.RefactoringFixture;
@@ -46,6 +49,7 @@ public sealed class ChangeSignatureTests
         var after = After(plan, file);
         Assert.Contains("string Greet(int times, string name);", after);
         Assert.Contains("public virtual string Greet(int times, string name) =>", after);
+        // Two parameter reads swap freely: nothing between them changes a value, so the call stays positional.
         Assert.Contains("public override string Greet(int times, string who) => base.Greet(times, who)", after);
         Assert.Contains("greeter.Greet(2, \"a\") + greeter.Greet(times: 3, name: \"b\")", after);
         Assert.Contains("new Greeter().Greet(1, \"c\")", after);
@@ -110,6 +114,117 @@ public sealed class ChangeSignatureTests
         Assert.Contains("Combine(a: Next(), b: Next())", after);
         await ApplyToDiskAsync(c, plan);
         await AssertBuildsAsync(dir);
+    }
+
+    [Fact]
+    public async Task ReorderPreservesReadsAroundMutatingCalls()
+    {
+        var (c, dir) = await OpenAsync();
+        await using var _ = c;
+        var file = Lib(dir, "ChangeSignature/EvaluationOrder.cs");
+        var before = File.ReadAllText(file);
+        var plan = Prepared(await PrepareAtAsync(c, Action, file, "int Combine(int a", 4,
+            Sig(new { from = 1, name = "b" }, new { from = 0, name = "a" })));
+        var after = After(plan, file);
+
+        static int[] Run(string source)
+        {
+            var compilation = CSharpCompilation.Create("SignatureEvaluation" + Guid.NewGuid().ToString("N"),
+                new[] { CSharpSyntaxTree.ParseText(source) },
+                new[] { MetadataReference.CreateFromFile(typeof(object).Assembly.Location) },
+                new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+            using var stream = new MemoryStream();
+            var emitted = compilation.Emit(stream);
+            Assert.True(emitted.Success, string.Join("\n", emitted.Diagnostics));
+            var type = Assembly.Load(stream.ToArray()).GetType("SignatureEvaluationOrder")!;
+            return new[] { "ReadBeforeMutation", "MutationBeforeRead", "CapturedLocal" }
+                .Select(name => (int)type.GetMethod(name)!.Invoke(null, null)!).ToArray();
+        }
+
+        var expected = Run(before);
+        Assert.Equal(new[] { 1, 11, 1 }, expected);
+        Assert.Equal(expected, Run(after));
+    }
+
+    [Fact]
+    public async Task ReorderPreservesUserDefinedConversionOrder()
+    {
+        var (c, dir) = await OpenAsync();
+        await using var _ = c;
+        var file = Lib(dir, "ChangeSignature/ConversionOrder.cs");
+        var before = File.ReadAllText(file);
+        var plan = Prepared(await PrepareAtAsync(c, Action, file, "int Pair(CountedValue a", 4,
+            Sig(new { from = 1, name = "b" }, new { from = 0, name = "a" })));
+        var after = After(plan, file);
+
+        // The conversion int → CountedValue counts: the argument converted first gets N = 1. Literals and plain locals
+        // look effect-free by their syntax, but swapping them positionally would give 21.
+        var expected = RunConversionOrder(before, "Literals", "Locals");
+        Assert.Equal(new[] { 12, 12 }, expected);
+        Assert.Equal(expected, RunConversionOrder(after, "Literals", "Locals"));
+    }
+
+    [Fact]
+    public async Task ReorderPreservesConversionOrderInsideTuples()
+    {
+        var (c, dir) = await OpenAsync();
+        await using var _ = c;
+        var file = Lib(dir, "ChangeSignature/ConversionOrder.cs");
+        var before = File.ReadAllText(file);
+        var plan = Prepared(await PrepareAtAsync(c, Action, file, "int TuplePair((CountedValue", 4,
+            Sig(new { from = 1, name = "b" }, new { from = 0, name = "a" })));
+        var after = After(plan, file);
+        // Locals of type (int, int) passed as (CountedValue, int): the element conversion counts, though the operation
+        // tree shows only the outer tuple conversion.
+        var expected = RunConversionOrder(before, "TupleLocals");
+        Assert.Equal(new[] { 12 }, expected);
+        Assert.Equal(expected, RunConversionOrder(after, "TupleLocals"));
+    }
+
+    [Fact]
+    public async Task TuplesNestedBeyondTheAnalysisCountAsConverting()
+    {
+        var (c, dir) = await OpenAsync();
+        await using var _ = c;
+        var file = Lib(dir, "ChangeSignature/ConversionOrder.cs");
+        var before = File.ReadAllText(file);
+        // 18 nested tuples: the counting conversion is deeper than the analysis looks, so the arguments keep their order.
+        var plan = Prepared(await PrepareAtAsync(c, Action, file, "int DeepPair(", 4,
+            Sig(new { from = 1, name = "b" }, new { from = 0, name = "a" })));
+        var after = After(plan, file);
+        var expected = RunConversionOrder(before, "DeepLocals");
+        Assert.Equal(new[] { 12 }, expected);
+        Assert.Equal(expected, RunConversionOrder(after, "DeepLocals"));
+        // ... and such an argument is not removed.
+        Unavailable(await PrepareAtAsync(c, Action, file, "int DeepDropped(", 4, Sig(new { from = 1, name = "kept" })), "ArgumentHasSideEffects");
+        Assert.Equal(new[] { 102 }, RunConversionOrder(before, "DeepDrop"));
+    }
+
+    [Fact]
+    public async Task RemovingAnArgumentWithAUserDefinedConversionIsRefused()
+    {
+        var (c, dir) = await OpenAsync();
+        await using var _ = c;
+        var file = Lib(dir, "ChangeSignature/ConversionOrder.cs");
+        // Dropped(1, 2): the literal 1 runs the counting conversion; removing it would change CountedValue.Count.
+        Unavailable(await PrepareAtAsync(c, Action, file, "int Dropped(CountedValue unused", 4, Sig(new { from = 1, name = "kept" })), "ArgumentHasSideEffects");
+        // TupleDropped(x, 2) with a local (int, int): the conversion of its first element counts too.
+        Unavailable(await PrepareAtAsync(c, Action, file, "int TupleDropped((CountedValue", 4, Sig(new { from = 1, name = "kept" })), "ArgumentHasSideEffects");
+        Assert.Equal(new[] { 102 }, RunConversionOrder(File.ReadAllText(file), "TupleDrop"));
+    }
+
+    /// <summary>Compiles the fixture source and runs the parameterless static methods of SignatureConversionOrder.</summary>
+    private static int[] RunConversionOrder(string source, params string[] methods)
+    {
+        var compilation = CSharpCompilation.Create("SignatureConversion" + Guid.NewGuid().ToString("N"),
+            new[] { CSharpSyntaxTree.ParseText(source) },
+            new[] { MetadataReference.CreateFromFile(typeof(object).Assembly.Location) },
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        using var stream = new MemoryStream();
+        var emitted = compilation.Emit(stream);
+        Assert.True(emitted.Success, string.Join("\n", emitted.Diagnostics));
+        var type = Assembly.Load(stream.ToArray()).GetType("SignatureConversionOrder")!;
+        return methods.Select(name => (int)type.GetMethod(name)!.Invoke(null, null)!).ToArray();
     }
 
     [Fact]

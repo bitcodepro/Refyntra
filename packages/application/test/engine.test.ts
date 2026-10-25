@@ -290,6 +290,36 @@ describe('rename plan state machine and apply', () => {
     expect(ws.applier.applied).toHaveLength(0);
   });
 
+  it('hand-over (F2): revalidated and every target checked like apply, nothing written, the plan finished', async () => {
+    const ws = make({ applyRenameEnabled: true });
+    const p = await prepared(ws);
+    const before = ws.route.engine!.received.length;
+    const r = await ws.engine.handOverRename(p.planId);
+    expect(r.status).toBe('handed-over');
+    expect(ws.route.engine!.received.slice(before)).toContain('refactor/revalidate');
+    expect(ws.applier.applied).toHaveLength(0);
+    expect(ws.engine.planState(p.planId)).toBeUndefined();
+    expect((await ws.engine.applyRename(p.planId)).status).toBe('stale');
+  });
+
+  it('hand-over (F2): a target changed after the read is refused by the synchronous check; a stale lease too', async () => {
+    const ws = make({ applyRenameEnabled: true });
+    const p = await prepared(ws, false);
+    ws.applier.afterCapture = () => ws.world.files.set(B, `${FIXTURE_FILES[B]!}// external write\n`);
+    expect((await ws.engine.handOverRename(p.planId)).status).toBe('stale');
+    ws.applier.afterCapture = undefined;
+    const q = await prepared(ws);
+    ws.engine.documentChanged(A, 'fixture', 99, `${ws.world.files.get(A) ?? ''} // edit`, true);
+    expect((await ws.engine.handOverRename(q.planId)).status).toBe('stale');
+    expect(ws.applier.applied).toHaveLength(0);
+  });
+
+  it('hand-over (F2): refused while applying is turned off', async () => {
+    const ws = make({ applyRenameEnabled: false });
+    const p = await prepared(ws);
+    expect((await ws.engine.handOverRename(p.planId)).status).toBe('disabled');
+  });
+
   it('a backend epoch change (host killed between prepare and apply) makes the plan stale', async () => {
     const ws = make({ applyRenameEnabled: true });
     const p = await prepared(ws);

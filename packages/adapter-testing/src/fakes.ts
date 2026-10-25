@@ -85,15 +85,24 @@ export class WorldEditApplier implements EditApplier {
     }
     this.afterCapture?.();
     const texts = writeSet as readonly PlannedTextChange[]; // checked above: text only
+    const check = (): { ok: true } | { ok: false; reason: string; uri: string } => {
+      for (const change of texts) {
+        const text = this.text(change.uri);
+        if (text === undefined || sha256(text) !== change.expectedHash) return { ok: false, reason: `${change.uri} changed`, uri: change.uri };
+        if (sha256(applyTextEdits(text, change.edits)) !== change.resultHash) return { ok: false, reason: 'the edits do not produce the previewed result', uri: change.uri };
+      }
+      return { ok: true };
+    };
     return {
       ok: true,
+      verify: () => {
+        this.beforeCommit?.();
+        return check();
+      },
       commit: (): CommitResult => {
         this.beforeCommit?.();
-        for (const change of texts) {
-          const text = this.text(change.uri);
-          if (text === undefined || sha256(text) !== change.expectedHash) return { started: false, reason: `${change.uri} changed`, uri: change.uri };
-          if (sha256(applyTextEdits(text, change.edits)) !== change.resultHash) return { started: false, reason: 'the edits do not produce the previewed result', uri: change.uri };
-        }
+        const checked = check();
+        if (!checked.ok) return { started: false, reason: checked.reason, uri: checked.uri };
         if (!this.rejectApply) {
           for (const change of texts) {
             let next = applyTextEdits(this.text(change.uri)!, change.edits);

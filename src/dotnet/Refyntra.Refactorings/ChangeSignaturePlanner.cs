@@ -484,10 +484,58 @@ public static class ChangeSignaturePlanner
     }
 
     /// <summary>
+    /// The arguments of a call (indexes into <paramref name="original"/>) whose evaluation runs a user-defined conversion:
+    /// into the parameter type or anywhere inside the argument. Such an argument has effects even when its syntax is a
+    /// literal or a plain read (M(1, 2) with an implicit operator V(int) that counts), and when the conversion is one
+    /// element of a tuple conversion (a local (int, int) passed as (V, int)). Null when the call cannot be analyzed: then
+    /// every argument counts as converted.
+    /// </summary>
+    private static HashSet<int>? ConvertingArguments(SyntaxNode call, IReadOnlyList<ArgumentSyntax> original, SemanticModel model, CancellationToken ct)
+    {
+        if (original.Count == 0) return new HashSet<int>();
+        if (model.GetOperation(call, ct) is not { } op) return null;
+        var found = new HashSet<int>();
+        foreach (var o in op.DescendantsAndSelf())
+        {
+            var userDefined = o switch
+            {
+                IConversionOperation conversion => conversion.Conversion.IsUserDefined || RunsUserCode(model.Compilation, conversion.Operand.Type, conversion.Type),
+                IArgumentOperation argument => argument.InConversion.IsUserDefined || argument.OutConversion.IsUserDefined,
+                _ => false,
+            };
+            if (!userDefined || o.Syntax == null) continue;
+            for (var i = 0; i < original.Count; i++)
+                if (original[i].Span.Contains(o.Syntax.Span)) found.Add(i);
+        }
+        return found;
+    }
+
+    /// <summary>
+    /// Whether converting a value of <paramref name="source"/> to <paramref name="destination"/> runs a user-defined
+    /// conversion inside a tuple or nullable conversion. The operation tree shows only the outer conversion (its element
+    /// conversions are not operations), so the element types are classified one by one; a top-level user-defined
+    /// conversion is the caller's check. Nesting deeper than the analysis goes counts as running user code (unknown).
+    /// </summary>
+    private static bool RunsUserCode(Compilation compilation, ITypeSymbol? source, ITypeSymbol? destination, int depth = 0)
+    {
+        if (source == null || destination == null || SymbolEqualityComparer.Default.Equals(source, destination)) return false;
+        if (depth > 16) return true;
+        bool Element(ITypeSymbol from, ITypeSymbol to) => compilation.ClassifyCommonConversion(from, to).IsUserDefined || RunsUserCode(compilation, from, to, depth + 1);
+        var s = Unwrap(source);
+        var d = Unwrap(destination);
+        if (s is INamedTypeSymbol { IsTupleType: true } st && d is INamedTypeSymbol { IsTupleType: true } dt)
+            return st.TupleElements.Length != dt.TupleElements.Length || st.TupleElements.Zip(dt.TupleElements, (a, b) => Element(a.Type, b.Type)).Any(x => x);
+        // A lifted conversion (int? → V?) runs the conversion of the underlying types.
+        return (!SymbolEqualityComparer.Default.Equals(s, source) || !SymbolEqualityComparer.Default.Equals(d, destination)) && Element(s, d);
+
+        static ITypeSymbol Unwrap(ITypeSymbol t) => t is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } n ? n.TypeArguments[0] : t;
+    }
+
+    /// <summary>
     /// The new argument list of one call site as a function of its current list (same arguments as the original, possibly
     /// with nested call sites already rewritten). Arguments of removed parameters must be free of side effects; when the
-    /// new order would evaluate arguments with side effects in another order, the arguments keep their order as named
-    /// arguments.
+    /// new order swaps an argument that may have side effects with a non-constant one, the arguments keep their original
+    /// evaluation order as named arguments (a read may depend on a neighboring argument that changes its value).
     /// </summary>
     private static Func<ArgumentListSyntax, ArgumentListSyntax>? PlanArguments(CallSite c, IReadOnlyList<ParameterSpec> spec, IReadOnlyList<IParameterSymbol> oldParams,
         List<int> removed, Dictionary<int, string> renamed, SemanticModel model, CancellationToken ct, out (string reason, string message)? error)
@@ -495,6 +543,9 @@ public static class ChangeSignaturePlanner
         error = null;
         var original = c.Args?.Arguments.ToList() ?? new List<ArgumentSyntax>();
         var where = CodeFacts.Label(c.Node.GetLocation());
+        var converting = ConvertingArguments(c.Node, original, model, ct);
+        // An argument converted by user code runs that code when it is evaluated, whatever its syntax (a literal, a read).
+        bool Converts(int i) => converting == null || converting.Contains(i);
         foreach (var r in removed)
         {
             if (!c.ArgsByOrdinal.TryGetValue(r, out var idxs)) continue;
@@ -506,21 +557,33 @@ public static class ChangeSignaturePlanner
                     error = ("RefOutParameter", $"The argument of {oldParams[r].Name} at {where} is passed by reference.");
                     return null;
                 }
-                if (!CodeFacts.IsSideEffectFree(a.Expression, model, ct))
+                if (!CodeFacts.IsSideEffectFree(a.Expression, model, ct) || Converts(i))
                 {
                     error = ("ArgumentHasSideEffects", $"The argument '{a.Expression}' for {oldParams[r].Name} at {where} may have side effects; removing it could change behavior. Make it a local variable first.");
                     return null;
                 }
             }
         }
-        // Emission order of the kept arguments; does the relative order of arguments with side effects change?
+        // Reads of locals and fields can depend on a neighboring call (M(value, Mutate())), so an argument that may have side
+        // effects (a call, an assignment, ref / out, a user-defined conversion) keeps its place relative to every argument
+        // whose value can differ. Two plain reads, or a read and a constant, may swap: nothing between them runs code. Such
+        // a swap is kept by naming the arguments.
         var keptOrder = new List<int>();
         foreach (var s in spec)
             if (s.From is { } f && c.ArgsByOrdinal.TryGetValue(f, out var idxs)) keptOrder.AddRange(idxs);
-        var impure = keptOrder.Where(i => !CodeFacts.IsSideEffectFree(original[i].Expression, model, ct)).ToList();
-        var orderChanges = impure.Zip(impure.Skip(1), (a, b) => a > b).Any(x => x);
+        bool Effects(int i) => !original[i].RefKindKeyword.IsKind(SyntaxKind.None) && !original[i].RefKindKeyword.IsKind(SyntaxKind.InKeyword)
+            || !CodeFacts.IsSideEffectFree(original[i].Expression, model, ct) || Converts(i);
+        // A converted constant varies too: the conversion's result depends on when it runs (implicit operator V(int) => ++n).
+        bool Varies(int i) => Converts(i) || !model.GetConstantValue(original[i].Expression, ct).HasValue;
+        var orderMatters = false;
+        for (var p = 0; p < keptOrder.Count && !orderMatters; p++)
+            for (var q = p + 1; q < keptOrder.Count && !orderMatters; q++)
+            {
+                int first = keptOrder[q], second = keptOrder[p]; // the original order of a swapped pair
+                orderMatters = first < second && (Effects(first) && Varies(second) || Effects(second) && Varies(first));
+            }
         // Positional emission: a gap (an omitted optional argument or a new parameter without a call-site value) makes the rest named.
-        var useNamedAll = orderChanges;
+        var useNamedAll = orderMatters;
         if (useNamedAll && c.Expanded && c.ArgsByOrdinal.TryGetValue(c.ParamsOrdinal, out var pa) && pa.Count != 1)
         {
             error = ("EvaluationOrder", $"The call at {where} passes a params array in expanded form; its arguments cannot be reordered without changing evaluation order.");

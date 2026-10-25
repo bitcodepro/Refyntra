@@ -125,6 +125,63 @@ export function parseBranches(text: string): Branch[] {
     });
 }
 
+/** What git's configuration says about pushing a local branch (each value from `git config --get`). */
+export interface PushConfig {
+  branch: string;
+  /** branch.<name>.remote and branch.<name>.merge: the upstream (none when either is missing). */
+  remote?: string;
+  merge?: string;
+  /** branch.<name>.pushRemote, then remote.pushDefault: where pushes go instead of the upstream's remote. */
+  pushRemote?: string;
+  pushDefaultRemote?: string;
+  /** push.default (git's default: simple). */
+  pushDefault?: string;
+  /** `git remote`: the remotes there are. */
+  remotes: string[];
+}
+
+/**
+ * `remote` and `target` (a full ref) are where the branch goes. `existingOnly`: push.default "matching" pushes a branch
+ * only to a same-named branch that already exists there; the caller checks the remote first and pushes only then.
+ */
+export type PushPlan = { ok: true; args: string[]; label: string; remote: string; target: string; existingOnly?: true } | { ok: false; reason: string };
+
+const shortHead = (ref: string) => ref.replace(/^refs\/heads\//, '');
+
+/**
+ * The push of one branch as git would do it for that branch checked out, as an explicit refspec (so a branch that is not
+ * checked out goes to the same place): the remote from pushRemote / remote.pushDefault / the upstream, the remote branch
+ * from push.default. A branch without an upstream is published (-u) to that remote, else origin or the only remote:
+ * Publish names its target, as `git push -u <remote> <branch>` does, so push.default (which applies to a push without
+ * one) does not stop it. Refused where git refuses (push.default nothing; simple or upstream with a target git would
+ * not choose); matching never creates a branch on the remote (existingOnly).
+ */
+export function pushPlan(c: PushConfig): PushPlan {
+  const mode = (c.pushDefault ?? 'simple').toLowerCase();
+  const own = `refs/heads/${c.branch}`;
+  const pushTo = c.pushRemote ?? c.pushDefaultRemote;
+  if (!c.remote || !c.merge) {
+    const remote = pushTo ?? (c.remotes.includes('origin') ? 'origin' : c.remotes.length === 1 ? c.remotes[0] : undefined);
+    if (!remote) return { ok: false, reason: c.remotes.length ? `${c.branch} has no upstream and there is no origin; choose a remote with git push -u <remote> ${c.branch}.` : 'The repository has no remote to push to.' };
+    return { ok: true, args: ['push', '-u', remote, `${own}:${own}`], label: `Publish ${c.branch} to ${remote}`, remote, target: own };
+  }
+  if (mode === 'nothing') return { ok: false, reason: 'push.default is "nothing": git pushes only with an explicit target. Push from a terminal.' };
+  const remote = pushTo ?? c.remote;
+  const triangular = remote !== c.remote;
+  const existingOnly = mode === 'matching' ? ({ existingOnly: true } as const) : {};
+  let target: string;
+  if (mode === 'current' || mode === 'matching') target = own;
+  else if (mode === 'upstream' || mode === 'tracking') {
+    if (triangular) return { ok: false, reason: `push.default is "upstream" but pushes go to ${remote}, not to the upstream's remote ${c.remote}; git refuses this push.` };
+    target = c.merge;
+  } else if (triangular) target = own;
+  else if (c.merge === own) target = c.merge;
+  else {
+    return { ok: false, reason: `${c.branch} tracks ${c.remote}/${shortHead(c.merge)}, which has another name; with push.default "simple" git refuses this push. Set push.default to "upstream" to push to it, or push from a terminal.` };
+  }
+  return { ok: true, args: ['push', remote, `${own}:${target}`], label: `Push ${c.branch} to ${remote}/${shortHead(target)}`, remote, target, ...existingOnly };
+}
+
 export interface FileChange {
   path: string;
   /** For a rename: the old path. */
@@ -230,6 +287,68 @@ export function parsePatch(text: string): DiffLine[] {
 export function gitHubRepoOf(url: string): { owner: string; repo: string } | undefined {
   const m = /^(?:https?:\/\/(?:[^@/]+@)?github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([^/]+)\/([^/]+?)(?:\.git)?\/?$/.exec(url.trim());
   return m ? { owner: m[1]!, repo: m[2]! } : undefined;
+}
+
+/**
+ * The `head` of a GitHub pull request into `base` from `branch` of the repository `from` (where the branch is): the
+ * branch name in the same repository; owner:branch with `headRepo` from another owner's repository, which `fork` names:
+ * the caller must first confirm through GitHub that it is in the fork network of `base` (an unrelated repository of that
+ * owner would name another repository's branch, or none). Another repository of the same owner, or a remote that is not
+ * on GitHub, is refused.
+ */
+export function pullHead(
+  base: { owner: string; repo: string },
+  from: { owner: string; repo: string } | undefined,
+  branch: string,
+  remote: string,
+): { ok: true; head: string; headRepo?: string; fork?: { owner: string; repo: string } } | { ok: false; reason: string } {
+  if (!from) return { ok: false, reason: `${branch} is on ${remote}, which is not a GitHub repository.` };
+  const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+  if (same(from.owner, base.owner)) {
+    if (same(from.repo, base.repo)) return { ok: true, head: branch };
+    return { ok: false, reason: `${branch} is on ${from.owner}/${from.repo}, another repository of ${base.owner}; open this pull request on GitHub.` };
+  }
+  return { ok: true, head: `${from.owner}:${branch}`, headRepo: from.repo, fork: from };
+}
+
+/**
+ * Where a push to a remote goes, from git's configuration: `configured` are the remote's push URLs as written
+ * (remote.<name>.pushurl, else remote.<name>.url), `effective` the URLs git pushes to after insteadOf / pushInsteadOf.
+ * Exactly one destination is required (several push URLs are refused: which one is the pull request's head?). Its
+ * GitHub repository is the configured URL's, unless the rewritten URL names another GitHub repository (refused).
+ * `verified`: git pushes to a GitHub URL of that repository itself (https or ssh). A rewrite to another host (a mirror,
+ * a local path) only claims the repository: the caller must check on GitHub that the pushed commit is there.
+ */
+export function pushDestination(
+  remote: string,
+  configured: string[],
+  effective: string[],
+): { ok: true; url: string; github?: { owner: string; repo: string }; verified: boolean } | { ok: false; reason: string } {
+  if (configured.length !== 1 || effective.length !== 1) {
+    return { ok: false, reason: configured.length || effective.length ? `${remote} pushes to ${Math.max(configured.length, effective.length)} URLs; push from a terminal.` : `${remote} has no URL to push to.` };
+  }
+  const repo = remoteRepository(remote, configured[0]!, effective[0]!, 'pushes to');
+  return repo.ok ? { ...repo, url: effective[0]! } : repo;
+}
+
+/**
+ * The GitHub repository a remote URL names: as configured, or as rewritten by insteadOf when only the rewrite is a GitHub
+ * URL (a shorthand like gh:acme/app). `verified` when the URL git uses is that repository's own GitHub URL.
+ */
+export function remoteRepository(
+  remote: string,
+  configured: string,
+  effective: string,
+  verb = 'fetches from',
+): { ok: true; github?: { owner: string; repo: string }; verified: boolean } | { ok: false; reason: string } {
+  const github = gitHubRepoOf(configured);
+  const rewritten = gitHubRepoOf(effective);
+  const name = (r: { owner: string; repo: string }) => `${r.owner}/${r.repo}`.toLowerCase();
+  if (github && rewritten && name(rewritten) !== name(github)) {
+    return { ok: false, reason: `${remote} is configured as ${github.owner}/${github.repo} but git ${verb} ${rewritten.owner}/${rewritten.repo} (url insteadOf); push from a terminal.` };
+  }
+  const repo = github ?? rewritten;
+  return { ok: true, ...(repo ? { github: repo } : {}), verified: !!rewritten };
 }
 
 export type SearchMode = 'message' | 'code' | 'author';

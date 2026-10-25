@@ -17,7 +17,6 @@ const label = (uri: vscode.Uri) => vscode.workspace.asRelativePath(uri, false);
 interface Target {
   change: PlannedTextChange;
   uri: vscode.Uri;
-  diskText: string | undefined;
 }
 
 interface CreateTarget {
@@ -47,6 +46,18 @@ export function targetExists(fsPath: string): boolean {
     return fs.readdirSync(path.dirname(fsPath)).some((n) => n.toLowerCase() === name);
   } catch {
     return true;
+  }
+}
+
+/**
+ * A closed target's text on disk, read synchronously (inside the final check, where no await is allowed): what the edit
+ * will be applied to, not what an earlier read saw. Undefined when it cannot be read or is not UTF-8.
+ */
+function diskText(uri: vscode.Uri): string | undefined {
+  try {
+    return decodeUtf8(fs.readFileSync(uri.fsPath));
+  } catch {
+    return undefined;
   }
 }
 
@@ -166,28 +177,38 @@ export class VsCodeEditApplier implements EditApplier {
       if (renames.length > 0) return { ok: false, reason: 'a text change follows a file rename' };
       const uri = vscode.Uri.parse(change.uri, true);
       if (uri.scheme !== 'file') return { ok: false, reason: 'a target is not a local file', uri: change.uri };
-      let diskText: string | undefined;
       if (!openDocument(uri)) {
-        // Closed file: read it now, just before the final synchronous check. Never open it (that is an editor event).
+        // Closed file: an early refusal when it cannot be read. Never open it (that is an editor event). This text is not
+        // what the final check uses: the other targets are read after it, so the final check reads the disk again.
+        let text: string | undefined;
         try {
-          diskText = decodeUtf8(await vscode.workspace.fs.readFile(uri));
+          text = decodeUtf8(await vscode.workspace.fs.readFile(uri));
         } catch {
           return { ok: false, reason: `${label(uri)} cannot be read`, uri: change.uri };
         }
-        if (diskText === undefined) return { ok: false, reason: `${label(uri)} is not UTF-8`, uri: change.uri };
+        if (text === undefined) return { ok: false, reason: `${label(uri)} is not UTF-8`, uri: change.uri };
+        if (sha256(text) !== change.expectedHash) return { ok: false, reason: `${label(uri)} changed`, uri: change.uri };
       }
-      targets.push({ change, uri, diskText });
+      targets.push({ change, uri });
     }
-    return { ok: true, commit: () => this.commit(targets, renames, creates, deletes, confirmation) };
+    return {
+      ok: true,
+      commit: () => this.commit(targets, renames, creates, deletes, confirmation),
+      verify: () => {
+        const edit = this.check(targets, renames, creates, deletes, confirmation);
+        return edit instanceof vscode.WorkspaceEdit ? { ok: true } : { ok: false, reason: edit.reason, ...(edit.uri ? { uri: edit.uri } : {}) };
+      },
+    };
   }
 
   /** Builds the text edit after checking every target synchronously; a string is the reason it cannot be applied. */
   private textEdit(targets: Target[], confirmation?: EditConfirmation): vscode.WorkspaceEdit | { started: false; reason: string; uri?: string } {
     const edit = new vscode.WorkspaceEdit();
     for (const t of targets) {
+      // An open document's text, else the file on disk as it is now (a file changed after capture() read it is refused).
       const doc = openDocument(t.uri);
-      const current = doc ? doc.getText() : t.diskText;
-      if (current === undefined) return { started: false, reason: `${label(t.uri)} was closed and not read`, uri: t.change.uri };
+      const current = doc ? doc.getText() : diskText(t.uri);
+      if (current === undefined) return { started: false, reason: `${label(t.uri)} cannot be read`, uri: t.change.uri };
       if (sha256(current) !== t.change.expectedHash) return { started: false, reason: `${label(t.uri)} changed`, uri: t.change.uri };
       let result: string;
       try {
@@ -220,8 +241,8 @@ export class VsCodeEditApplier implements EditApplier {
     return vscode.workspace.applyEdit(edit);
   }
 
-  /** Synchronous check of every target, then the first editor apply is started with no await in between. */
-  private commit(targets: Target[], renames: RenameTarget[], creates: CreateTarget[], deletes: DeleteTarget[] = [], confirmation?: EditConfirmation): CommitResult {
+  /** The synchronous checks of commit, nothing started: the text edit, or why nothing may be applied. */
+  private check(targets: Target[], renames: RenameTarget[], creates: CreateTarget[], deletes: DeleteTarget[], confirmation?: EditConfirmation): vscode.WorkspaceEdit | { started: false; reason: string; uri?: string } {
     const edit = this.textEdit(targets, confirmation);
     if (!(edit instanceof vscode.WorkspaceEdit)) return edit;
     // The absence precondition once more, synchronously: a target that appeared means nothing is applied at all.
@@ -236,6 +257,13 @@ export class VsCodeEditApplier implements EditApplier {
       const problem = this.deleteProblem(d);
       if (problem) return { started: false, reason: problem, uri: d.change.uri };
     }
+    return edit;
+  }
+
+  /** Synchronous check of every target, then the first editor apply is started with no await in between. */
+  private commit(targets: Target[], renames: RenameTarget[], creates: CreateTarget[], deletes: DeleteTarget[] = [], confirmation?: EditConfirmation): CommitResult {
+    const edit = this.check(targets, renames, creates, deletes, confirmation);
+    if (!(edit instanceof vscode.WorkspaceEdit)) return edit;
     const withDeletes = async (report: ApplyReport): Promise<ApplyReport> => (deletes.length === 0 ? report : { ...report, resources: [...(report.resources ?? []), ...(await this.applyDeletes(report, deletes))] });
     const withRenames = async (report: ApplyReport): Promise<ApplyReport> =>
       withDeletes(renames.length === 0 ? report : { ...report, resources: [...(report.resources ?? []), ...(await this.applyRenames(report, renames))] });
