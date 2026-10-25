@@ -46,6 +46,11 @@ function twoRepos(): { a: string; b: string } {
     const dir = path.join(root, name);
     fs.mkdirSync(dir);
     git(dir, 'init', '-q', '-b', 'main');
+    // The provider runs git with the machine's own environment: CI has no identity (commit, stash) and Windows runners
+    // convert line endings on checkout (core.autocrlf=true). The repository fixes both for every git it runs.
+    git(dir, 'config', 'user.name', 'Dana');
+    git(dir, 'config', 'user.email', '');
+    git(dir, 'config', 'core.autocrlf', 'false');
     fs.writeFileSync(path.join(dir, 'tracked.txt'), 'one\n');
     git(dir, 'add', '-A');
     git(dir, 'commit', '-q', '-m', 'Initial');
