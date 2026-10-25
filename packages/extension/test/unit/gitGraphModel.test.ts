@@ -1,14 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import { type GraphCommit, layoutGraph, parseBranches, parseGraphLog, parseStatus, pushPlan } from '../../src/gitGraphModel';
 
-describe('Push refuses push.default=nothing before publishing a branch', () => {
+describe('push.default=nothing: Publish names its target, a push without one is refused', () => {
   it.each([
-    {},
-    { remote: 'origin' },
-    { merge: 'refs/heads/topic' },
-    { pushRemote: 'upstream' },
-  ])('does not publish without a complete upstream (%j)', (config) => {
-    expect(pushPlan({ branch: 'topic', remotes: ['origin', 'upstream'], pushDefault: 'nothing', ...config })).toMatchObject({
+    [{}, 'origin'],
+    [{ remote: 'origin' }, 'origin'],
+    [{ merge: 'refs/heads/topic' }, 'origin'],
+    [{ pushRemote: 'upstream' }, 'upstream'],
+  ])('a branch without a complete upstream (%j) is published to %s, as git push -u <remote> <branch> is', (config, remote) => {
+    expect(pushPlan({ branch: 'topic', remotes: ['origin', 'upstream'], pushDefault: 'nothing', ...config })).toEqual({
+      ok: true,
+      args: ['push', '-u', remote, 'refs/heads/topic:refs/heads/topic'],
+      label: `Publish topic to ${remote}`,
+    });
+  });
+
+  it('a branch with an upstream is not pushed (git push without a target does nothing)', () => {
+    expect(pushPlan({ branch: 'topic', remote: 'origin', merge: 'refs/heads/topic', remotes: ['origin'], pushDefault: 'nothing' })).toMatchObject({
       ok: false,
       reason: expect.stringContaining('push.default is "nothing"'),
     });

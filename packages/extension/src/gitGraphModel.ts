@@ -147,12 +147,13 @@ const shortHead = (ref: string) => ref.replace(/^refs\/heads\//, '');
 /**
  * The push of one branch as git would do it for that branch checked out, as an explicit refspec (so a branch that is not
  * checked out goes to the same place): the remote from pushRemote / remote.pushDefault / the upstream, the remote branch
- * from push.default. A branch without an upstream is published (-u) to that remote, else origin or the only remote.
- * Refused where git refuses (push.default nothing; simple or upstream with a target git would not choose).
+ * from push.default. A branch without an upstream is published (-u) to that remote, else origin or the only remote:
+ * Publish names its target, as `git push -u <remote> <branch>` does, so push.default (which applies to a push without
+ * one) does not stop it. Refused where git refuses (push.default nothing; simple or upstream with a target git would
+ * not choose).
  */
 export function pushPlan(c: PushConfig): PushPlan {
   const mode = (c.pushDefault ?? 'simple').toLowerCase();
-  if (mode === 'nothing') return { ok: false, reason: 'push.default is "nothing": git pushes only with an explicit target. Push from a terminal.' };
   const own = `refs/heads/${c.branch}`;
   const pushTo = c.pushRemote ?? c.pushDefaultRemote;
   if (!c.remote || !c.merge) {
@@ -160,6 +161,7 @@ export function pushPlan(c: PushConfig): PushPlan {
     if (!remote) return { ok: false, reason: c.remotes.length ? `${c.branch} has no upstream and there is no origin; choose a remote with git push -u <remote> ${c.branch}.` : 'The repository has no remote to push to.' };
     return { ok: true, args: ['push', '-u', remote, `${own}:${own}`], label: `Publish ${c.branch} to ${remote}` };
   }
+  if (mode === 'nothing') return { ok: false, reason: 'push.default is "nothing": git pushes only with an explicit target. Push from a terminal.' };
   const remote = pushTo ?? c.remote;
   const triangular = remote !== c.remote;
   let target: string;

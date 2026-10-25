@@ -39,6 +39,8 @@ const GRAPH_LIMIT = 400;
 const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 /** The message of the stash that keeps a branch's changes while another branch is checked out. */
 const STASH_PREFIX = 'refyntra: changes left on ';
+/** Workspace state: commit ids of recovery stashes (see stashFor). */
+const RECOVERY_STASHES = 'refyntra.git.recoveryStashes';
 
 /** A repository's state for the overview: its branch, ahead / behind its upstream, changed files. */
 export interface RepoState {
@@ -347,15 +349,34 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
     return this.statesRunning;
   }
 
-  /** The stash Refyntra left for a branch when switching away from it with changes. */
+  /**
+   * The stash Refyntra left for a branch when switching away from it with changes. A recovery stash (kept after a failed
+   * switch whose changes were restored) has the same message but is never offered: its changes are already back.
+   */
   private async stashFor(repo: string, branch: string): Promise<{ ref: string; branch: string } | undefined> {
     if (!branch) return undefined;
-    const r = await runGit(['stash', 'list', '--format=%gd%x1f%s'], repo);
+    const recovered = this.recoveryStashes();
+    const r = await runGit(['stash', 'list', '--format=%gd%x1f%H%x1f%s'], repo);
     for (const line of r.stdout.split('\n')) {
-      const [ref, subject] = line.split('\x1f');
-      if (ref && subject?.endsWith(`${STASH_PREFIX}${branch}`)) return { ref, branch };
+      const [ref, hash, subject] = line.split('\x1f');
+      if (ref && hash && !recovered.includes(hash) && subject?.endsWith(`${STASH_PREFIX}${branch}`)) return { ref, branch };
     }
     return undefined;
+  }
+
+  /** Commit ids of recovery stashes: kept after a failed switch restored their changes, never offered back. */
+  private recoveryStashes(): string[] {
+    return this.state.get<string[]>(RECOVERY_STASHES) ?? [];
+  }
+
+  /**
+   * Applies stashed changes with their staged state (--index); when git cannot restore the index (it conflicts), the
+   * changes are applied without it. `pop` removes the entry after a successful apply.
+   */
+  private async applyStash(repo: string, ref: string, pop: boolean, what: string): Promise<boolean> {
+    const op = pop ? 'pop' : 'apply';
+    if ((await runGit(['stash', op, '--index', ref], repo)).code === 0) return true;
+    return (await this.git(['stash', op, ref], what)).ok;
   }
 
   /** Selects another repository; waits for a changing operation that is running (it stays in its repository). */
@@ -515,7 +536,7 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
    */
   switchBranch(branch: string, mode?: 'stash' | 'bring'): Promise<'ok' | 'needsChoice' | 'failed'> {
     if (!safeRef(branch)) return Promise.resolve('failed');
-    return this.inRepo<'ok' | 'needsChoice' | 'failed'>('failed', async () => {
+    return this.inRepo<'ok' | 'needsChoice' | 'failed'>('failed', async (repo) => {
       if (this.current.changes.length > 0 && !mode) return 'needsChoice';
       const from = this.current.head ?? '';
       let savedStash: string | undefined;
@@ -532,9 +553,12 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
       const ok = await this.checkout(branch);
       if (!ok && savedStash) {
         // Apply the immutable object id. Keep the recovery entry: dropping a moving stash@{n} could delete another
-        // process's work. An older stash is never applied or dropped, including when stash push was a no-op.
-        const restored = await this.git(['stash', 'apply', savedStash], 'restore the changes');
-        if (restored.ok) void vscode.window.showInformationMessage('Refyntra: the switch failed. Your changes were restored; their recovery stash was kept.');
+        // process's work. An older stash is never applied or dropped, including when stash push was a no-op. The kept
+        // entry is not offered back as "changes left on this branch": they are back in the working tree.
+        if (await this.applyStash(repo, savedStash, false, 'restore the changes')) {
+          await this.state.update(RECOVERY_STASHES, [...this.recoveryStashes(), savedStash].slice(-50));
+          void vscode.window.showInformationMessage('Refyntra: the switch failed. Your changes were restored; their recovery stash was kept.');
+        }
         await this.refresh();
       }
       return ok ? 'ok' : 'failed';
@@ -543,10 +567,10 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
 
   /** Brings back the changes left on this branch (git stash pop). */
   restoreStash(): Promise<boolean> {
-    return this.inRepo(false, async () => {
+    return this.inRepo(false, async (repo) => {
       const st = this.current.stash;
       if (!st) return false;
-      const ok = (await this.git(['stash', 'pop', st.ref], 'restore the stashed changes')).ok;
+      const ok = await this.applyStash(repo, st.ref, true, 'restore the stashed changes');
       await this.refresh();
       return ok;
     });

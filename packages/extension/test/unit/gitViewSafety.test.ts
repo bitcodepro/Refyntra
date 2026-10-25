@@ -171,6 +171,38 @@ describe('Git tab: a failed branch switch restores only its own stash', { timeou
     expect(saved).toHaveLength(2);
     expect(saved[1]).toBe(older);
     expect(ws.infos.some((m) => /recovery stash/i.test(m))).toBe(true);
+    // The recovery entry is not offered back as "changes left on main": they are already in the working tree.
+    expect(g.model().stash).toBeUndefined();
+    expect((await g.refresh()).stash).toBeUndefined();
+    expect(await g.restoreStash()).toBe(false);
+    expect(git(a, 'stash', 'list', '--format=%H').trim().split('\n')).toEqual(saved);
+  });
+
+  it('restored changes keep what was staged', async () => {
+    const { a } = twoRepos();
+    fs.writeFileSync(path.join(a, 'tracked.txt'), 'staged work\n');
+    git(a, 'add', 'tracked.txt');
+    const g = provider();
+    await g.refresh();
+    expect(await g.switchBranch('missing-branch', 'stash')).toBe('failed');
+    expect(git(a, 'diff', '--cached', '--name-only').trim()).toBe('tracked.txt');
+    expect(fs.readFileSync(path.join(a, 'tracked.txt'), 'utf8')).toBe('staged work\n');
+  });
+
+  it('changes left on a branch come back with what was staged, and the stash is offered until then', async () => {
+    const { a } = twoRepos();
+    git(a, 'switch', '-q', '-c', 'other');
+    git(a, 'switch', '-q', 'main');
+    git(a, 'add', 'tracked.txt');
+    const g = provider();
+    await g.refresh();
+    expect(await g.switchBranch('other', 'stash')).toBe('ok');
+    expect(await g.switchBranch('main')).toBe('ok');
+    expect(g.model().stash?.branch).toBe('main');
+    expect(await g.restoreStash()).toBe(true);
+    expect(git(a, 'diff', '--cached', '--name-only').trim()).toBe('tracked.txt');
+    expect(fs.existsSync(path.join(a, 'new.txt'))).toBe(true);
+    expect(g.model().stash).toBeUndefined();
   });
 });
 
@@ -192,16 +224,25 @@ describe('Git tab: Push follows the configured upstream and push settings', { ti
   }
   const heads = (bare: string) => git(bare, 'for-each-ref', '--format=%(refname:short)', 'refs/heads').split('\n').filter(Boolean).sort();
 
-  it('push.default=nothing refuses publication of a branch without an upstream', async () => {
+  it('push.default=nothing: Publish (an explicit target) still publishes, as git push -u origin <branch> does', async () => {
     const { repo, origin } = withRemotes();
     git(repo, 'switch', '-q', '-c', 'unpublished');
     git(repo, 'config', 'push.default', 'nothing');
     const g = provider();
     await g.refresh();
+    expect(await g.push()).toBe(true);
+    expect(heads(origin)).toEqual(['unpublished']);
+    expect(git(repo, 'rev-parse', '--abbrev-ref', 'unpublished@{upstream}').trim()).toBe('origin/unpublished');
+  });
+
+  it('push.default=nothing refuses Push of a branch with an upstream; nothing is pushed', async () => {
+    const { repo, upstream } = withRemotes();
+    git(repo, 'config', 'push.default', 'nothing');
+    const g = provider();
+    await g.refresh();
     expect(await g.push()).toBe(false);
     expect(g.lastError).toContain('push.default is "nothing"');
-    expect(heads(origin)).toEqual([]);
-    expect(git(repo, 'for-each-ref', '--format=%(upstream)', 'refs/heads/unpublished').trim()).toBe('');
+    expect(git(upstream, 'log', '-1', '--format=%s', 'review').trim()).toBe('Initial');
   });
 
   it('feature tracking upstream/review with push.default=upstream goes to upstream review, not origin/feature', async () => {

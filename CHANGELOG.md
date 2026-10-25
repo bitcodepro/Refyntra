@@ -6,13 +6,17 @@ All notable changes are listed here. The project is in preview; every merge to m
 
 ### Fixed (safety of applied changes)
 
-- **Change Signature** preserves evaluation order when reordered arguments read values changed by another argument;
-  non-constant arguments keep their original order through named arguments.
+- **Change Signature** preserves evaluation order when reordered arguments read values changed by another argument:
+  when an argument that may have side effects (a call, an assignment, `ref` / `out`) swaps with a non-constant one, the
+  arguments keep their original order through named arguments. Plain reads and constants still reorder positionally.
 - **Central NuGet updates** write Directory.Packages.props once, refuse stale or unsaved input, keep concurrent edits,
   and report failed or cancelled Restore tasks. Undo also refuses unsaved changes.
-- **Failed Git branch switches** restore only the stash created by that switch, by object id, and keep its recovery
-  entry. A no-op stash push never applies or drops an older user stash.
-- **Git Push** respects `push.default=nothing` for unpublished branches as well as branches with an upstream.
+- **Failed Git branch switches** restore only the stash created by that switch, by object id, with its staged state,
+  and keep its recovery entry; the tab does not offer that entry back as changes left on the branch (they are already
+  restored). A no-op stash push never applies or drops an older user stash. Restoring changes left on a branch keeps
+  what was staged too (`--index`, without it when git cannot restore the index).
+- **Git Push** respects `push.default=nothing` for a branch with an upstream (a push without a target); Publish names
+  its remote and branch, as `git push -u <remote> <branch>` does, and still works.
 - **F2 rename in C#** no longer hands the plan's edits to the editor unchecked: a plan with problems, a plan that is not
   `Previewing`, applying turned off (`refyntra.rename.apply`) or a plan only partly validated is refused with the
   reason; an applicable plan is revalidated by the backend and every target checked by the EditApplier, as before an

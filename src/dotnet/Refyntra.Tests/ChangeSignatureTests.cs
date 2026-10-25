@@ -49,7 +49,8 @@ public sealed class ChangeSignatureTests
         var after = After(plan, file);
         Assert.Contains("string Greet(int times, string name);", after);
         Assert.Contains("public virtual string Greet(int times, string name) =>", after);
-        Assert.Contains("public override string Greet(int times, string who) => base.Greet(name: who, times: times)", after);
+        // Two parameter reads swap freely: nothing between them changes a value, so the call stays positional.
+        Assert.Contains("public override string Greet(int times, string who) => base.Greet(times, who)", after);
         Assert.Contains("greeter.Greet(2, \"a\") + greeter.Greet(times: 3, name: \"b\")", after);
         Assert.Contains("new Greeter().Greet(1, \"c\")", after);
         Assert.Contains("new LoudGreeter().Greet(1, \"app\")", After(plan, App(dir, "Program.cs")));

@@ -486,8 +486,8 @@ public static class ChangeSignaturePlanner
     /// <summary>
     /// The new argument list of one call site as a function of its current list (same arguments as the original, possibly
     /// with nested call sites already rewritten). Arguments of removed parameters must be free of side effects; when the
-    /// new order moves non-constant arguments, the arguments keep their original evaluation order as named arguments
-    /// (a read may depend on a neighboring argument that changes its value).
+    /// new order swaps an argument that may have side effects with a non-constant one, the arguments keep their original
+    /// evaluation order as named arguments (a read may depend on a neighboring argument that changes its value).
     /// </summary>
     private static Func<ArgumentListSyntax, ArgumentListSyntax>? PlanArguments(CallSite c, IReadOnlyList<ParameterSpec> spec, IReadOnlyList<IParameterSymbol> oldParams,
         List<int> removed, Dictionary<int, string> renamed, SemanticModel model, CancellationToken ct, out (string reason, string message)? error)
@@ -513,14 +513,24 @@ public static class ChangeSignaturePlanner
                 }
             }
         }
-        // Reads of locals and fields can depend on a neighboring call (M(value, Mutate())). Only constants can be
-        // moved freely: when other kept arguments are reordered, preserve their original evaluation order by naming them.
+        // Reads of locals and fields can depend on a neighboring call (M(value, Mutate())), so an argument that may have side
+        // effects (a call, an assignment, ref / out) keeps its place relative to every non-constant argument. Two reads, or
+        // a read and a constant, may swap: nothing between them changes a value. Such a swap is kept by naming the arguments.
         var keptOrder = new List<int>();
         foreach (var s in spec)
             if (s.From is { } f && c.ArgsByOrdinal.TryGetValue(f, out var idxs)) keptOrder.AddRange(idxs);
-        var orderChanges = keptOrder.Zip(keptOrder.Skip(1), (a, b) => a > b).Any(x => x);
+        bool Effects(int i) => !original[i].RefKindKeyword.IsKind(SyntaxKind.None) && !original[i].RefKindKeyword.IsKind(SyntaxKind.InKeyword)
+            || !CodeFacts.IsSideEffectFree(original[i].Expression, model, ct);
+        bool Varies(int i) => !model.GetConstantValue(original[i].Expression, ct).HasValue;
+        var orderMatters = false;
+        for (var p = 0; p < keptOrder.Count && !orderMatters; p++)
+            for (var q = p + 1; q < keptOrder.Count && !orderMatters; q++)
+            {
+                int first = keptOrder[q], second = keptOrder[p]; // the original order of a swapped pair
+                orderMatters = first < second && (Effects(first) && Varies(second) || Effects(second) && Varies(first));
+            }
         // Positional emission: a gap (an omitted optional argument or a new parameter without a call-site value) makes the rest named.
-        var useNamedAll = orderChanges && keptOrder.Any(i => !model.GetConstantValue(original[i].Expression, ct).HasValue);
+        var useNamedAll = orderMatters;
         if (useNamedAll && c.Expanded && c.ArgsByOrdinal.TryGetValue(c.ParamsOrdinal, out var pa) && pa.Count != 1)
         {
             error = ("EvaluationOrder", $"The call at {where} passes a params array in expanded form; its arguments cannot be reordered without changing evaluation order.");
