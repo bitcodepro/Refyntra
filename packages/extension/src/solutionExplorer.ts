@@ -300,14 +300,39 @@ export class SolutionExplorer implements vscode.TreeDataProvider<SolutionNode>, 
   }
 
   /** Direct file edits (Directory.Packages.props versions) with the same undo, reload and refresh as CLI operations. */
-  async editFiles(title: string, edits: { path: string; text: string }[], before?: string): Promise<void> {
+  async editFiles(title: string, edits: { path: string; text: string }[], before?: string, command?: Parameters<typeof runVisible>[0]): Promise<boolean> {
     const snapshot: Snapshot = { title, files: edits.map((e) => ({ path: e.path, before: before ?? readText(e.path) ?? '', after: e.text })) };
+    // The prepared text may already be stale, or the editor may hold unsaved changes. Refuse both before writing.
+    const blocked = snapshot.files.filter((f) => this.hasUnsavedEdits(f.path) || readText(f.path) !== f.before);
+    if (blocked.length) {
+      void vscode.window.showWarningMessage(`Refyntra: cannot ${title}: ${blocked.map((f) => path.basename(f.path)).join(', ')} changed or has unsaved edits. Save or review it and try again.`);
+      return false;
+    }
     for (const e of edits) fs.writeFileSync(e.path, e.text, 'utf8');
     this.lastUndo = snapshot;
+    let failure: string | undefined;
+    if (command) {
+      try {
+        const code = await runVisible(command);
+        if (code !== 0) failure = `${command.title} ${code === undefined ? 'did not finish' : `failed (exit code ${code})`}. The file edit was kept; review it or use Undo.`;
+      } catch (e) {
+        failure = `${command.title} failed: ${e instanceof Error ? e.message : String(e)}. The file edit was kept; review it or use Undo.`;
+      }
+    }
     await this.reloadAndRefresh(title);
-    void vscode.window.showInformationMessage(`Refyntra: ${title}.`, 'Undo').then((pick) => {
+    const changed = snapshot.files.some((f) => this.hasUnsavedEdits(f.path) || readText(f.path) !== f.after);
+    const notice = failure ? vscode.window.showErrorMessage(`Refyntra: ${failure}`, 'Undo')
+      : changed ? vscode.window.showWarningMessage(`Refyntra: files changed while ${title} was running. Their changes were kept; review them and restore packages again.`, 'Undo')
+      : vscode.window.showInformationMessage(`Refyntra: ${title}.`, 'Undo');
+    void notice.then((pick) => {
       if (pick === 'Undo') void this.undo();
     });
+    return !failure && !changed;
+  }
+
+  private hasUnsavedEdits(file: string): boolean {
+    const key = (p: string) => process.platform === 'win32' ? path.resolve(p).toLowerCase() : path.resolve(p);
+    return vscode.workspace.textDocuments.some((doc) => doc.isDirty && doc.uri.scheme === 'file' && key(doc.uri.fsPath) === key(file));
   }
 
   /** Undoes the last project operation: restores the files it changed, when nobody changed them since. */
@@ -317,9 +342,9 @@ export class SolutionExplorer implements vscode.TreeDataProvider<SolutionNode>, 
       void vscode.window.showInformationMessage('Refyntra: nothing to undo.');
       return [];
     }
-    const blocked = s.files.filter((f) => readText(f.path) !== f.after);
+    const blocked = s.files.filter((f) => this.hasUnsavedEdits(f.path) || readText(f.path) !== f.after);
     if (blocked.length) {
-      void vscode.window.showWarningMessage(`Refyntra: cannot undo "${s.title}": ${blocked.map((f) => path.basename(f.path)).join(', ')} changed since.`);
+      void vscode.window.showWarningMessage(`Refyntra: cannot undo "${s.title}": ${blocked.map((f) => path.basename(f.path)).join(', ')} changed since or has unsaved edits.`);
       return [];
     }
     for (const f of s.files) fs.writeFileSync(f.path, f.before, 'utf8');

@@ -99,8 +99,10 @@ export interface ApplyOutcome {
   /**
    * `limited`: nothing was done; the plan is only partly validated and needs an explicit confirmation of
    * `limitations` (call applyRename again with `acceptLimited`). The plan stays Previewing.
+   * `handed-over` (handOverRename only): every check passed and nothing was applied; the caller hands the edits to the
+   * editor at once.
    */
-  status: 'applied' | 'stale' | 'failed' | 'disabled' | 'cancelled' | 'limited';
+  status: 'applied' | 'stale' | 'failed' | 'disabled' | 'cancelled' | 'limited' | 'handed-over';
   message: string;
   /** With status `limited`: what the user must confirm. */
   limitations?: string[];
@@ -295,6 +297,13 @@ export interface EngineClient {
    */
   prepareCleanup(cleanup: import('@refyntra/contracts').CleanupParams, token?: CancellationToken, adapterId?: string): Promise<RenameOutcome>;
   applyRename(planId: string, token?: CancellationToken, options?: ApplyOptions): Promise<ApplyOutcome>;
+  /**
+   * For an editor that applies the edits itself (F2 Rename Symbol): the same checks as applyRename — a valid plan only
+   * (a limited one is answered `limited` and not consumed), lease, backend revalidation, every target checked
+   * synchronously by the EditApplier — and then `handed-over` instead of an apply. The plan is finished either way except
+   * for `limited` / `disabled`.
+   */
+  handOverRename(planId: string, token?: CancellationToken): Promise<ApplyOutcome>;
   /**
    * Call / type hierarchy (owned route, protocol 1.7): the symbol at the position and its neighbours in `direction`
    * ('subject' resolves only the symbol, with no items).
@@ -1328,11 +1337,20 @@ export class RefyntraEngine implements EngineClient {
    * Mandatory revalidation after the user confirmed:
    *   1. the plan must still be Previewing, same epoch, same workspace revision (editor events break the lease);
    *   2. backend revalidation (barrier + every read-set fingerprint);
-   *   3. the EditApplier reads closed targets from disk (the last await);
-   *   4. synchronously: lease check again, every target hash checked, editor apply started — no await in between;
+   *   3. the EditApplier checks that closed targets can be read (the last await);
+   *   4. synchronously: lease check again, closed targets read again from disk, every target hash checked, editor apply
+   *      started — no await in between;
    *   5. post-state reconciliation; the result is reported per file, never assumed. No auto-save, no rollback.
    */
-  async applyRename(planId: string, token?: CancellationToken, options: ApplyOptions = {}): Promise<ApplyOutcome> {
+  applyRename(planId: string, token?: CancellationToken, options: ApplyOptions = {}): Promise<ApplyOutcome> {
+    return this.revalidateAndApply(planId, token, options, false);
+  }
+
+  handOverRename(planId: string, token?: CancellationToken): Promise<ApplyOutcome> {
+    return this.revalidateAndApply(planId, token, {}, true);
+  }
+
+  private async revalidateAndApply(planId: string, token: CancellationToken | undefined, options: ApplyOptions, handOver: boolean): Promise<ApplyOutcome> {
     const entry = this.plans.get(planId);
     if (!entry) return { status: 'stale', message: 'This preview is no longer valid. Run Rename again.', canReprepare: true };
     const { lifecycle, adapter } = entry;
@@ -1385,6 +1403,12 @@ export class RefyntraEngine implements EngineClient {
       if (token?.isCancellationRequested) return finish('Cancelled', { status: 'cancelled', message: 'Rename cancelled. No file was changed.' });
       if (!captured.ok) return stale(`The code changed since the preview (${captured.reason}).`);
       if (!lease()) return stale('The code changed since the preview.');
+      if (handOver) {
+        const checked = captured.verify ? captured.verify() : { ok: false as const, reason: 'the edits cannot be checked without applying them' };
+        if (!checked.ok) return stale(`The code changed since the preview (${checked.reason}).`);
+        adapter.discard(planId);
+        return finish('Discarded', { status: 'handed-over', message: `${plan.title}: checked and handed to the editor` });
+      }
       const commit = captured.commit();
       if (!commit.started) return stale(`The code changed since the preview (${commit.reason}).`);
       lifecycle.transition('Applying');

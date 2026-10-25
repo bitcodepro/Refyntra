@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { ProjectStructure } from '@refyntra/contracts';
-import { runCapture, runVisible } from './dotnetCli';
+import { runCapture } from './dotnetCli';
 import { type InstalledRow, type NuGetPageState, type NuGetTab, renderNuGetBody, renderNuGetHtml } from './nugetHtml';
 import { type SearchHit, filterHits, mergeHits, needsCredentials, parseLocalFeed, parsePackageSearchJson, parseSearch, parseServiceIndex, parseVersions, searchUrl, versionsUrl } from './nugetModel';
 import { type NuGetSource, addCentralVersion, addPackage, compareVersions, consolidate, listPackages, nugetSources, packageSearch, parseListPackageJson, parseSourcesShort, removePackage, restore, setCentralVersion } from './projectOpsModel';
@@ -328,13 +328,12 @@ export class NuGetPanel implements vscode.Disposable {
       const text = fs.readFileSync(props, 'utf8');
       const next = setCentralVersion(text, id, version) ?? addCentralVersion(text, id, version);
       this.set({ busy: `Setting ${id} ${version} in Directory.Packages.props…` });
-      // Restore first (visible task), so the reloaded project resolves the new version.
-      fs.writeFileSync(props, next, 'utf8');
       const sln = this.explorer.structure()?.solutionUri;
-      await runVisible(restore(sln ? fsPath(sln) : fsPath(central.projectUri)));
-      await this.explorer.editFiles(`${id} ${version} in Directory.Packages.props`, [{ path: props, text: next }], text);
+      // Write once, capture Undo before Restore, then reload. Never write the old prepared text after the task awaited.
+      const ok = await this.explorer.editFiles(`${id} ${version} in Directory.Packages.props`, [{ path: props, text: next }], text,
+        restore(sln ? fsPath(sln) : fsPath(central.projectUri)));
       this.afterChange();
-      return true;
+      return ok;
     }
     const targets = projects ?? (owners.length && inScope.length > 1 ? owners : await this.targetProjects(`Install ${id} into`));
     if (!targets.length) return false;

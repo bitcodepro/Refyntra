@@ -4,6 +4,28 @@ All notable changes are listed here. The project is in preview; every merge to m
 
 ## Unreleased
 
+### Fixed (safety of applied changes)
+
+- **Change Signature** preserves evaluation order when reordered arguments read values changed by another argument;
+  non-constant arguments keep their original order through named arguments.
+- **Central NuGet updates** write Directory.Packages.props once, refuse stale or unsaved input, keep concurrent edits,
+  and report failed or cancelled Restore tasks. Undo also refuses unsaved changes.
+- **Failed Git branch switches** restore only the stash created by that switch, by object id, and keep its recovery
+  entry. A no-op stash push never applies or drops an older user stash.
+- **Git Push** respects `push.default=nothing` for unpublished branches as well as branches with an upstream.
+- **F2 rename in C#** no longer hands the plan's edits to the editor unchecked: a plan with problems, a plan that is not
+  `Previewing`, applying turned off (`refyntra.rename.apply`) or a plan only partly validated is refused with the
+  reason; an applicable plan is revalidated by the backend and every target checked by the EditApplier, as before an
+  apply, and only then are its edits returned to the editor (`handOverRename`).
+- **Closed files in an apply** are read again from disk in the final synchronous check: a file that changed while the
+  other targets were being read is refused before the edit starts (it was checked against the earlier copy).
+- **Git tab**: changing operations (stage, discard, commit, checkout, merge, push, …) run one at a time, each pinned to
+  the repository it started in; a page action for a repository that is no longer selected does nothing. Discard deletes
+  only paths that are changes of that repository (a Discard could finish in another repository after a switch).
+- **Git tab Push** follows git's configuration: `branch.<name>.pushRemote`, `remote.pushDefault`, the upstream's remote
+  and branch, and `push.default` (a push git would refuse is not started). It pushed `origin <branch>` whatever the
+  upstream was.
+
 ### Added (recent)
 
 - **Persistent project index** (ADR-014): a reopened, unchanged solution is usable at once (Shop: 0.1 s instead of 3.9 s)

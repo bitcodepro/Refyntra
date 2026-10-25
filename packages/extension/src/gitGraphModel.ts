@@ -125,6 +125,56 @@ export function parseBranches(text: string): Branch[] {
     });
 }
 
+/** What git's configuration says about pushing a local branch (each value from `git config --get`). */
+export interface PushConfig {
+  branch: string;
+  /** branch.<name>.remote and branch.<name>.merge: the upstream (none when either is missing). */
+  remote?: string;
+  merge?: string;
+  /** branch.<name>.pushRemote, then remote.pushDefault: where pushes go instead of the upstream's remote. */
+  pushRemote?: string;
+  pushDefaultRemote?: string;
+  /** push.default (git's default: simple). */
+  pushDefault?: string;
+  /** `git remote`: the remotes there are. */
+  remotes: string[];
+}
+
+export type PushPlan = { ok: true; args: string[]; label: string } | { ok: false; reason: string };
+
+const shortHead = (ref: string) => ref.replace(/^refs\/heads\//, '');
+
+/**
+ * The push of one branch as git would do it for that branch checked out, as an explicit refspec (so a branch that is not
+ * checked out goes to the same place): the remote from pushRemote / remote.pushDefault / the upstream, the remote branch
+ * from push.default. A branch without an upstream is published (-u) to that remote, else origin or the only remote.
+ * Refused where git refuses (push.default nothing; simple or upstream with a target git would not choose).
+ */
+export function pushPlan(c: PushConfig): PushPlan {
+  const mode = (c.pushDefault ?? 'simple').toLowerCase();
+  if (mode === 'nothing') return { ok: false, reason: 'push.default is "nothing": git pushes only with an explicit target. Push from a terminal.' };
+  const own = `refs/heads/${c.branch}`;
+  const pushTo = c.pushRemote ?? c.pushDefaultRemote;
+  if (!c.remote || !c.merge) {
+    const remote = pushTo ?? (c.remotes.includes('origin') ? 'origin' : c.remotes.length === 1 ? c.remotes[0] : undefined);
+    if (!remote) return { ok: false, reason: c.remotes.length ? `${c.branch} has no upstream and there is no origin; choose a remote with git push -u <remote> ${c.branch}.` : 'The repository has no remote to push to.' };
+    return { ok: true, args: ['push', '-u', remote, `${own}:${own}`], label: `Publish ${c.branch} to ${remote}` };
+  }
+  const remote = pushTo ?? c.remote;
+  const triangular = remote !== c.remote;
+  let target: string;
+  if (mode === 'current' || mode === 'matching') target = own;
+  else if (mode === 'upstream' || mode === 'tracking') {
+    if (triangular) return { ok: false, reason: `push.default is "upstream" but pushes go to ${remote}, not to the upstream's remote ${c.remote}; git refuses this push.` };
+    target = c.merge;
+  } else if (triangular) target = own;
+  else if (c.merge === own) target = c.merge;
+  else {
+    return { ok: false, reason: `${c.branch} tracks ${c.remote}/${shortHead(c.merge)}, which has another name; with push.default "simple" git refuses this push. Set push.default to "upstream" to push to it, or push from a terminal.` };
+  }
+  return { ok: true, args: ['push', remote, `${own}:${target}`], label: `Push ${c.branch} to ${remote}/${shortHead(target)}` };
+}
+
 export interface FileChange {
   path: string;
   /** For a rename: the old path. */

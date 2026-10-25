@@ -70,10 +70,15 @@ export interface CapturedEdit {
   ok: true;
   /**
    * Fully synchronous: checks every target's current text hash against `expectedHash` (open buffer text, or the
-   * disk text read by `capture` for closed files) and that the edits produce `resultHash`; then starts the editor
-   * apply without any await in between. `result` resolves after the apply with a post-state reconciliation.
+   * closed file read again from disk) and that the edits produce `resultHash`; then starts the editor apply without any
+   * await in between. `result` resolves after the apply with a post-state reconciliation.
    */
   commit(): CommitResult;
+  /**
+   * Fully synchronous: the same checks as `commit`, without starting anything (the caller hands the edits to the editor,
+   * e.g. F2). Missing: the applier cannot check without applying, so nothing may be handed over.
+   */
+  verify?(): { ok: true } | { ok: false; reason: string; uri?: string };
 }
 
 export type CommitResult = { started: true; result: Promise<ApplyReport> } | { started: false; reason: string; uri?: string };

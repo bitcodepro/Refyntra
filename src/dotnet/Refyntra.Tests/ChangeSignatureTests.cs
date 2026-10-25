@@ -1,4 +1,7 @@
+using System.Reflection;
 using System.Text.Json;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Refyntra.Tests.Infrastructure;
 using Refyntra.Workspaces;
 using static Refyntra.Tests.RefactoringFixture;
@@ -46,7 +49,7 @@ public sealed class ChangeSignatureTests
         var after = After(plan, file);
         Assert.Contains("string Greet(int times, string name);", after);
         Assert.Contains("public virtual string Greet(int times, string name) =>", after);
-        Assert.Contains("public override string Greet(int times, string who) => base.Greet(times, who)", after);
+        Assert.Contains("public override string Greet(int times, string who) => base.Greet(name: who, times: times)", after);
         Assert.Contains("greeter.Greet(2, \"a\") + greeter.Greet(times: 3, name: \"b\")", after);
         Assert.Contains("new Greeter().Greet(1, \"c\")", after);
         Assert.Contains("new LoudGreeter().Greet(1, \"app\")", After(plan, App(dir, "Program.cs")));
@@ -110,6 +113,36 @@ public sealed class ChangeSignatureTests
         Assert.Contains("Combine(a: Next(), b: Next())", after);
         await ApplyToDiskAsync(c, plan);
         await AssertBuildsAsync(dir);
+    }
+
+    [Fact]
+    public async Task ReorderPreservesReadsAroundMutatingCalls()
+    {
+        var (c, dir) = await OpenAsync();
+        await using var _ = c;
+        var file = Lib(dir, "ChangeSignature/EvaluationOrder.cs");
+        var before = File.ReadAllText(file);
+        var plan = Prepared(await PrepareAtAsync(c, Action, file, "int Combine(int a", 4,
+            Sig(new { from = 1, name = "b" }, new { from = 0, name = "a" })));
+        var after = After(plan, file);
+
+        static int[] Run(string source)
+        {
+            var compilation = CSharpCompilation.Create("SignatureEvaluation" + Guid.NewGuid().ToString("N"),
+                new[] { CSharpSyntaxTree.ParseText(source) },
+                new[] { MetadataReference.CreateFromFile(typeof(object).Assembly.Location) },
+                new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+            using var stream = new MemoryStream();
+            var emitted = compilation.Emit(stream);
+            Assert.True(emitted.Success, string.Join("\n", emitted.Diagnostics));
+            var type = Assembly.Load(stream.ToArray()).GetType("SignatureEvaluationOrder")!;
+            return new[] { "ReadBeforeMutation", "MutationBeforeRead", "CapturedLocal" }
+                .Select(name => (int)type.GetMethod(name)!.Invoke(null, null)!).ToArray();
+        }
+
+        var expected = Run(before);
+        Assert.Equal(new[] { 1, 11, 1 }, expected);
+        Assert.Equal(expected, Run(after));
     }
 
     [Fact]

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type { EngineClient } from '@refyntra/application';
 import type { TextEditDto } from '@refyntra/contracts';
+import { editorRenameFailure, editorRenameRefusal } from './editorEditsModel';
 
 const CSHARP_EXTENSION = 'ms-dotnettools.csharp';
 
@@ -12,8 +13,11 @@ const toEdit = (e: TextEditDto) => vscode.TextEdit.replace(new vscode.Range(e.ra
 
 /**
  * F2 in C#: the same rename plan as Refyntra Rename (Roslyn Renamer, compile-checked, .razor / .cshtml and EF Core
- * migrations included); the editor applies it (Shift+Enter in the rename box shows VS Code's own preview). Refused
- * renames show the host's reason. Off while the C# extension is installed.
+ * migrations included), with the same checks: a plan with problems, applying turned off or only partly validated is
+ * refused; otherwise the engine revalidates it and the EditApplier checks every target synchronously (handOverRename),
+ * and only then are its edits returned for the editor to apply (Shift+Enter in the rename box shows VS Code's own
+ * preview). Nothing is applied here: a rename provider only computes edits. Refused renames show the reason. Off while
+ * the C# extension is installed.
  */
 export class CSharpRenameProvider implements vscode.RenameProvider {
   constructor(private readonly engine: EngineClient) {}
@@ -32,12 +36,22 @@ export class CSharpRenameProvider implements vscode.RenameProvider {
     try {
       const r = await this.engine.prepareRename({ uri: document.uri.toString(), position: { line: position.line, character: position.character } }, newName.trim(), source.token, {});
       if (r.kind !== 'preview') throw new Error(r.message);
+      const refusal = editorRenameRefusal(r);
+      if (refusal) {
+        this.engine.discardPlan(r.planId);
+        throw new Error(refusal);
+      }
+      const result = await this.engine.handOverRename(r.planId, source.token);
+      if (result.status !== 'handed-over') {
+        this.engine.discardPlan(r.planId);
+        throw new Error(editorRenameFailure(result));
+      }
+      // Built right after the synchronous check (no await in between): the edits fit the text they were checked against.
       const edit = new vscode.WorkspaceEdit();
       for (const c of r.plan.writeSet) {
         if (c.kind === 'text') for (const e of c.edits) edit.replace(vscode.Uri.parse(c.uri, true), toEdit(e).range, e.newText);
         else if (c.kind === 'rename') edit.renameFile(vscode.Uri.parse(c.oldUri, true), vscode.Uri.parse(c.newUri, true));
       }
-      this.engine.discardPlan(r.planId);
       return edit;
     } finally {
       sub.dispose();

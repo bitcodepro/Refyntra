@@ -1,5 +1,54 @@
 import { describe, expect, it } from 'vitest';
-import { type GraphCommit, layoutGraph, parseBranches, parseGraphLog, parseStatus } from '../../src/gitGraphModel';
+import { type GraphCommit, layoutGraph, parseBranches, parseGraphLog, parseStatus, pushPlan } from '../../src/gitGraphModel';
+
+describe('Push refuses push.default=nothing before publishing a branch', () => {
+  it.each([
+    {},
+    { remote: 'origin' },
+    { merge: 'refs/heads/topic' },
+    { pushRemote: 'upstream' },
+  ])('does not publish without a complete upstream (%j)', (config) => {
+    expect(pushPlan({ branch: 'topic', remotes: ['origin', 'upstream'], pushDefault: 'nothing', ...config })).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining('push.default is "nothing"'),
+    });
+  });
+});
+
+describe('push target from the git configuration', () => {
+  const tracking = { branch: 'feature', remote: 'upstream', merge: 'refs/heads/review', remotes: ['origin', 'upstream'] };
+
+  it('a differently named upstream: refused with push.default simple (git default), pushed to it with upstream', () => {
+    const simple = pushPlan(tracking);
+    expect(simple.ok).toBe(false);
+    expect(!simple.ok && simple.reason).toMatch(/upstream\/review/);
+    expect(pushPlan({ ...tracking, pushDefault: 'upstream' })).toEqual({ ok: true, args: ['push', 'upstream', 'refs/heads/feature:refs/heads/review'], label: 'Push feature to upstream/review' });
+    expect(pushPlan({ ...tracking, pushDefault: 'tracking' })).toMatchObject({ ok: true, args: ['push', 'upstream', 'refs/heads/feature:refs/heads/review'] });
+  });
+
+  it('never origin just because it exists: the upstream remote of a same-named branch', () => {
+    expect(pushPlan({ ...tracking, merge: 'refs/heads/feature' })).toMatchObject({ ok: true, args: ['push', 'upstream', 'refs/heads/feature:refs/heads/feature'] });
+  });
+
+  it('pushRemote, then remote.pushDefault, take the push (triangular: the local name)', () => {
+    expect(pushPlan({ ...tracking, pushRemote: 'origin', pushDefaultRemote: 'upstream' })).toMatchObject({ ok: true, args: ['push', 'origin', 'refs/heads/feature:refs/heads/feature'] });
+    expect(pushPlan({ ...tracking, pushDefaultRemote: 'origin' })).toMatchObject({ ok: true, args: ['push', 'origin', 'refs/heads/feature:refs/heads/feature'] });
+    expect(pushPlan({ ...tracking, pushDefaultRemote: 'origin', pushDefault: 'upstream' }).ok).toBe(false);
+  });
+
+  it('push.default current and nothing', () => {
+    expect(pushPlan({ ...tracking, pushDefault: 'current' })).toMatchObject({ ok: true, args: ['push', 'upstream', 'refs/heads/feature:refs/heads/feature'] });
+    expect(pushPlan({ ...tracking, pushDefault: 'nothing' }).ok).toBe(false);
+  });
+
+  it('no upstream: published to pushRemote, origin or the only remote; refused when none fits', () => {
+    expect(pushPlan({ branch: 'solo', remotes: ['origin', 'fork'] })).toEqual({ ok: true, args: ['push', '-u', 'origin', 'refs/heads/solo:refs/heads/solo'], label: 'Publish solo to origin' });
+    expect(pushPlan({ branch: 'solo', remotes: ['fork'] })).toMatchObject({ ok: true, args: ['push', '-u', 'fork', 'refs/heads/solo:refs/heads/solo'] });
+    expect(pushPlan({ branch: 'solo', pushDefaultRemote: 'fork', remotes: ['origin', 'fork'] })).toMatchObject({ ok: true, args: ['push', '-u', 'fork', 'refs/heads/solo:refs/heads/solo'] });
+    expect(pushPlan({ branch: 'solo', remotes: ['a', 'b'] }).ok).toBe(false);
+    expect(pushPlan({ branch: 'solo', remotes: [] }).ok).toBe(false);
+  });
+});
 
 const c = (sha: string, parents: string[], refs: string[] = []): GraphCommit => ({ sha, parents, refs, author: 'a', time: 0, subject: sha });
 

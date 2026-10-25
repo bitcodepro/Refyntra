@@ -2972,7 +2972,7 @@
         "refyntra.editor.rename": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "F2 (Rename Symbol) in C# uses Refyntra's rename plan (compile-checked; .razor, .cshtml and EF Core migrations included). Not used while the C# extension (`ms-dotnettools.csharp`) is installed."
+          "markdownDescription": "F2 (Rename Symbol) in C# uses Refyntra's rename plan (compile-checked; .razor, .cshtml and EF Core migrations included) and applies it like Refyntra Rename: revalidated first, refused when the plan has problems, is only partly validated or `refyntra.rename.apply` is off. Not used while the C# extension (`ms-dotnettools.csharp`) is installed."
         },
         "refyntra.editor.formatting": {
           "type": "boolean",

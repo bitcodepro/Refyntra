@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
@@ -18,6 +20,7 @@ import {
   parseNumstat,
   parsePatch,
   parseStatus,
+  pushPlan,
   type SearchMode,
   searchArgs,
 } from './gitGraphModel';
@@ -117,6 +120,9 @@ async function pullArgs(repo: string): Promise<string[]> {
   const r = await runGit(['config', '--get', 'pull.rebase'], repo);
   return r.code === 0 ? ['pull'] : ['pull', '--no-rebase'];
 }
+
+/** Messages of the page that change the repository (or start a network operation): one at a time, in its repository. */
+const CHANGING_MESSAGES = new Set(['stage', 'unstage', 'discard', 'commit', 'checkout', 'switch', 'restoreStash', 'dropStash', 'merge', 'createBranch', 'switchBranch', 'newBranch', 'deleteBranch', 'mergeBranch', 'pushBranch', 'fetch', 'pull', 'push', 'cherryPick', 'createPull', 'mergePull', 'checkoutPull']);
 
 /** A branch name git accepts and that cannot be read as an option. */
 function safeRef(name: string): boolean {
@@ -352,20 +358,66 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
     return undefined;
   }
 
-  async selectRepo(repo: string): Promise<void> {
-    this.repo = repo;
-    this.search = undefined;
-    this.pulls = {};
-    await this.state.update('refyntra.git.repo', repo);
-    await this.refresh();
+  /** Selects another repository; waits for a changing operation that is running (it stays in its repository). */
+  selectRepo(repo: string): Promise<void> {
+    return this.serial(async () => {
+      this.repo = repo;
+      this.search = undefined;
+      this.pulls = {};
+      await this.state.update('refyntra.git.repo', repo);
+      await this.refresh();
+    });
   }
 
   // ---- running git
 
-  /** Runs git in the repository; on failure shows git's own message (last lines) and returns false. */
+  /** The changing operation running now and the repository it is pinned to (undefined: all repositories). */
+  private readonly operation = new AsyncLocalStorage<{ repo: string | undefined }>();
+  private operations: Promise<unknown> = Promise.resolve();
+
+  /**
+   * Changing operations and repository switches run one at a time (the page sends its messages without waiting for an
+   * answer): one started meanwhile waits. A call made inside an operation (commit & push, switch with a stash) runs at
+   * once, as part of it.
+   */
+  private serial<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.operation.getStore()) return fn();
+    const run = () => this.operation.run({ repo: undefined }, fn);
+    const p = this.operations.then(run, run);
+    this.operations = p.then(
+      () => undefined,
+      () => undefined,
+    );
+    return p;
+  }
+
+  /**
+   * A changing operation in the selected repository, pinned to it: every git command of the operation runs there even
+   * if another repository is selected meanwhile. `shown` is the repository the page showed when the user acted (its
+   * paths and branches belong to it): when another one is selected by the time the operation runs, nothing is done.
+   */
+  private inRepo<T>(fallback: T, fn: (repo: string) => Promise<T>, shown?: string): Promise<T> {
+    const outer = this.operation.getStore()?.repo;
+    if (outer !== undefined) return shown !== undefined && shown !== outer ? Promise.resolve(fallback) : fn(outer);
+    return this.serial(async () => {
+      // The model (changes, branches) must be the selected repository's: a switch may still be reading it.
+      if (!this.repo || this.current.repo !== this.repo) await this.refresh();
+      const repo = this.current.repo;
+      if (!repo || repo !== this.repo) return fallback;
+      if (shown !== undefined && shown !== repo) {
+        void vscode.window.showInformationMessage(`Refyntra: the Git tab now shows ${repoName(repo)}; nothing was done in it. Try again.`);
+        this.post();
+        return fallback;
+      }
+      return this.operation.run({ repo }, () => fn(repo));
+    });
+  }
+
+  /** Runs git in the operation's repository; on failure shows git's own message (last lines) and returns false. */
   private async git(args: string[], what: string, stdin?: string): Promise<{ ok: boolean; stdout: string }> {
-    if (!this.repo) return { ok: false, stdout: '' };
-    const r = await runGit(args, this.repo, stdin);
+    const repo = this.operation.getStore()?.repo;
+    if (!repo) throw new Error(`git ${args[0]} outside a repository operation`);
+    const r = await runGit(args, repo, stdin);
     if (r.code !== 0) {
       const msg = (r.stderr || r.stdout).trim().split('\n').filter(Boolean).slice(-3).join(' ');
       void vscode.window.showErrorMessage(`Refyntra: ${what} failed: ${msg || `git exited with ${r.code}`}`);
@@ -380,10 +432,12 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
 
   /** A network operation (fetch, pull, push): progress in the tab and the window. */
   private async network(label: string, args: string[]): Promise<boolean> {
+    // The operation (its repository) is handed to the progress task explicitly: VS Code calls it.
+    const op = this.operation.getStore() ?? { repo: undefined };
     this.busy = label;
     this.post();
     try {
-      return await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: `Refyntra: ${label}` }, async () => (await this.git(args, label)).ok);
+      return await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: `Refyntra: ${label}` }, () => this.operation.run(op, async () => (await this.git(args, label)).ok));
     } finally {
       this.busy = undefined;
       await this.refresh();
@@ -402,41 +456,54 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
 
   // ---- changes
 
-  async stage(paths: string[]): Promise<void> {
-    if (paths.length === 0) return;
-    await this.git(['add', '--', ...paths], 'stage');
-    await this.refresh();
+  stage(paths: string[]): Promise<void> {
+    if (paths.length === 0) return Promise.resolve();
+    return this.inRepo(undefined, async () => {
+      await this.git(['add', '--', ...paths], 'stage');
+      await this.refresh();
+    });
   }
 
-  async unstage(paths: string[]): Promise<void> {
-    if (paths.length === 0) return;
-    await this.git(['restore', '--staged', '--', ...paths], 'unstage');
-    await this.refresh();
+  unstage(paths: string[]): Promise<void> {
+    if (paths.length === 0) return Promise.resolve();
+    return this.inRepo(undefined, async () => {
+      await this.git(['restore', '--staged', '--', ...paths], 'unstage');
+      await this.refresh();
+    });
   }
 
-  /** Discards working tree changes (asks first): tracked files are restored, untracked ones deleted. */
-  async discard(paths: string[]): Promise<boolean> {
-    if (paths.length === 0 || !this.repo) return false;
-    const untracked = this.current.changes.filter((c) => c.status === '?' && paths.includes(c.path)).map((c) => c.path);
-    const tracked = paths.filter((p) => !untracked.includes(p));
-    if (!(await this.confirm(`Discard the changes of ${paths.length === 1 ? paths[0] : `${paths.length} files`}? ${untracked.length ? 'New files are deleted. ' : ''}This cannot be undone.`, 'Discard'))) return false;
-    if (tracked.length) await this.git(['restore', '--worktree', '--', ...tracked], 'discard');
-    if (untracked.length) await this.git(['clean', '-f', '-q', '--', ...untracked], 'discard');
-    await this.refresh();
-    return true;
+  /**
+   * Discards working tree changes (asks first): tracked files are restored, untracked ones deleted. Only paths that are
+   * changes of the repository the operation runs in; the list is read before the question and not again after it.
+   */
+  discard(paths: string[]): Promise<boolean> {
+    return this.inRepo(false, async () => {
+      const changes = this.current.changes;
+      const listed = [...new Set(paths)].filter((p) => changes.some((c) => c.path === p));
+      if (listed.length === 0) return false;
+      const untracked = changes.filter((c) => c.status === '?' && listed.includes(c.path)).map((c) => c.path);
+      const tracked = listed.filter((p) => !untracked.includes(p));
+      if (!(await this.confirm(`Discard the changes of ${listed.length === 1 ? listed[0] : `${listed.length} files`}? ${untracked.length ? 'New files are deleted. ' : ''}This cannot be undone.`, 'Discard'))) return false;
+      if (tracked.length) await this.git(['restore', '--worktree', '--', ...tracked], 'discard');
+      if (untracked.length) await this.git(['clean', '-f', '-q', '--', ...untracked], 'discard');
+      await this.refresh();
+      return true;
+    });
   }
 
   /** Commits what is staged with the message (and pushes when asked); false when git refuses. */
-  async commit(message: string, push = false): Promise<boolean> {
-    if (!this.repo || !message.trim()) return false;
-    if (!this.current.changes.some((c) => c.staged)) {
-      void vscode.window.showInformationMessage('Refyntra: nothing is staged. Stage files first (+).');
-      return false;
-    }
-    const ok = (await this.git(['commit', '-F', '-'], 'commit', message)).ok;
-    await this.refresh();
-    if (ok && push) return this.push();
-    return ok;
+  commit(message: string, push = false): Promise<boolean> {
+    if (!message.trim()) return Promise.resolve(false);
+    return this.inRepo(false, async () => {
+      if (!this.current.changes.some((c) => c.staged)) {
+        void vscode.window.showInformationMessage('Refyntra: nothing is staged. Stage files first (+).');
+        return false;
+      }
+      const ok = (await this.git(['commit', '-F', '-'], 'commit', message)).ok;
+      await this.refresh();
+      if (ok && push) return this.push();
+      return ok;
+    });
   }
 
   // ---- branches and remotes
@@ -446,38 +513,53 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
    * current branch (a stash Refyntra offers back when the branch is checked out again) or bring them along (git refuses
    * when they collide). 'needsChoice' when changes exist and no mode was given.
    */
-  async switchBranch(branch: string, mode?: 'stash' | 'bring'): Promise<'ok' | 'needsChoice' | 'failed'> {
-    if (!this.repo || !safeRef(branch)) return 'failed';
-    if (this.current.changes.length > 0 && !mode) return 'needsChoice';
-    const from = this.current.head ?? '';
-    if (mode === 'stash' && this.current.changes.length > 0) {
-      const s = await this.git(['stash', 'push', '--include-untracked', '-m', `${STASH_PREFIX}${from}`], 'stash the changes');
-      if (!s.ok) return 'failed';
-    }
-    const ok = await this.checkout(branch);
-    if (!ok && mode === 'stash') {
-      // Switching failed: the changes come back where they were.
-      await this.git(['stash', 'pop'], 'restore the changes');
-      await this.refresh();
-    }
-    return ok ? 'ok' : 'failed';
+  switchBranch(branch: string, mode?: 'stash' | 'bring'): Promise<'ok' | 'needsChoice' | 'failed'> {
+    if (!safeRef(branch)) return Promise.resolve('failed');
+    return this.inRepo<'ok' | 'needsChoice' | 'failed'>('failed', async () => {
+      if (this.current.changes.length > 0 && !mode) return 'needsChoice';
+      const from = this.current.head ?? '';
+      let savedStash: string | undefined;
+      if (mode === 'stash' && this.current.changes.length > 0) {
+        // stash push also succeeds when there is nothing to save. Identify this operation's entry by a unique message,
+        // never assume stash@{0} is ours (an external git process may have changed the stash list).
+        const message = `${randomUUID()} ${STASH_PREFIX}${from}`;
+        const s = await this.git(['stash', 'push', '--include-untracked', '-m', message], 'stash the changes');
+        if (!s.ok) return 'failed';
+        const list = await this.git(['stash', 'list', '--format=%H%x1f%s'], 'identify the saved changes');
+        if (!list.ok) { await this.refresh(); return 'failed'; }
+        savedStash = list.stdout.split('\n').find((line) => line.trimEnd().endsWith(message))?.split('\x1f')[0];
+      }
+      const ok = await this.checkout(branch);
+      if (!ok && savedStash) {
+        // Apply the immutable object id. Keep the recovery entry: dropping a moving stash@{n} could delete another
+        // process's work. An older stash is never applied or dropped, including when stash push was a no-op.
+        const restored = await this.git(['stash', 'apply', savedStash], 'restore the changes');
+        if (restored.ok) void vscode.window.showInformationMessage('Refyntra: the switch failed. Your changes were restored; their recovery stash was kept.');
+        await this.refresh();
+      }
+      return ok ? 'ok' : 'failed';
+    });
   }
 
   /** Brings back the changes left on this branch (git stash pop). */
-  async restoreStash(): Promise<boolean> {
-    const st = this.current.stash;
-    if (!st) return false;
-    const ok = (await this.git(['stash', 'pop', st.ref], 'restore the stashed changes')).ok;
-    await this.refresh();
-    return ok;
+  restoreStash(): Promise<boolean> {
+    return this.inRepo(false, async () => {
+      const st = this.current.stash;
+      if (!st) return false;
+      const ok = (await this.git(['stash', 'pop', st.ref], 'restore the stashed changes')).ok;
+      await this.refresh();
+      return ok;
+    });
   }
 
-  async dropStash(): Promise<boolean> {
-    const st = this.current.stash;
-    if (!st || !(await this.confirm(`Discard the changes stashed on ${st.branch}? This cannot be undone.`, 'Discard'))) return false;
-    const ok = (await this.git(['stash', 'drop', st.ref], 'discard the stash')).ok;
-    await this.refresh();
-    return ok;
+  dropStash(): Promise<boolean> {
+    return this.inRepo(false, async () => {
+      const st = this.current.stash;
+      if (!st || !(await this.confirm(`Discard the changes stashed on ${st.branch}? This cannot be undone.`, 'Discard'))) return false;
+      const ok = (await this.git(['stash', 'drop', st.ref], 'discard the stash')).ok;
+      await this.refresh();
+      return ok;
+    });
   }
 
   /** What merging a branch into the current one would do: commits it brings, files that would conflict. */
@@ -491,76 +573,123 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
     return { commits, conflicts: [...new Set(conflicts)], upToDate: false };
   }
 
-  async checkout(branch: string): Promise<boolean> {
-    if (!safeRef(branch)) return false;
-    // A remote branch (origin/x) without a local one: a local tracking branch named x.
-    const local = this.current.branches.some((b) => b.name === branch);
-    const remote = !local && this.current.remoteBranches.includes(branch);
-    const args = remote ? ['switch', '--track', branch] : ['switch', branch];
-    const ok = (await this.git(args, `checkout ${branch}`)).ok;
-    await this.refresh();
-    return ok;
+  checkout(branch: string): Promise<boolean> {
+    if (!safeRef(branch)) return Promise.resolve(false);
+    return this.inRepo(false, async () => {
+      // A remote branch (origin/x) without a local one: a local tracking branch named x.
+      const local = this.current.branches.some((b) => b.name === branch);
+      const remote = !local && this.current.remoteBranches.includes(branch);
+      const args = remote ? ['switch', '--track', branch] : ['switch', branch];
+      const ok = (await this.git(args, `checkout ${branch}`)).ok;
+      await this.refresh();
+      return ok;
+    });
   }
 
-  async createBranch(name?: string, from?: string, checkout = true): Promise<boolean> {
-    const n = name ?? (await this.input({ title: 'Refyntra: New Branch', prompt: `Name of the new branch${from ? ` (from ${from})` : ' (from the current commit)'}`, validateInput: (v) => (v && safeRef(v) ? undefined : 'Not a valid branch name') }));
-    if (!n || !safeRef(n) || (from && !safeRef(from))) return false;
-    const args = checkout ? ['switch', '-c', n, ...(from ? [from] : [])] : ['branch', n, ...(from ? [from] : [])];
-    const ok = (await this.git(args, `create ${n}`)).ok;
-    await this.refresh();
-    return ok;
+  createBranch(name?: string, from?: string, checkout = true): Promise<boolean> {
+    return this.inRepo(false, async () => {
+      const n = name ?? (await this.input({ title: 'Refyntra: New Branch', prompt: `Name of the new branch${from ? ` (from ${from})` : ' (from the current commit)'}`, validateInput: (v) => (v && safeRef(v) ? undefined : 'Not a valid branch name') }));
+      if (!n || !safeRef(n) || (from && !safeRef(from))) return false;
+      const args = checkout ? ['switch', '-c', n, ...(from ? [from] : [])] : ['branch', n, ...(from ? [from] : [])];
+      const ok = (await this.git(args, `create ${n}`)).ok;
+      await this.refresh();
+      return ok;
+    });
   }
 
-  async deleteBranch(name: string): Promise<boolean> {
-    if (!safeRef(name)) return false;
-    if (!(await this.confirm(`Delete the local branch ${name}?`, 'Delete'))) return false;
-    let r = await runGit(['branch', '-d', name], this.repo!);
-    if (r.code !== 0 && /not fully merged/.test(r.stderr)) {
-      if (!(await this.confirm(`${name} is not fully merged: its commits are lost when it is deleted. Delete anyway?`, 'Delete Anyway'))) return false;
-      r = await runGit(['branch', '-D', name], this.repo!);
-    }
-    if (r.code !== 0) void vscode.window.showErrorMessage(`Refyntra: delete ${name} failed: ${r.stderr.trim()}`);
-    await this.refresh();
-    return r.code === 0;
+  deleteBranch(name: string): Promise<boolean> {
+    if (!safeRef(name)) return Promise.resolve(false);
+    return this.inRepo(false, async (repo) => {
+      if (!(await this.confirm(`Delete the local branch ${name}?`, 'Delete'))) return false;
+      let r = await runGit(['branch', '-d', name], repo);
+      if (r.code !== 0 && /not fully merged/.test(r.stderr)) {
+        if (!(await this.confirm(`${name} is not fully merged: its commits are lost when it is deleted. Delete anyway?`, 'Delete Anyway'))) return false;
+        r = await runGit(['branch', '-D', name], repo);
+      }
+      if (r.code !== 0) void vscode.window.showErrorMessage(`Refyntra: delete ${name} failed: ${r.stderr.trim()}`);
+      await this.refresh();
+      return r.code === 0;
+    });
   }
 
   /** Merges a branch into the current one (a merge commit when it does not fast-forward). */
-  async mergeBranch(name: string, confirmed = false): Promise<boolean> {
-    if (!safeRef(name)) return false;
-    if (!confirmed && !(await this.confirm(`Merge ${name} into ${this.current.head}?`, 'Merge'))) return false;
-    const ok = (await this.git(['merge', '--no-edit', name], `merge ${name}`)).ok;
-    await this.refresh();
-    return ok;
+  mergeBranch(name: string, confirmed = false): Promise<boolean> {
+    if (!safeRef(name)) return Promise.resolve(false);
+    return this.inRepo(false, async () => {
+      if (!confirmed && !(await this.confirm(`Merge ${name} into ${this.current.head}?`, 'Merge'))) return false;
+      const ok = (await this.git(['merge', '--no-edit', name], `merge ${name}`)).ok;
+      await this.refresh();
+      return ok;
+    });
   }
 
   /** Applies one commit onto the current branch (git cherry-pick); a conflict is left for the user to resolve. */
-  async cherryPick(sha: string, confirmed = false): Promise<boolean> {
-    if (!/^[0-9a-f]{7,40}$/i.test(sha)) return false;
-    if (!confirmed && !(await this.confirm(`Cherry-pick ${sha.slice(0, 8)} onto ${this.current.head}?`, 'Cherry-pick'))) return false;
-    const ok = (await this.git(['cherry-pick', sha], `cherry-pick ${sha.slice(0, 8)}`)).ok;
-    await this.refresh();
-    return ok;
+  cherryPick(sha: string, confirmed = false): Promise<boolean> {
+    if (!/^[0-9a-f]{7,40}$/i.test(sha)) return Promise.resolve(false);
+    return this.inRepo(false, async () => {
+      if (!confirmed && !(await this.confirm(`Cherry-pick ${sha.slice(0, 8)} onto ${this.current.head}?`, 'Cherry-pick'))) return false;
+      const ok = (await this.git(['cherry-pick', sha], `cherry-pick ${sha.slice(0, 8)}`)).ok;
+      await this.refresh();
+      return ok;
+    });
   }
 
   fetch(): Promise<boolean> {
-    return this.network('Fetch', ['fetch', '--all', '--prune']);
+    return this.inRepo(false, () => this.network('Fetch', ['fetch', '--all', '--prune']));
   }
 
-  async pull(): Promise<boolean> {
-    return this.network('Pull', await pullArgs(this.repo!));
+  pull(): Promise<boolean> {
+    return this.inRepo(false, async (repo) => this.network('Pull', await pullArgs(repo)));
   }
 
-  /** Pushes the current branch; a branch without an upstream is published to origin. */
-  async push(branch?: string): Promise<boolean> {
-    const name = branch ?? this.current.head;
-    if (!name || name === 'HEAD' || !safeRef(name)) return false;
-    const b = this.current.branches.find((x) => x.name === name);
-    const args = b?.upstream ? ['push', 'origin', name] : ['push', '-u', 'origin', name];
-    return this.network(b?.upstream ? 'Push' : `Publish ${name}`, args);
+  /**
+   * Pushes a branch (the current one by default) where git's configuration sends it: pushRemote / remote.pushDefault /
+   * the upstream's remote, the remote branch by push.default. A branch without an upstream is published (origin, or the
+   * only remote). A push git would refuse is not started; the reason is shown.
+   */
+  push(branch?: string): Promise<boolean> {
+    return this.inRepo(false, async (repo) => {
+      const name = branch ?? this.current.head;
+      if (!name || name === 'HEAD' || !safeRef(name)) return false;
+      const get = async (key: string) => {
+        const r = await runGit(['config', '--get', key], repo);
+        return r.code === 0 ? r.stdout.trim() || undefined : undefined;
+      };
+      const [remote, merge, pushRemote, pushDefaultRemote, pushDefault, remotes] = await Promise.all([
+        get(`branch.${name}.remote`),
+        get(`branch.${name}.merge`),
+        get(`branch.${name}.pushRemote`),
+        get('remote.pushDefault'),
+        get('push.default'),
+        runGit(['remote'], repo),
+      ]);
+      const plan = pushPlan({
+        branch: name,
+        ...(remote ? { remote } : {}),
+        ...(merge ? { merge } : {}),
+        ...(pushRemote ? { pushRemote } : {}),
+        ...(pushDefaultRemote ? { pushDefaultRemote } : {}),
+        ...(pushDefault ? { pushDefault } : {}),
+        remotes: remotes.stdout.split('\n').map((s) => s.trim()).filter(Boolean),
+      });
+      if (!plan.ok) {
+        this.lastError = plan.reason;
+        void vscode.window.showErrorMessage(`Refyntra: push ${name} not started: ${plan.reason}`);
+        return false;
+      }
+      return this.network(plan.label, plan.args);
+    });
   }
 
-  /** Fetch or pull in every repository of the workspace, one after another; a summary per repository. */
-  async allRepos(op: 'fetch' | 'pull', quiet = false): Promise<{ repo: string; ok: boolean; message: string }[]> {
+  /**
+   * Fetch or pull in every repository of the workspace, one after another; a summary per repository. Waits for a
+   * changing operation that is running (and the next one waits for it).
+   */
+  allRepos(op: 'fetch' | 'pull', quiet = false): Promise<{ repo: string; ok: boolean; message: string }[]> {
+    return this.serial(() => this.allReposNow(op, quiet));
+  }
+
+  private async allReposNow(op: 'fetch' | 'pull', quiet: boolean): Promise<{ repo: string; ok: boolean; message: string }[]> {
     const repos = this.current.repos.length ? this.current.repos : (await this.refresh()).repos;
     const results: { repo: string; ok: boolean; message: string }[] = [];
     this.busy = `${op === 'pull' ? 'Pull' : 'Fetch'} all (${repos.length})`;
@@ -706,7 +835,11 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
   }
 
   /** A pull request from the current branch (pushed first when it has no upstream). */
-  async createPull(): Promise<PullRequest | undefined> {
+  createPull(): Promise<PullRequest | undefined> {
+    return this.inRepo(undefined, () => this.createPullNow());
+  }
+
+  private async createPullNow(): Promise<PullRequest | undefined> {
     const head = this.current.head;
     if (!head || head === 'HEAD') return undefined;
     const c = await this.client();
@@ -740,7 +873,11 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  async mergePull(number: number, method: 'merge' | 'squash' | 'rebase' = 'merge'): Promise<boolean> {
+  mergePull(number: number, method: 'merge' | 'squash' | 'rebase' = 'merge'): Promise<boolean> {
+    return this.inRepo(false, () => this.mergePullNow(number, method));
+  }
+
+  private async mergePullNow(number: number, method: 'merge' | 'squash' | 'rebase'): Promise<boolean> {
     const pr = this.pulls.list?.find((p) => p.number === number);
     if (!(await this.confirm(`Merge pull request #${number}${pr ? ` "${pr.title}" (${pr.head} → ${pr.base})` : ''} on GitHub (${method})?`, 'Merge'))) return false;
     const c = await this.client();
@@ -758,15 +895,28 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
   }
 
   /** Checks out a pull request's branch (fetched from origin as pr/<number>). */
-  async checkoutPull(number: number): Promise<boolean> {
-    if (!Number.isInteger(number) || number <= 0) return false;
+  checkoutPull(number: number): Promise<boolean> {
+    if (!Number.isInteger(number) || number <= 0) return Promise.resolve(false);
+    return this.inRepo(false, () => this.checkoutPullNow(number));
+  }
+
+  private async checkoutPullNow(number: number): Promise<boolean> {
     if (!(await this.network(`Fetch #${number}`, ['fetch', 'origin', `pull/${number}/head:pr/${number}`]))) return false;
     return this.checkout(`pr/${number}`);
   }
 
   // ---- messages of the page
 
-  private async onMessage(m: { type: string; [k: string]: unknown }): Promise<void> {
+  /**
+   * A message of the page. Changing ones run one at a time, pinned to the repository the page showed (`forRepo`, sent
+   * with every message): nothing is done when another repository is selected by the time it runs.
+   */
+  private onMessage(m: { type: string; [k: string]: unknown }): Promise<void> {
+    if (!CHANGING_MESSAGES.has(m.type)) return this.handle(m);
+    return this.inRepo(undefined, () => this.handle(m), typeof m.forRepo === 'string' ? m.forRepo : undefined);
+  }
+
+  private async handle(m: { type: string; [k: string]: unknown }): Promise<void> {
     const str = (k: string) => (typeof m[k] === 'string' ? (m[k] as string) : undefined);
     const paths = Array.isArray(m.paths) ? (m.paths as unknown[]).filter((p): p is string => typeof p === 'string') : [];
     switch (m.type) {
@@ -1081,7 +1231,8 @@ body:not(.wide) .changes{flex:1}
 const vs = acquireVsCodeApi();
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
-const send = (m) => vs.postMessage(m);
+// Every message names the repository the page shows: an action is not run in another one selected meanwhile.
+const send = (m) => vs.postMessage(Object.assign({ forRepo: model ? model.repo : undefined }, m));
 const COLORS = ['var(--vscode-charts-blue)','var(--vscode-charts-orange)','var(--vscode-charts-green)','var(--vscode-charts-purple)','var(--vscode-charts-red)','var(--vscode-charts-yellow)'];
 let model = null, tab = (vs.getState() || {}).tab || 'changes', selected = null;
 function renderDiff(path, lines) {

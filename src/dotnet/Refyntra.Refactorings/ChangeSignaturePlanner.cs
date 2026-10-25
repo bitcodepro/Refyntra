@@ -486,8 +486,8 @@ public static class ChangeSignaturePlanner
     /// <summary>
     /// The new argument list of one call site as a function of its current list (same arguments as the original, possibly
     /// with nested call sites already rewritten). Arguments of removed parameters must be free of side effects; when the
-    /// new order would evaluate arguments with side effects in another order, the arguments keep their order as named
-    /// arguments.
+    /// new order moves non-constant arguments, the arguments keep their original evaluation order as named arguments
+    /// (a read may depend on a neighboring argument that changes its value).
     /// </summary>
     private static Func<ArgumentListSyntax, ArgumentListSyntax>? PlanArguments(CallSite c, IReadOnlyList<ParameterSpec> spec, IReadOnlyList<IParameterSymbol> oldParams,
         List<int> removed, Dictionary<int, string> renamed, SemanticModel model, CancellationToken ct, out (string reason, string message)? error)
@@ -513,14 +513,14 @@ public static class ChangeSignaturePlanner
                 }
             }
         }
-        // Emission order of the kept arguments; does the relative order of arguments with side effects change?
+        // Reads of locals and fields can depend on a neighboring call (M(value, Mutate())). Only constants can be
+        // moved freely: when other kept arguments are reordered, preserve their original evaluation order by naming them.
         var keptOrder = new List<int>();
         foreach (var s in spec)
             if (s.From is { } f && c.ArgsByOrdinal.TryGetValue(f, out var idxs)) keptOrder.AddRange(idxs);
-        var impure = keptOrder.Where(i => !CodeFacts.IsSideEffectFree(original[i].Expression, model, ct)).ToList();
-        var orderChanges = impure.Zip(impure.Skip(1), (a, b) => a > b).Any(x => x);
+        var orderChanges = keptOrder.Zip(keptOrder.Skip(1), (a, b) => a > b).Any(x => x);
         // Positional emission: a gap (an omitted optional argument or a new parameter without a call-site value) makes the rest named.
-        var useNamedAll = orderChanges;
+        var useNamedAll = orderChanges && keptOrder.Any(i => !model.GetConstantValue(original[i].Expression, ct).HasValue);
         if (useNamedAll && c.Expanded && c.ArgsByOrdinal.TryGetValue(c.ParamsOrdinal, out var pa) && pa.Count != 1)
         {
             error = ("EvaluationOrder", $"The call at {where} passes a params array in expanded form; its arguments cannot be reordered without changing evaluation order.");
