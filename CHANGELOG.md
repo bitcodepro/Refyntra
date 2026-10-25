@@ -11,7 +11,8 @@ All notable changes are listed here. The project is in preview; every merge to m
   parameter type) swaps with an argument whose value can differ, the arguments keep their original order through named
   arguments. Plain reads and constants without such a conversion still reorder positionally; `M(1, 2)` and
   `M(x, y)` with an `implicit operator V(int)` keep their order, also inside a tuple or nullable conversion (a local
-  `(int, int)` passed as `(V, int)`). An argument whose conversion runs user code is not removed either.
+  `(int, int)` passed as `(V, int)`); tuples nested deeper than the analysis goes count as converting. An argument whose
+  conversion runs user code is not removed either.
 - **Central NuGet updates** write Directory.Packages.props once, refuse stale or unsaved input, keep concurrent edits,
   and report failed or cancelled Restore tasks. Undo also refuses unsaved changes.
 - **Failed Git branch switches** restore only the stash created by that switch, by object id, with its staged state,
@@ -36,8 +37,9 @@ All notable changes are listed here. The project is in preview; every merge to m
 - **Create Pull Request** opens it from where the branch was pushed: the push destination's repository (`pushurl`, not
   the fetch URL) and remote branch name (a differently named upstream); `owner:branch` with that repository only when
   GitHub confirms it is in the target's fork network. A remote with several push URLs, another repository of the same
-  owner, an unrelated repository or a destination not on GitHub is refused before anything is pushed. It used the local
-  branch name on origin.
+  owner, an unrelated repository or a destination not on GitHub is refused before anything is pushed. When git reaches
+  that repository through a URL rewrite to another host (a mirror via insteadOf / pushInsteadOf), the pull request is
+  opened only if GitHub's branch is exactly the commit that was pushed. It used the local branch name on origin.
 
 ### Added (recent)
 

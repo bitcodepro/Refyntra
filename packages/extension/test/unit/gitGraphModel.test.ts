@@ -2,13 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { type GraphCommit, layoutGraph, parseBranches, parseGraphLog, parseStatus, pullHead, pushDestination, pushPlan } from '../../src/gitGraphModel';
 
 describe('push destination: the push URL, not the fetch URL', () => {
-  it('one push URL: its GitHub repository; a transport rewrite (insteadOf) keeps it', () => {
-    expect(pushDestination('origin', ['https://github.com/dana/app-fork.git'], ['git@github.com:dana/app-fork.git'])).toEqual({ ok: true, url: 'git@github.com:dana/app-fork.git', github: { owner: 'dana', repo: 'app-fork' } });
-    expect(pushDestination('origin', ['https://github.com/dana/app-fork.git'], ['/srv/mirror/app.git'])).toMatchObject({ ok: true, url: '/srv/mirror/app.git', github: { owner: 'dana', repo: 'app-fork' } });
-    expect(pushDestination('origin', ['gh:acme/app'], ['https://github.com/acme/app'])).toMatchObject({ ok: true, github: { owner: 'acme', repo: 'app' } });
+  it('one push URL: its GitHub repository, verified when git pushes to a GitHub URL of it (https or ssh)', () => {
+    expect(pushDestination('origin', ['https://github.com/dana/app-fork.git'], ['git@github.com:dana/app-fork.git'])).toEqual({ ok: true, url: 'git@github.com:dana/app-fork.git', github: { owner: 'dana', repo: 'app-fork' }, verified: true });
+    expect(pushDestination('origin', ['gh:acme/app'], ['https://github.com/acme/app'])).toEqual({ ok: true, url: 'https://github.com/acme/app', github: { owner: 'acme', repo: 'app' }, verified: true });
+  });
+  it('a rewrite to another host (a mirror) only claims the repository: not verified', () => {
+    expect(pushDestination('origin', ['https://github.com/dana/app-fork.git'], ['/srv/mirror/app.git'])).toEqual({ ok: true, url: '/srv/mirror/app.git', github: { owner: 'dana', repo: 'app-fork' }, verified: false });
   });
   it('not on GitHub: no repository', () => {
-    expect(pushDestination('origin', ['/srv/git/app.git'], ['/srv/git/app.git'])).toEqual({ ok: true, url: '/srv/git/app.git' });
+    expect(pushDestination('origin', ['/srv/git/app.git'], ['/srv/git/app.git'])).toEqual({ ok: true, url: '/srv/git/app.git', verified: false });
   });
   it('several push URLs, none, or a rewrite to another GitHub repository are refused', () => {
     expect(pushDestination('origin', ['https://github.com/a/x', 'https://github.com/b/x'], ['https://github.com/a/x', 'https://github.com/b/x'])).toMatchObject({ ok: false, reason: expect.stringContaining('2 URLs') });

@@ -1981,6 +1981,12 @@ scenarios['git-client'] = [
           const ok = (body) => ({ ok: true, status: 200, json: async () => body, text: async () => '' });
           if (init.method === 'GET' && url.endsWith('/pulls?state=open&per_page=50')) return ok([pr(5, 'remote-work')]);
           if (init.method === 'GET' && url.endsWith('/repos/acme/shop')) return ok({ default_branch: 'main' });
+          // The pushes reach GitHub's stand-in (the bare repository): its branches are what GitHub reports.
+          const refs = '/repos/acme/shop/git/ref/heads/';
+          if (init.method === 'GET' && url.includes(refs)) {
+            const branch = url.slice(url.indexOf(refs) + refs.length).split('/').map(decodeURIComponent).join('/');
+            return ok({ object: { sha: git(remote, 'rev-parse', `refs/heads/${branch}`).trim() } });
+          }
           if (init.method === 'POST') return ok(pr(6, JSON.parse(init.body).head));
           if (init.method === 'PUT') return ok({ sha: 'abc', merged: true, message: 'ok' });
           return { ok: false, status: 404, json: async () => ({ message: 'Not Found' }), text: async () => '' };

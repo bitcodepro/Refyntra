@@ -514,11 +514,12 @@ public static class ChangeSignaturePlanner
     /// Whether converting a value of <paramref name="source"/> to <paramref name="destination"/> runs a user-defined
     /// conversion inside a tuple or nullable conversion. The operation tree shows only the outer conversion (its element
     /// conversions are not operations), so the element types are classified one by one; a top-level user-defined
-    /// conversion is the caller's check.
+    /// conversion is the caller's check. Nesting deeper than the analysis goes counts as running user code (unknown).
     /// </summary>
     private static bool RunsUserCode(Compilation compilation, ITypeSymbol? source, ITypeSymbol? destination, int depth = 0)
     {
-        if (source == null || destination == null || depth > 16 || SymbolEqualityComparer.Default.Equals(source, destination)) return false;
+        if (source == null || destination == null || SymbolEqualityComparer.Default.Equals(source, destination)) return false;
+        if (depth > 16) return true;
         bool Element(ITypeSymbol from, ITypeSymbol to) => compilation.ClassifyCommonConversion(from, to).IsUserDefined || RunsUserCode(compilation, from, to, depth + 1);
         var s = Unwrap(source);
         var d = Unwrap(destination);

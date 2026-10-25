@@ -76,6 +76,16 @@ export class GitHubClient {
     return (await this.call<{ default_branch: string }>('GET', '')).default_branch;
   }
 
+  /** The commit a branch points to on GitHub; undefined when there is no such branch. */
+  async branchSha(branch: string): Promise<string | undefined> {
+    try {
+      return (await this.call<{ object: { sha: string } }>('GET', `/git/ref/heads/${branch.split('/').map(encodeURIComponent).join('/')}`)).object.sha;
+    } catch (e) {
+      if (e instanceof GitHubError && e.status === 404) return undefined;
+      throw e;
+    }
+  }
+
   /** The repository and its fork network (the root of its forks: `source`, or itself when it is not a fork). */
   async repository(): Promise<{ fullName: string; network: string }> {
     const r = await this.call<{ full_name: string; source?: { full_name: string } }>('GET', '');

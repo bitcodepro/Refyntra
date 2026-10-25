@@ -24,6 +24,7 @@ import {
   pushDestination,
   type PushPlan,
   pushPlan,
+  remoteRepository,
   type SearchMode,
   searchArgs,
 } from './gitGraphModel';
@@ -734,10 +735,10 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
     return pushDestination(remote, configured, await all(['remote', 'get-url', '--push', '--all', remote]));
   }
 
-  /** The GitHub repository a remote fetches from (its first URL, as configured or rewritten by insteadOf). */
-  private async fetchRepositoryOf(repo: string, remote: string): Promise<{ owner: string; repo: string } | undefined> {
-    const configured = (await runGit(['config', '--get-all', `remote.${remote}.url`], repo)).stdout.split('\n')[0] ?? '';
-    return gitHubRepoOf(configured) ?? gitHubRepoOf((await runGit(['remote', 'get-url', remote], repo)).stdout);
+  /** The GitHub repository a remote fetches from (its first URL, as configured and as rewritten by insteadOf). */
+  private async fetchRepositoryOf(repo: string, remote: string): Promise<ReturnType<typeof remoteRepository>> {
+    const configured = (await runGit(['config', '--get-all', `remote.${remote}.url`], repo)).stdout.split('\n')[0]?.trim() ?? '';
+    return remoteRepository(remote, configured, (await runGit(['remote', 'get-url', remote], repo)).stdout.trim());
   }
 
   private refusePush(name: string, reason: string): false {
@@ -927,6 +928,8 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
     let remote: string;
     let ref: string;
     let from: { owner: string; repo: string } | undefined;
+    // false: git talks to another host (a mirror, a local path) that only claims to be `from`.
+    let verified = true;
     if (needsPush) {
       const p = await this.pushTarget(repo, head);
       if (!p.ok) {
@@ -937,11 +940,13 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
       ({ remote, target: ref } = p);
       const dest = await this.pushDestinationOf(repo, remote);
       if (!dest.ok) return refuse(dest.reason);
-      from = dest.github;
+      ({ github: from, verified } = dest);
     } else {
       const get = async (key: string) => (await runGit(['config', '--get', key], repo)).stdout.trim();
       [remote, ref] = await Promise.all([get(`branch.${head}.remote`), get(`branch.${head}.merge`)]);
-      from = remote ? await this.fetchRepositoryOf(repo, remote) : undefined;
+      const source = remote ? await this.fetchRepositoryOf(repo, remote) : undefined;
+      if (source && !source.ok) return refuse(source.reason);
+      if (source) ({ github: from, verified } = source);
     }
     if (!github) {
       await this.client(); // explains that the origin is not on GitHub; nothing is pushed
@@ -965,6 +970,24 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
     }
     const prHead = where.head;
     if (plan && !(await this.pushTo(repo, head, plan))) return undefined;
+    if (!verified) {
+      // An insteadOf rule is no proof that the other host is that GitHub repository: GitHub's branch must be exactly the
+      // commit that was pushed (or, with nothing to push, the upstream commit fetched from that host).
+      const branch = ref.replace(/^refs\/heads\//, '') || head;
+      const expected = (await runGit(['rev-parse', plan ? `refs/heads/${head}` : `${head}@{upstream}`], repo)).stdout.trim();
+      const owner = where.fork ?? github;
+      let actual: string | undefined;
+      try {
+        actual = await (where.fork ? await this.clientFor(where.fork.owner, where.fork.repo) : c).branchSha(branch);
+      } catch (e) {
+        return refuse(`${owner.owner}/${owner.repo} cannot be checked on GitHub: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      if (!expected || actual !== expected) {
+        return refuse(
+          `git ${plan ? 'pushed' : 'fetched'} ${branch} via another URL than GitHub, and ${owner.owner}/${owner.repo} ${actual ? `has ${branch} at ${actual.slice(0, 8)}, not ${expected.slice(0, 8)}` : `has no branch ${branch}`}. Push it to GitHub first.`,
+        );
+      }
+    }
     let base: string;
     try {
       base = await c.defaultBranch();

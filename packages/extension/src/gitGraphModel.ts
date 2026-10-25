@@ -314,21 +314,41 @@ export function pullHead(
 /**
  * Where a push to a remote goes, from git's configuration: `configured` are the remote's push URLs as written
  * (remote.<name>.pushurl, else remote.<name>.url), `effective` the URLs git pushes to after insteadOf / pushInsteadOf.
- * Exactly one destination is required (several push URLs are refused: which one is the pull request's head?); its
+ * Exactly one destination is required (several push URLs are refused: which one is the pull request's head?). Its
  * GitHub repository is the configured URL's, unless the rewritten URL names another GitHub repository (refused).
+ * `verified`: git pushes to a GitHub URL of that repository itself (https or ssh). A rewrite to another host (a mirror,
+ * a local path) only claims the repository: the caller must check on GitHub that the pushed commit is there.
  */
-export function pushDestination(remote: string, configured: string[], effective: string[]): { ok: true; url: string; github?: { owner: string; repo: string } } | { ok: false; reason: string } {
+export function pushDestination(
+  remote: string,
+  configured: string[],
+  effective: string[],
+): { ok: true; url: string; github?: { owner: string; repo: string }; verified: boolean } | { ok: false; reason: string } {
   if (configured.length !== 1 || effective.length !== 1) {
     return { ok: false, reason: configured.length || effective.length ? `${remote} pushes to ${Math.max(configured.length, effective.length)} URLs; push from a terminal.` : `${remote} has no URL to push to.` };
   }
-  const github = gitHubRepoOf(configured[0]!);
-  const rewritten = gitHubRepoOf(effective[0]!);
-  if (github && rewritten && `${rewritten.owner}/${rewritten.repo}`.toLowerCase() !== `${github.owner}/${github.repo}`.toLowerCase()) {
-    return { ok: false, reason: `${remote} is configured as ${github.owner}/${github.repo} but git pushes to ${rewritten.owner}/${rewritten.repo} (url insteadOf); push from a terminal.` };
+  const repo = remoteRepository(remote, configured[0]!, effective[0]!, 'pushes to');
+  return repo.ok ? { ...repo, url: effective[0]! } : repo;
+}
+
+/**
+ * The GitHub repository a remote URL names: as configured, or as rewritten by insteadOf when only the rewrite is a GitHub
+ * URL (a shorthand like gh:acme/app). `verified` when the URL git uses is that repository's own GitHub URL.
+ */
+export function remoteRepository(
+  remote: string,
+  configured: string,
+  effective: string,
+  verb = 'fetches from',
+): { ok: true; github?: { owner: string; repo: string }; verified: boolean } | { ok: false; reason: string } {
+  const github = gitHubRepoOf(configured);
+  const rewritten = gitHubRepoOf(effective);
+  const name = (r: { owner: string; repo: string }) => `${r.owner}/${r.repo}`.toLowerCase();
+  if (github && rewritten && name(rewritten) !== name(github)) {
+    return { ok: false, reason: `${remote} is configured as ${github.owner}/${github.repo} but git ${verb} ${rewritten.owner}/${rewritten.repo} (url insteadOf); push from a terminal.` };
   }
-  // A shorthand that only becomes a GitHub URL after insteadOf (gh:acme/app) names the rewritten repository.
   const repo = github ?? rewritten;
-  return { ok: true, url: effective[0]!, ...(repo ? { github: repo } : {}) };
+  return { ok: true, ...(repo ? { github: repo } : {}), verified: !!rewritten };
 }
 
 export type SearchMode = 'message' | 'code' | 'author';

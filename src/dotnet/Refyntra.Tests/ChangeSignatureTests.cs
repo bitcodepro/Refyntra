@@ -182,6 +182,25 @@ public sealed class ChangeSignatureTests
     }
 
     [Fact]
+    public async Task TuplesNestedBeyondTheAnalysisCountAsConverting()
+    {
+        var (c, dir) = await OpenAsync();
+        await using var _ = c;
+        var file = Lib(dir, "ChangeSignature/ConversionOrder.cs");
+        var before = File.ReadAllText(file);
+        // 18 nested tuples: the counting conversion is deeper than the analysis looks, so the arguments keep their order.
+        var plan = Prepared(await PrepareAtAsync(c, Action, file, "int DeepPair(", 4,
+            Sig(new { from = 1, name = "b" }, new { from = 0, name = "a" })));
+        var after = After(plan, file);
+        var expected = RunConversionOrder(before, "DeepLocals");
+        Assert.Equal(new[] { 12 }, expected);
+        Assert.Equal(expected, RunConversionOrder(after, "DeepLocals"));
+        // ... and such an argument is not removed.
+        Unavailable(await PrepareAtAsync(c, Action, file, "int DeepDropped(", 4, Sig(new { from = 1, name = "kept" })), "ArgumentHasSideEffects");
+        Assert.Equal(new[] { 102 }, RunConversionOrder(before, "DeepDrop"));
+    }
+
+    [Fact]
     public async Task RemovingAnArgumentWithAUserDefinedConversionIsRefused()
     {
         var (c, dir) = await OpenAsync();

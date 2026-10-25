@@ -341,8 +341,11 @@ describe('Git tab: Create Pull Request uses the branch where it was pushed', { t
     return { repo: a, origin };
   }
 
-  /** A fake GitHub: repositories and their fork networks (acme/app is the root); records the pull requests created. */
-  function fakeGitHub(g: GitViewProvider, networks: Record<string, string> = {}): { head: string; base: string; headRepo?: string }[] {
+  /**
+   * A fake GitHub: repositories and their fork networks (acme/app is the root); `copies` are the bare repositories that
+   * hold what GitHub has for a repository (its branches). Records the pull requests created.
+   */
+  function fakeGitHub(g: GitViewProvider, networks: Record<string, string> = {}, copies: Record<string, string> = {}): { head: string; base: string; headRepo?: string }[] {
     const created: { head: string; base: string; headRepo?: string }[] = [];
     const network: Record<string, string> = { 'acme/app': 'acme/app', ...networks };
     g.hooks.github = (owner: string, repo: string) =>
@@ -353,6 +356,15 @@ describe('Git tab: Create Pull Request uses the branch where it was pushed', { t
           const fullName = `${owner}/${repo}`;
           if (!network[fullName]) throw new Error('Not Found');
           return { fullName, network: network[fullName] };
+        },
+        branchSha: async (branch: string) => {
+          const copy = copies[`${owner}/${repo}`];
+          if (!copy) return undefined;
+          try {
+            return git(copy, 'rev-parse', '--verify', '-q', `refs/heads/${branch}`).trim() || undefined;
+          } catch {
+            return undefined;
+          }
         },
         createPull: async (head: string, base: string, title: string, _body: string, _draft?: boolean, headRepo?: string) => {
           created.push({ head, base, ...(headRepo ? { headRepo } : {}) });
@@ -368,11 +380,27 @@ describe('Git tab: Create Pull Request uses the branch where it was pushed', { t
     git(repo, 'config', 'push.default', 'upstream');
     const g = provider();
     await g.refresh();
-    const created = fakeGitHub(g);
-    expect(await g.createPull()).toBeDefined();
+    // Pushes go to the local stand-in through pushInsteadOf: GitHub must show the pushed commit.
+    const created = fakeGitHub(g, {}, { 'acme/app': origin });
+    expect(await g.createPull(), g.lastError).toBeDefined();
     expect(created).toEqual([{ head: 'review', base: 'main' }]);
     expect(subject(origin, 'review')).toBe('Feature work');
     expect(heads(origin)).toEqual(['review']);
+  });
+
+  it('a push rewritten to a mirror (pushInsteadOf): GitHub keeps its old review, so no pull request is opened from it', async () => {
+    const { repo, origin } = onGitHub(); // origin's pushes go to this bare repository: the mirror
+    const onGitHubItself = bare('refyntra-github-');
+    git(repo, 'push', '-q', onGitHubItself, 'main:review'); // what GitHub has: review at Initial
+    git(repo, 'config', 'push.default', 'upstream');
+    const g = provider();
+    await g.refresh();
+    const created = fakeGitHub(g, {}, { 'acme/app': onGitHubItself });
+    expect(await g.createPull()).toBeUndefined();
+    expect(created).toEqual([]);
+    expect(g.lastError).toMatch(/acme\/app has review at [0-9a-f]{8}, not [0-9a-f]{8}/);
+    expect(subject(origin, 'review')).toBe('Feature work'); // the mirror got the push
+    expect(subject(onGitHubItself, 'review')).toBe('Initial');
   });
 
   it('nothing to push: the pull request comes from the upstream branch', async () => {
@@ -396,7 +424,7 @@ describe('Git tab: Create Pull Request uses the branch where it was pushed', { t
     git(repo, 'config', 'push.default', 'upstream');
     const g = provider();
     await g.refresh();
-    const created = fakeGitHub(g, { 'dana/app-fork': 'acme/app' });
+    const created = fakeGitHub(g, { 'dana/app-fork': 'acme/app' }, { 'dana/app-fork': fork });
     expect(await g.createPull(), g.lastError).toBeDefined();
     expect(created).toEqual([{ head: 'dana:review', base: 'main', headRepo: 'app-fork' }]);
     expect(subject(fork, 'review')).toBe('Feature work');
@@ -411,8 +439,8 @@ describe('Git tab: Create Pull Request uses the branch where it was pushed', { t
     git(repo, 'config', 'branch.feature.pushRemote', 'fork');
     const g = provider();
     await g.refresh();
-    const created = fakeGitHub(g, { 'dana/app': 'acme/app' });
-    expect(await g.createPull()).toBeDefined();
+    const created = fakeGitHub(g, { 'dana/app': 'acme/app' }, { 'dana/app': fork });
+    expect(await g.createPull(), g.lastError).toBeDefined();
     expect(created).toEqual([{ head: 'dana:feature', base: 'main', headRepo: 'app' }]);
     expect(heads(fork)).toEqual(['feature']);
     expect(subject(origin, 'review')).toBe('Initial');
