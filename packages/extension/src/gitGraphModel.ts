@@ -140,7 +140,11 @@ export interface PushConfig {
   remotes: string[];
 }
 
-export type PushPlan = { ok: true; args: string[]; label: string } | { ok: false; reason: string };
+/**
+ * `remote` and `target` (a full ref) are where the branch goes. `existingOnly`: push.default "matching" pushes a branch
+ * only to a same-named branch that already exists there; the caller checks the remote first and pushes only then.
+ */
+export type PushPlan = { ok: true; args: string[]; label: string; remote: string; target: string; existingOnly?: true } | { ok: false; reason: string };
 
 const shortHead = (ref: string) => ref.replace(/^refs\/heads\//, '');
 
@@ -150,7 +154,7 @@ const shortHead = (ref: string) => ref.replace(/^refs\/heads\//, '');
  * from push.default. A branch without an upstream is published (-u) to that remote, else origin or the only remote:
  * Publish names its target, as `git push -u <remote> <branch>` does, so push.default (which applies to a push without
  * one) does not stop it. Refused where git refuses (push.default nothing; simple or upstream with a target git would
- * not choose).
+ * not choose); matching never creates a branch on the remote (existingOnly).
  */
 export function pushPlan(c: PushConfig): PushPlan {
   const mode = (c.pushDefault ?? 'simple').toLowerCase();
@@ -159,11 +163,12 @@ export function pushPlan(c: PushConfig): PushPlan {
   if (!c.remote || !c.merge) {
     const remote = pushTo ?? (c.remotes.includes('origin') ? 'origin' : c.remotes.length === 1 ? c.remotes[0] : undefined);
     if (!remote) return { ok: false, reason: c.remotes.length ? `${c.branch} has no upstream and there is no origin; choose a remote with git push -u <remote> ${c.branch}.` : 'The repository has no remote to push to.' };
-    return { ok: true, args: ['push', '-u', remote, `${own}:${own}`], label: `Publish ${c.branch} to ${remote}` };
+    return { ok: true, args: ['push', '-u', remote, `${own}:${own}`], label: `Publish ${c.branch} to ${remote}`, remote, target: own };
   }
   if (mode === 'nothing') return { ok: false, reason: 'push.default is "nothing": git pushes only with an explicit target. Push from a terminal.' };
   const remote = pushTo ?? c.remote;
   const triangular = remote !== c.remote;
+  const existingOnly = mode === 'matching' ? ({ existingOnly: true } as const) : {};
   let target: string;
   if (mode === 'current' || mode === 'matching') target = own;
   else if (mode === 'upstream' || mode === 'tracking') {
@@ -174,7 +179,7 @@ export function pushPlan(c: PushConfig): PushPlan {
   else {
     return { ok: false, reason: `${c.branch} tracks ${c.remote}/${shortHead(c.merge)}, which has another name; with push.default "simple" git refuses this push. Set push.default to "upstream" to push to it, or push from a terminal.` };
   }
-  return { ok: true, args: ['push', remote, `${own}:${target}`], label: `Push ${c.branch} to ${remote}/${shortHead(target)}` };
+  return { ok: true, args: ['push', remote, `${own}:${target}`], label: `Push ${c.branch} to ${remote}/${shortHead(target)}`, remote, target, ...existingOnly };
 }
 
 export interface FileChange {
@@ -282,6 +287,21 @@ export function parsePatch(text: string): DiffLine[] {
 export function gitHubRepoOf(url: string): { owner: string; repo: string } | undefined {
   const m = /^(?:https?:\/\/(?:[^@/]+@)?github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([^/]+)\/([^/]+?)(?:\.git)?\/?$/.exec(url.trim());
   return m ? { owner: m[1]!, repo: m[2]! } : undefined;
+}
+
+/**
+ * The `head` of a GitHub pull request into `base` from `branch` of the repository `from` (the remote the branch was
+ * pushed to): the branch name in the same repository, owner:branch from another owner's repository (a fork). Another
+ * repository of the same owner, or a remote that is not on GitHub, is refused (the head would name the wrong branch).
+ */
+export function pullHead(base: { owner: string; repo: string }, from: { owner: string; repo: string } | undefined, branch: string, remote: string): { ok: true; head: string } | { ok: false; reason: string } {
+  if (!from) return { ok: false, reason: `${branch} is on ${remote}, which is not a GitHub repository.` };
+  const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+  if (same(from.owner, base.owner)) {
+    if (same(from.repo, base.repo)) return { ok: true, head: branch };
+    return { ok: false, reason: `${branch} is on ${from.owner}/${from.repo}, another repository of ${base.owner}; open this pull request on GitHub.` };
+  }
+  return { ok: true, head: `${from.owner}:${branch}` };
 }
 
 export type SearchMode = 'message' | 'code' | 'author';

@@ -20,6 +20,8 @@ import {
   parseNumstat,
   parsePatch,
   parseStatus,
+  pullHead,
+  type PushPlan,
   pushPlan,
   type SearchMode,
   searchArgs,
@@ -675,34 +677,50 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
     return this.inRepo(false, async (repo) => {
       const name = branch ?? this.current.head;
       if (!name || name === 'HEAD' || !safeRef(name)) return false;
-      const get = async (key: string) => {
-        const r = await runGit(['config', '--get', key], repo);
-        return r.code === 0 ? r.stdout.trim() || undefined : undefined;
-      };
-      const [remote, merge, pushRemote, pushDefaultRemote, pushDefault, remotes] = await Promise.all([
-        get(`branch.${name}.remote`),
-        get(`branch.${name}.merge`),
-        get(`branch.${name}.pushRemote`),
-        get('remote.pushDefault'),
-        get('push.default'),
-        runGit(['remote'], repo),
-      ]);
-      const plan = pushPlan({
-        branch: name,
-        ...(remote ? { remote } : {}),
-        ...(merge ? { merge } : {}),
-        ...(pushRemote ? { pushRemote } : {}),
-        ...(pushDefaultRemote ? { pushDefaultRemote } : {}),
-        ...(pushDefault ? { pushDefault } : {}),
-        remotes: remotes.stdout.split('\n').map((s) => s.trim()).filter(Boolean),
-      });
-      if (!plan.ok) {
-        this.lastError = plan.reason;
-        void vscode.window.showErrorMessage(`Refyntra: push ${name} not started: ${plan.reason}`);
-        return false;
-      }
-      return this.network(plan.label, plan.args);
+      const plan = await this.pushTarget(repo, name);
+      return plan.ok ? this.pushTo(repo, name, plan) : this.refusePush(name, plan.reason);
     });
+  }
+
+  /** Where git's configuration sends a push of `name` (see pushPlan). */
+  private async pushTarget(repo: string, name: string): Promise<PushPlan> {
+    const get = async (key: string) => {
+      const r = await runGit(['config', '--get', key], repo);
+      return r.code === 0 ? r.stdout.trim() || undefined : undefined;
+    };
+    const [remote, merge, pushRemote, pushDefaultRemote, pushDefault, remotes] = await Promise.all([
+      get(`branch.${name}.remote`),
+      get(`branch.${name}.merge`),
+      get(`branch.${name}.pushRemote`),
+      get('remote.pushDefault'),
+      get('push.default'),
+      runGit(['remote'], repo),
+    ]);
+    return pushPlan({
+      branch: name,
+      ...(remote ? { remote } : {}),
+      ...(merge ? { merge } : {}),
+      ...(pushRemote ? { pushRemote } : {}),
+      ...(pushDefaultRemote ? { pushDefaultRemote } : {}),
+      ...(pushDefault ? { pushDefault } : {}),
+      remotes: remotes.stdout.split('\n').map((s) => s.trim()).filter(Boolean),
+    });
+  }
+
+  /** Runs a planned push; for push.default "matching" only when the remote already has that branch (git never creates it). */
+  private async pushTo(repo: string, name: string, plan: Extract<PushPlan, { ok: true }>): Promise<boolean> {
+    if (plan.existingOnly) {
+      const r = await runGit(['ls-remote', '--exit-code', '--heads', plan.remote, plan.target], repo);
+      if (r.code === 2) return this.refusePush(name, `push.default is "matching" and ${plan.remote} has no branch ${plan.target.replace(/^refs\/heads\//, '')}; git pushes only to branches that exist there. Publish it from a terminal.`);
+      if (r.code !== 0) return this.refusePush(name, `${plan.remote} cannot be read: ${(r.stderr || r.stdout).trim().split('\n').slice(-1)[0] ?? `git exited with ${r.code}`}`);
+    }
+    return this.network(plan.label, plan.args);
+  }
+
+  private refusePush(name: string, reason: string): false {
+    this.lastError = reason;
+    void vscode.window.showErrorMessage(`Refyntra: push ${name} not started: ${reason}`);
+    return false;
   }
 
   /**
@@ -858,34 +876,63 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
     return this.pulls.list ?? [];
   }
 
-  /** A pull request from the current branch (pushed first when it has no upstream). */
+  /** A pull request from the current branch (pushed first when it has no upstream or is ahead of it). */
   createPull(): Promise<PullRequest | undefined> {
-    return this.inRepo(undefined, () => this.createPullNow());
+    return this.inRepo(undefined, (repo) => this.createPullNow(repo));
   }
 
-  private async createPullNow(): Promise<PullRequest | undefined> {
+  private async createPullNow(repo: string): Promise<PullRequest | undefined> {
     const head = this.current.head;
+    const github = this.current.github;
     if (!head || head === 'HEAD') return undefined;
-    const c = await this.client();
-    if (!c) return undefined;
+    // The pull request's head is where the branch is on GitHub: where the push sends it, or its upstream when nothing is
+    // to push (a differently named remote branch, another remote). Resolved and checked before anything is pushed.
     const b = this.current.branches.find((x) => x.name === head);
-    if (!b?.upstream || b.ahead > 0) {
-      if (!(await this.push(head))) return undefined;
+    const needsPush = !b?.upstream || b.ahead > 0;
+    let plan: Extract<PushPlan, { ok: true }> | undefined;
+    let remote: string;
+    let ref: string;
+    if (needsPush) {
+      const p = await this.pushTarget(repo, head);
+      if (!p.ok) {
+        this.refusePush(head, p.reason);
+        return undefined;
+      }
+      plan = p;
+      ({ remote, target: ref } = p);
+    } else {
+      const get = async (key: string) => (await runGit(['config', '--get', key], repo)).stdout.trim();
+      [remote, ref] = await Promise.all([get(`branch.${head}.remote`), get(`branch.${head}.merge`)]);
     }
+    let prHead: string | undefined;
+    if (github) {
+      const from = remote ? gitHubRepoOf((await runGit(['remote', 'get-url', remote], repo)).stdout) : undefined;
+      const where = pullHead(github, from, ref.replace(/^refs\/heads\//, '') || head, remote || 'no remote');
+      if (!where.ok) {
+        this.lastError = where.reason;
+        void vscode.window.showErrorMessage(`Refyntra: the pull request was not created: ${where.reason}`);
+        return undefined;
+      }
+      prHead = where.head;
+    }
+    // Without a GitHub origin the client explains that and nothing is pushed.
+    const c = await this.client();
+    if (!c || !prHead) return undefined;
+    if (plan && !(await this.pushTo(repo, head, plan))) return undefined;
     let base: string;
     try {
       base = await c.defaultBranch();
     } catch {
       base = 'main';
     }
-    const baseAnswer = await this.input({ title: 'Refyntra: Create Pull Request', prompt: `Merge ${head} into`, value: base });
+    const baseAnswer = await this.input({ title: 'Refyntra: Create Pull Request', prompt: `Merge ${prHead} into`, value: base });
     if (!baseAnswer) return undefined;
     const lastSubject = this.current.rows.find((r) => r.commit.refs.some((x) => x.includes(head)))?.commit.subject ?? head;
     const title = await this.input({ title: 'Refyntra: Create Pull Request', prompt: 'Title', value: lastSubject });
     if (!title) return undefined;
     const body = (await this.input({ title: 'Refyntra: Create Pull Request', prompt: 'Description (optional)', value: '' })) ?? '';
     try {
-      const pr = await c.createPull(head, baseAnswer, title, body);
+      const pr = await c.createPull(prHead, baseAnswer, title, body);
       void vscode.window.showInformationMessage(`Refyntra: pull request #${pr.number} created.`, 'Open').then((a) => {
         if (a) void vscode.env.openExternal(vscode.Uri.parse(pr.url));
       });

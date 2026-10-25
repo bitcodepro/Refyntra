@@ -147,6 +147,47 @@ public sealed class ChangeSignatureTests
     }
 
     [Fact]
+    public async Task ReorderPreservesUserDefinedConversionOrder()
+    {
+        var (c, dir) = await OpenAsync();
+        await using var _ = c;
+        var file = Lib(dir, "ChangeSignature/ConversionOrder.cs");
+        var before = File.ReadAllText(file);
+        var plan = Prepared(await PrepareAtAsync(c, Action, file, "int Pair(CountedValue a", 4,
+            Sig(new { from = 1, name = "b" }, new { from = 0, name = "a" })));
+        var after = After(plan, file);
+
+        static int[] Run(string source)
+        {
+            var compilation = CSharpCompilation.Create("SignatureConversion" + Guid.NewGuid().ToString("N"),
+                new[] { CSharpSyntaxTree.ParseText(source) },
+                new[] { MetadataReference.CreateFromFile(typeof(object).Assembly.Location) },
+                new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+            using var stream = new MemoryStream();
+            var emitted = compilation.Emit(stream);
+            Assert.True(emitted.Success, string.Join("\n", emitted.Diagnostics));
+            var type = Assembly.Load(stream.ToArray()).GetType("SignatureConversionOrder")!;
+            return new[] { "Literals", "Locals" }.Select(name => (int)type.GetMethod(name)!.Invoke(null, null)!).ToArray();
+        }
+
+        // The conversion int → CountedValue counts: the argument converted first gets N = 1. Literals and plain locals
+        // look effect-free by their syntax, but swapping them positionally would give 21.
+        var expected = Run(before);
+        Assert.Equal(new[] { 12, 12 }, expected);
+        Assert.Equal(expected, Run(after));
+    }
+
+    [Fact]
+    public async Task RemovingAnArgumentWithAUserDefinedConversionIsRefused()
+    {
+        var (c, dir) = await OpenAsync();
+        await using var _ = c;
+        var file = Lib(dir, "ChangeSignature/ConversionOrder.cs");
+        // Dropped(1, 2): the literal 1 runs the counting conversion; removing it would change CountedValue.Count.
+        Unavailable(await PrepareAtAsync(c, Action, file, "int Dropped(CountedValue unused", 4, Sig(new { from = 1, name = "kept" })), "ArgumentHasSideEffects");
+    }
+
+    [Fact]
     public async Task RemovalRefusals()
     {
         var (c, dir) = await OpenAsync();

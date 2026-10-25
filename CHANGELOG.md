@@ -7,8 +7,11 @@ All notable changes are listed here. The project is in preview; every merge to m
 ### Fixed (safety of applied changes)
 
 - **Change Signature** preserves evaluation order when reordered arguments read values changed by another argument:
-  when an argument that may have side effects (a call, an assignment, `ref` / `out`) swaps with a non-constant one, the
-  arguments keep their original order through named arguments. Plain reads and constants still reorder positionally.
+  when an argument that may have side effects (a call, an assignment, `ref` / `out`, a user-defined conversion into the
+  parameter type) swaps with an argument whose value can differ, the arguments keep their original order through named
+  arguments. Plain reads and constants without such a conversion still reorder positionally; `M(1, 2)` and
+  `M(x, y)` with an `implicit operator V(int)` keep their order. An argument whose conversion runs user code is not
+  removed either.
 - **Central NuGet updates** write Directory.Packages.props once, refuse stale or unsaved input, keep concurrent edits,
   and report failed or cancelled Restore tasks. Undo also refuses unsaved changes.
 - **Failed Git branch switches** restore only the stash created by that switch, by object id, with its staged state,
@@ -28,7 +31,10 @@ All notable changes are listed here. The project is in preview; every merge to m
   only paths that are changes of that repository (a Discard could finish in another repository after a switch).
 - **Git tab Push** follows git's configuration: `branch.<name>.pushRemote`, `remote.pushDefault`, the upstream's remote
   and branch, and `push.default` (a push git would refuse is not started). It pushed `origin <branch>` whatever the
-  upstream was.
+  upstream was. With `push.default=matching` a branch is pushed only to a same-named branch the remote already has.
+- **Create Pull Request** opens it from where the branch was pushed: the remote branch name (a differently named
+  upstream), `owner:branch` for a push remote on another owner's fork; another repository of the same owner or a remote
+  not on GitHub is refused before anything is pushed. It used the local branch name on origin.
 
 ### Added (recent)
 

@@ -484,6 +484,32 @@ public static class ChangeSignaturePlanner
     }
 
     /// <summary>
+    /// The arguments of a call (indexes into <paramref name="original"/>) whose evaluation runs a user-defined conversion:
+    /// into the parameter type or anywhere inside the argument. Such an argument has effects even when its syntax is a
+    /// literal or a plain read (M(1, 2) with an implicit operator V(int) that counts). Null when the call cannot be
+    /// analyzed: then every argument counts as converted.
+    /// </summary>
+    private static HashSet<int>? ConvertingArguments(SyntaxNode call, IReadOnlyList<ArgumentSyntax> original, SemanticModel model, CancellationToken ct)
+    {
+        if (original.Count == 0) return new HashSet<int>();
+        if (model.GetOperation(call, ct) is not { } op) return null;
+        var found = new HashSet<int>();
+        foreach (var o in op.DescendantsAndSelf())
+        {
+            var userDefined = o switch
+            {
+                IConversionOperation conversion => conversion.Conversion.IsUserDefined,
+                IArgumentOperation argument => argument.InConversion.IsUserDefined || argument.OutConversion.IsUserDefined,
+                _ => false,
+            };
+            if (!userDefined || o.Syntax == null) continue;
+            for (var i = 0; i < original.Count; i++)
+                if (original[i].Span.Contains(o.Syntax.Span)) found.Add(i);
+        }
+        return found;
+    }
+
+    /// <summary>
     /// The new argument list of one call site as a function of its current list (same arguments as the original, possibly
     /// with nested call sites already rewritten). Arguments of removed parameters must be free of side effects; when the
     /// new order swaps an argument that may have side effects with a non-constant one, the arguments keep their original
@@ -495,6 +521,9 @@ public static class ChangeSignaturePlanner
         error = null;
         var original = c.Args?.Arguments.ToList() ?? new List<ArgumentSyntax>();
         var where = CodeFacts.Label(c.Node.GetLocation());
+        var converting = ConvertingArguments(c.Node, original, model, ct);
+        // An argument converted by user code runs that code when it is evaluated, whatever its syntax (a literal, a read).
+        bool Converts(int i) => converting == null || converting.Contains(i);
         foreach (var r in removed)
         {
             if (!c.ArgsByOrdinal.TryGetValue(r, out var idxs)) continue;
@@ -506,7 +535,7 @@ public static class ChangeSignaturePlanner
                     error = ("RefOutParameter", $"The argument of {oldParams[r].Name} at {where} is passed by reference.");
                     return null;
                 }
-                if (!CodeFacts.IsSideEffectFree(a.Expression, model, ct))
+                if (!CodeFacts.IsSideEffectFree(a.Expression, model, ct) || Converts(i))
                 {
                     error = ("ArgumentHasSideEffects", $"The argument '{a.Expression}' for {oldParams[r].Name} at {where} may have side effects; removing it could change behavior. Make it a local variable first.");
                     return null;
@@ -514,14 +543,16 @@ public static class ChangeSignaturePlanner
             }
         }
         // Reads of locals and fields can depend on a neighboring call (M(value, Mutate())), so an argument that may have side
-        // effects (a call, an assignment, ref / out) keeps its place relative to every non-constant argument. Two reads, or
-        // a read and a constant, may swap: nothing between them changes a value. Such a swap is kept by naming the arguments.
+        // effects (a call, an assignment, ref / out, a user-defined conversion) keeps its place relative to every argument
+        // whose value can differ. Two plain reads, or a read and a constant, may swap: nothing between them runs code. Such
+        // a swap is kept by naming the arguments.
         var keptOrder = new List<int>();
         foreach (var s in spec)
             if (s.From is { } f && c.ArgsByOrdinal.TryGetValue(f, out var idxs)) keptOrder.AddRange(idxs);
         bool Effects(int i) => !original[i].RefKindKeyword.IsKind(SyntaxKind.None) && !original[i].RefKindKeyword.IsKind(SyntaxKind.InKeyword)
-            || !CodeFacts.IsSideEffectFree(original[i].Expression, model, ct);
-        bool Varies(int i) => !model.GetConstantValue(original[i].Expression, ct).HasValue;
+            || !CodeFacts.IsSideEffectFree(original[i].Expression, model, ct) || Converts(i);
+        // A converted constant varies too: the conversion's result depends on when it runs (implicit operator V(int) => ++n).
+        bool Varies(int i) => Converts(i) || !model.GetConstantValue(original[i].Expression, ct).HasValue;
         var orderMatters = false;
         for (var p = 0; p < keptOrder.Count && !orderMatters; p++)
             for (var q = p + 1; q < keptOrder.Count && !orderMatters; q++)
