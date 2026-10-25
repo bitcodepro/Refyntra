@@ -60,8 +60,9 @@ export class GitHubClient {
     return list.map(toPull);
   }
 
-  async createPull(head: string, base: string, title: string, body: string, draft = false): Promise<PullRequest> {
-    return toPull(await this.call<RawPull>('POST', '/pulls', { head, base, title, body, draft }));
+  /** `headRepo`: the repository of a cross-repository head (owner:branch), so GitHub does not have to guess it. */
+  async createPull(head: string, base: string, title: string, body: string, draft = false, headRepo?: string): Promise<PullRequest> {
+    return toPull(await this.call<RawPull>('POST', '/pulls', { head, base, title, body, draft, ...(headRepo ? { head_repo: headRepo } : {}) }));
   }
 
   /** Merges a pull request (merge commit, squash or rebase); the merge commit's sha. */
@@ -73,6 +74,12 @@ export class GitHubClient {
 
   async defaultBranch(): Promise<string> {
     return (await this.call<{ default_branch: string }>('GET', '')).default_branch;
+  }
+
+  /** The repository and its fork network (the root of its forks: `source`, or itself when it is not a fork). */
+  async repository(): Promise<{ fullName: string; network: string }> {
+    const r = await this.call<{ full_name: string; source?: { full_name: string } }>('GET', '');
+    return { fullName: r.full_name, network: r.source?.full_name ?? r.full_name };
   }
 }
 

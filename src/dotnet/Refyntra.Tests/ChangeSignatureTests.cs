@@ -157,24 +157,28 @@ public sealed class ChangeSignatureTests
             Sig(new { from = 1, name = "b" }, new { from = 0, name = "a" })));
         var after = After(plan, file);
 
-        static int[] Run(string source)
-        {
-            var compilation = CSharpCompilation.Create("SignatureConversion" + Guid.NewGuid().ToString("N"),
-                new[] { CSharpSyntaxTree.ParseText(source) },
-                new[] { MetadataReference.CreateFromFile(typeof(object).Assembly.Location) },
-                new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
-            using var stream = new MemoryStream();
-            var emitted = compilation.Emit(stream);
-            Assert.True(emitted.Success, string.Join("\n", emitted.Diagnostics));
-            var type = Assembly.Load(stream.ToArray()).GetType("SignatureConversionOrder")!;
-            return new[] { "Literals", "Locals" }.Select(name => (int)type.GetMethod(name)!.Invoke(null, null)!).ToArray();
-        }
-
         // The conversion int → CountedValue counts: the argument converted first gets N = 1. Literals and plain locals
         // look effect-free by their syntax, but swapping them positionally would give 21.
-        var expected = Run(before);
+        var expected = RunConversionOrder(before, "Literals", "Locals");
         Assert.Equal(new[] { 12, 12 }, expected);
-        Assert.Equal(expected, Run(after));
+        Assert.Equal(expected, RunConversionOrder(after, "Literals", "Locals"));
+    }
+
+    [Fact]
+    public async Task ReorderPreservesConversionOrderInsideTuples()
+    {
+        var (c, dir) = await OpenAsync();
+        await using var _ = c;
+        var file = Lib(dir, "ChangeSignature/ConversionOrder.cs");
+        var before = File.ReadAllText(file);
+        var plan = Prepared(await PrepareAtAsync(c, Action, file, "int TuplePair((CountedValue", 4,
+            Sig(new { from = 1, name = "b" }, new { from = 0, name = "a" })));
+        var after = After(plan, file);
+        // Locals of type (int, int) passed as (CountedValue, int): the element conversion counts, though the operation
+        // tree shows only the outer tuple conversion.
+        var expected = RunConversionOrder(before, "TupleLocals");
+        Assert.Equal(new[] { 12 }, expected);
+        Assert.Equal(expected, RunConversionOrder(after, "TupleLocals"));
     }
 
     [Fact]
@@ -185,6 +189,23 @@ public sealed class ChangeSignatureTests
         var file = Lib(dir, "ChangeSignature/ConversionOrder.cs");
         // Dropped(1, 2): the literal 1 runs the counting conversion; removing it would change CountedValue.Count.
         Unavailable(await PrepareAtAsync(c, Action, file, "int Dropped(CountedValue unused", 4, Sig(new { from = 1, name = "kept" })), "ArgumentHasSideEffects");
+        // TupleDropped(x, 2) with a local (int, int): the conversion of its first element counts too.
+        Unavailable(await PrepareAtAsync(c, Action, file, "int TupleDropped((CountedValue", 4, Sig(new { from = 1, name = "kept" })), "ArgumentHasSideEffects");
+        Assert.Equal(new[] { 102 }, RunConversionOrder(File.ReadAllText(file), "TupleDrop"));
+    }
+
+    /// <summary>Compiles the fixture source and runs the parameterless static methods of SignatureConversionOrder.</summary>
+    private static int[] RunConversionOrder(string source, params string[] methods)
+    {
+        var compilation = CSharpCompilation.Create("SignatureConversion" + Guid.NewGuid().ToString("N"),
+            new[] { CSharpSyntaxTree.ParseText(source) },
+            new[] { MetadataReference.CreateFromFile(typeof(object).Assembly.Location) },
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        using var stream = new MemoryStream();
+        var emitted = compilation.Emit(stream);
+        Assert.True(emitted.Success, string.Join("\n", emitted.Diagnostics));
+        var type = Assembly.Load(stream.ToArray()).GetType("SignatureConversionOrder")!;
+        return methods.Select(name => (int)type.GetMethod(name)!.Invoke(null, null)!).ToArray();
     }
 
     [Fact]

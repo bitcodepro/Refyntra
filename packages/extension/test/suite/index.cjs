@@ -1968,9 +1968,10 @@ scenarios['git-client'] = [
         assert.equal(g.watchdogState().live, 0, 'no watchdog left after closing the Git tab and a commit panel');
         await new Promise((r) => setTimeout(r, 11000));
         assert.equal(g.watchdogState().notices, notices, 'no delayed notice for closed views');
-        // Pull requests against a fake GitHub (no network): origin must be on GitHub.
+        // Pull requests against a fake GitHub (no network): origin must be on GitHub, fetch and push. Pushes reach the local
+        // bare repository through a transport rewrite (pushInsteadOf); a pushurl elsewhere would be another destination.
         git(root, 'remote', 'set-url', 'origin', 'https://github.com/acme/shop.git');
-        git(root, 'remote', 'set-url', '--push', 'origin', remote);
+        git(root, 'config', `url.${remote}.pushInsteadOf`, 'https://github.com/acme/shop.git');
         await g.refresh();
         assert.deepEqual(g.model().github, { owner: 'acme', repo: 'shop' });
         const calls = [];

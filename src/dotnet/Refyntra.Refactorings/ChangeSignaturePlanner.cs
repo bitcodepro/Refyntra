@@ -486,8 +486,9 @@ public static class ChangeSignaturePlanner
     /// <summary>
     /// The arguments of a call (indexes into <paramref name="original"/>) whose evaluation runs a user-defined conversion:
     /// into the parameter type or anywhere inside the argument. Such an argument has effects even when its syntax is a
-    /// literal or a plain read (M(1, 2) with an implicit operator V(int) that counts). Null when the call cannot be
-    /// analyzed: then every argument counts as converted.
+    /// literal or a plain read (M(1, 2) with an implicit operator V(int) that counts), and when the conversion is one
+    /// element of a tuple conversion (a local (int, int) passed as (V, int)). Null when the call cannot be analyzed: then
+    /// every argument counts as converted.
     /// </summary>
     private static HashSet<int>? ConvertingArguments(SyntaxNode call, IReadOnlyList<ArgumentSyntax> original, SemanticModel model, CancellationToken ct)
     {
@@ -498,7 +499,7 @@ public static class ChangeSignaturePlanner
         {
             var userDefined = o switch
             {
-                IConversionOperation conversion => conversion.Conversion.IsUserDefined,
+                IConversionOperation conversion => conversion.Conversion.IsUserDefined || RunsUserCode(model.Compilation, conversion.Operand.Type, conversion.Type),
                 IArgumentOperation argument => argument.InConversion.IsUserDefined || argument.OutConversion.IsUserDefined,
                 _ => false,
             };
@@ -507,6 +508,26 @@ public static class ChangeSignaturePlanner
                 if (original[i].Span.Contains(o.Syntax.Span)) found.Add(i);
         }
         return found;
+    }
+
+    /// <summary>
+    /// Whether converting a value of <paramref name="source"/> to <paramref name="destination"/> runs a user-defined
+    /// conversion inside a tuple or nullable conversion. The operation tree shows only the outer conversion (its element
+    /// conversions are not operations), so the element types are classified one by one; a top-level user-defined
+    /// conversion is the caller's check.
+    /// </summary>
+    private static bool RunsUserCode(Compilation compilation, ITypeSymbol? source, ITypeSymbol? destination, int depth = 0)
+    {
+        if (source == null || destination == null || depth > 16 || SymbolEqualityComparer.Default.Equals(source, destination)) return false;
+        bool Element(ITypeSymbol from, ITypeSymbol to) => compilation.ClassifyCommonConversion(from, to).IsUserDefined || RunsUserCode(compilation, from, to, depth + 1);
+        var s = Unwrap(source);
+        var d = Unwrap(destination);
+        if (s is INamedTypeSymbol { IsTupleType: true } st && d is INamedTypeSymbol { IsTupleType: true } dt)
+            return st.TupleElements.Length != dt.TupleElements.Length || st.TupleElements.Zip(dt.TupleElements, (a, b) => Element(a.Type, b.Type)).Any(x => x);
+        // A lifted conversion (int? → V?) runs the conversion of the underlying types.
+        return (!SymbolEqualityComparer.Default.Equals(s, source) || !SymbolEqualityComparer.Default.Equals(d, destination)) && Element(s, d);
+
+        static ITypeSymbol Unwrap(ITypeSymbol t) => t is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } n ? n.TypeArguments[0] : t;
     }
 
     /// <summary>

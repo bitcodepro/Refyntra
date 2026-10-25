@@ -1,13 +1,29 @@
 import { describe, expect, it } from 'vitest';
-import { type GraphCommit, layoutGraph, parseBranches, parseGraphLog, parseStatus, pullHead, pushPlan } from '../../src/gitGraphModel';
+import { type GraphCommit, layoutGraph, parseBranches, parseGraphLog, parseStatus, pullHead, pushDestination, pushPlan } from '../../src/gitGraphModel';
+
+describe('push destination: the push URL, not the fetch URL', () => {
+  it('one push URL: its GitHub repository; a transport rewrite (insteadOf) keeps it', () => {
+    expect(pushDestination('origin', ['https://github.com/dana/app-fork.git'], ['git@github.com:dana/app-fork.git'])).toEqual({ ok: true, url: 'git@github.com:dana/app-fork.git', github: { owner: 'dana', repo: 'app-fork' } });
+    expect(pushDestination('origin', ['https://github.com/dana/app-fork.git'], ['/srv/mirror/app.git'])).toMatchObject({ ok: true, url: '/srv/mirror/app.git', github: { owner: 'dana', repo: 'app-fork' } });
+    expect(pushDestination('origin', ['gh:acme/app'], ['https://github.com/acme/app'])).toMatchObject({ ok: true, github: { owner: 'acme', repo: 'app' } });
+  });
+  it('not on GitHub: no repository', () => {
+    expect(pushDestination('origin', ['/srv/git/app.git'], ['/srv/git/app.git'])).toEqual({ ok: true, url: '/srv/git/app.git' });
+  });
+  it('several push URLs, none, or a rewrite to another GitHub repository are refused', () => {
+    expect(pushDestination('origin', ['https://github.com/a/x', 'https://github.com/b/x'], ['https://github.com/a/x', 'https://github.com/b/x'])).toMatchObject({ ok: false, reason: expect.stringContaining('2 URLs') });
+    expect(pushDestination('origin', [], [])).toMatchObject({ ok: false, reason: expect.stringContaining('no URL') });
+    expect(pushDestination('origin', ['https://github.com/acme/app'], ['https://github.com/eve/app'])).toMatchObject({ ok: false, reason: expect.stringContaining('eve/app') });
+  });
+});
 
 describe('pull request head: where the branch was pushed', () => {
   const base = { owner: 'acme', repo: 'app' };
   it('the same repository: the remote branch name (not the local one)', () => {
     expect(pullHead(base, { owner: 'Acme', repo: 'App' }, 'review', 'origin')).toEqual({ ok: true, head: 'review' });
   });
-  it("another owner's repository (a fork): owner:branch", () => {
-    expect(pullHead(base, { owner: 'dana', repo: 'app-fork' }, 'feature', 'fork')).toEqual({ ok: true, head: 'dana:feature' });
+  it("another owner's repository: owner:branch with its repository, to be confirmed as a fork through GitHub", () => {
+    expect(pullHead(base, { owner: 'dana', repo: 'app-fork' }, 'feature', 'fork')).toEqual({ ok: true, head: 'dana:feature', headRepo: 'app-fork', fork: { owner: 'dana', repo: 'app-fork' } });
   });
   it('another repository of the same owner, or a remote not on GitHub, is refused', () => {
     expect(pullHead(base, { owner: 'acme', repo: 'other' }, 'feature', 'mirror')).toMatchObject({ ok: false, reason: expect.stringContaining('acme/other') });

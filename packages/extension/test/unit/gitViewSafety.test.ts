@@ -296,6 +296,22 @@ describe('Git tab: Push follows the configured upstream and push settings', { ti
     expect(await g.push()).toBe(true);
     expect(git(upstream, 'log', '-1', '--format=%s', 'feature').trim()).toBe('Feature work');
   });
+
+  it('push.default=matching checks the push URL, not the fetch URL: a branch only the fetch side has is not created', async () => {
+    const { repo, upstream } = withRemotes();
+    const pushed = fs.mkdtempSync(path.join(os.tmpdir(), 'refyntra-pushed-'));
+    roots.push(pushed);
+    git(pushed, 'init', '-q', '--bare', '-b', 'main');
+    git(upstream, 'branch', 'feature', 'review'); // the fetch URL has feature
+    git(repo, 'config', 'remote.upstream.pushurl', pushed); // pushes go elsewhere, where there is no feature
+    git(repo, 'config', 'push.default', 'matching');
+    const g = provider();
+    await g.refresh();
+    expect(await g.push()).toBe(false);
+    expect(g.lastError).toMatch(/matching.*has no branch feature/);
+    expect(heads(pushed)).toEqual([]);
+    expect(git(upstream, 'log', '-1', '--format=%s', 'feature').trim()).toBe('Initial');
+  });
 });
 
 describe('Git tab: Create Pull Request uses the branch where it was pushed', { timeout: 30000 }, () => {
@@ -306,13 +322,16 @@ describe('Git tab: Create Pull Request uses the branch where it was pushed', { t
     return dir;
   };
   const heads = (dir: string) => git(dir, 'for-each-ref', '--format=%(refname:short)', 'refs/heads').split('\n').filter(Boolean).sort();
+  const subject = (dir: string, branch: string) => git(dir, 'log', '-1', '--format=%s', branch).trim();
+  /** Pushes to the GitHub `url` go to the local bare repository `dir` (url.<dir>.pushInsteadOf: a transport rewrite). */
+  const pushesTo = (repo: string, url: string, dir: string) => git(repo, 'config', '--add', `url.${dir}.pushInsteadOf`, url);
 
-  /** Local feature tracks origin/review; origin is github.com/acme/app, its pushes go to a local bare repository. */
+  /** Local feature tracks origin/review; origin is github.com/acme/app (fetch and push), pushed into a local bare repository. */
   function onGitHub(): { repo: string; origin: string } {
     const { a } = twoRepos();
     const origin = bare('refyntra-origin-');
     git(a, 'remote', 'add', 'origin', 'https://github.com/acme/app.git');
-    git(a, 'config', 'remote.origin.pushurl', origin);
+    pushesTo(a, 'https://github.com/acme/app.git', origin);
     git(a, 'push', '-q', 'origin', 'main:review');
     git(a, 'update-ref', 'refs/remotes/origin/review', 'main');
     git(a, 'switch', '-q', '-c', 'feature');
@@ -322,15 +341,21 @@ describe('Git tab: Create Pull Request uses the branch where it was pushed', { t
     return { repo: a, origin };
   }
 
-  /** A fake GitHub that records the pull requests it is asked to create. */
-  function fakeGitHub(g: GitViewProvider): { head: string; base: string }[] {
-    const created: { head: string; base: string }[] = [];
-    g.hooks.github = () =>
+  /** A fake GitHub: repositories and their fork networks (acme/app is the root); records the pull requests created. */
+  function fakeGitHub(g: GitViewProvider, networks: Record<string, string> = {}): { head: string; base: string; headRepo?: string }[] {
+    const created: { head: string; base: string; headRepo?: string }[] = [];
+    const network: Record<string, string> = { 'acme/app': 'acme/app', ...networks };
+    g.hooks.github = (owner: string, repo: string) =>
       ({
         defaultBranch: async () => 'main',
         openPulls: async () => [],
-        createPull: async (head: string, base: string, title: string) => {
-          created.push({ head, base });
+        repository: async () => {
+          const fullName = `${owner}/${repo}`;
+          if (!network[fullName]) throw new Error('Not Found');
+          return { fullName, network: network[fullName] };
+        },
+        createPull: async (head: string, base: string, title: string, _body: string, _draft?: boolean, headRepo?: string) => {
+          created.push({ head, base, ...(headRepo ? { headRepo } : {}) });
           return { number: 7, url: 'https://github.com/acme/app/pull/7', title, head, base };
         },
       }) as never;
@@ -346,7 +371,7 @@ describe('Git tab: Create Pull Request uses the branch where it was pushed', { t
     const created = fakeGitHub(g);
     expect(await g.createPull()).toBeDefined();
     expect(created).toEqual([{ head: 'review', base: 'main' }]);
-    expect(git(origin, 'log', '-1', '--format=%s', 'review').trim()).toBe('Feature work');
+    expect(subject(origin, 'review')).toBe('Feature work');
     expect(heads(origin)).toEqual(['review']);
   });
 
@@ -362,26 +387,87 @@ describe('Git tab: Create Pull Request uses the branch where it was pushed', { t
     expect(heads(origin)).toEqual(['review']);
   });
 
-  it("a separate pushRemote on another owner's fork: owner:branch", async () => {
+  it("origin fetches acme/app but pushes to dana/app-fork (pushurl): the head is dana's fork, not acme's branch", async () => {
+    const { repo, origin } = onGitHub();
+    const fork = bare('refyntra-fork-');
+    git(repo, 'config', 'remote.origin.pushurl', 'https://github.com/dana/app-fork.git');
+    // git ignores pushInsteadOf for an explicit pushurl; insteadOf applies to it.
+    git(repo, 'config', `url.${fork}.insteadOf`, 'https://github.com/dana/app-fork.git');
+    git(repo, 'config', 'push.default', 'upstream');
+    const g = provider();
+    await g.refresh();
+    const created = fakeGitHub(g, { 'dana/app-fork': 'acme/app' });
+    expect(await g.createPull(), g.lastError).toBeDefined();
+    expect(created).toEqual([{ head: 'dana:review', base: 'main', headRepo: 'app-fork' }]);
+    expect(subject(fork, 'review')).toBe('Feature work');
+    expect(subject(origin, 'review')).toBe('Initial');
+  });
+
+  it("a separate pushRemote on another owner's fork: owner:branch with that repository", async () => {
     const { repo, origin } = onGitHub();
     const fork = bare('refyntra-fork-');
     git(repo, 'remote', 'add', 'fork', 'https://github.com/dana/app.git');
-    git(repo, 'config', 'remote.fork.pushurl', fork);
+    pushesTo(repo, 'https://github.com/dana/app.git', fork);
     git(repo, 'config', 'branch.feature.pushRemote', 'fork');
     const g = provider();
     await g.refresh();
-    const created = fakeGitHub(g);
+    const created = fakeGitHub(g, { 'dana/app': 'acme/app' });
     expect(await g.createPull()).toBeDefined();
-    expect(created).toEqual([{ head: 'dana:feature', base: 'main' }]);
+    expect(created).toEqual([{ head: 'dana:feature', base: 'main', headRepo: 'app' }]);
     expect(heads(fork)).toEqual(['feature']);
-    expect(git(origin, 'log', '-1', '--format=%s', 'review').trim()).toBe('Initial');
+    expect(subject(origin, 'review')).toBe('Initial');
+  });
+
+  it("an unrelated repository of that owner, next to the owner's real fork, is refused before anything is pushed", async () => {
+    const { repo } = onGitHub();
+    const tools = bare('refyntra-tools-');
+    git(repo, 'remote', 'add', 'tools', 'https://github.com/dana/tools.git');
+    pushesTo(repo, 'https://github.com/dana/tools.git', tools);
+    git(repo, 'config', 'branch.feature.pushRemote', 'tools');
+    const g = provider();
+    await g.refresh();
+    // dana/app is a fork of acme/app with a branch named feature; dana/tools is not in that network.
+    const created = fakeGitHub(g, { 'dana/app': 'acme/app', 'dana/tools': 'dana/tools' });
+    expect(await g.createPull()).toBeUndefined();
+    expect(created).toEqual([]);
+    expect(g.lastError).toMatch(/dana\/tools is not a fork of acme\/app/);
+    expect(heads(tools)).toEqual([]);
+  });
+
+  it('a push URL that is not on GitHub is refused, though the fetch URL is; nothing is pushed', async () => {
+    const { repo, origin } = onGitHub();
+    const elsewhere = bare('refyntra-elsewhere-');
+    git(repo, 'config', 'remote.origin.pushurl', elsewhere);
+    git(repo, 'config', 'push.default', 'upstream');
+    const g = provider();
+    await g.refresh();
+    const created = fakeGitHub(g);
+    expect(await g.createPull()).toBeUndefined();
+    expect(created).toEqual([]);
+    expect(g.lastError).toContain('not a GitHub repository');
+    expect(heads(elsewhere)).toEqual([]);
+    expect(subject(origin, 'review')).toBe('Initial');
+  });
+
+  it('several push URLs are refused (which one would be the head?)', async () => {
+    const { repo, origin } = onGitHub();
+    git(repo, 'config', '--add', 'remote.origin.pushurl', 'https://github.com/acme/app.git');
+    git(repo, 'config', '--add', 'remote.origin.pushurl', 'https://github.com/dana/app.git');
+    git(repo, 'config', 'push.default', 'upstream');
+    const g = provider();
+    await g.refresh();
+    const created = fakeGitHub(g, { 'dana/app': 'acme/app' });
+    expect(await g.createPull()).toBeUndefined();
+    expect(created).toEqual([]);
+    expect(g.lastError).toContain('2 URLs');
+    expect(subject(origin, 'review')).toBe('Initial');
   });
 
   it('a pushRemote in another repository of the same owner is refused before anything is pushed', async () => {
     const { repo } = onGitHub();
     const mirror = bare('refyntra-mirror-');
     git(repo, 'remote', 'add', 'mirror', 'https://github.com/acme/other.git');
-    git(repo, 'config', 'remote.mirror.pushurl', mirror);
+    pushesTo(repo, 'https://github.com/acme/other.git', mirror);
     git(repo, 'config', 'branch.feature.pushRemote', 'mirror');
     const g = provider();
     await g.refresh();

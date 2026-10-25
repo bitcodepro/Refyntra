@@ -290,18 +290,45 @@ export function gitHubRepoOf(url: string): { owner: string; repo: string } | und
 }
 
 /**
- * The `head` of a GitHub pull request into `base` from `branch` of the repository `from` (the remote the branch was
- * pushed to): the branch name in the same repository, owner:branch from another owner's repository (a fork). Another
- * repository of the same owner, or a remote that is not on GitHub, is refused (the head would name the wrong branch).
+ * The `head` of a GitHub pull request into `base` from `branch` of the repository `from` (where the branch is): the
+ * branch name in the same repository; owner:branch with `headRepo` from another owner's repository, which `fork` names:
+ * the caller must first confirm through GitHub that it is in the fork network of `base` (an unrelated repository of that
+ * owner would name another repository's branch, or none). Another repository of the same owner, or a remote that is not
+ * on GitHub, is refused.
  */
-export function pullHead(base: { owner: string; repo: string }, from: { owner: string; repo: string } | undefined, branch: string, remote: string): { ok: true; head: string } | { ok: false; reason: string } {
+export function pullHead(
+  base: { owner: string; repo: string },
+  from: { owner: string; repo: string } | undefined,
+  branch: string,
+  remote: string,
+): { ok: true; head: string; headRepo?: string; fork?: { owner: string; repo: string } } | { ok: false; reason: string } {
   if (!from) return { ok: false, reason: `${branch} is on ${remote}, which is not a GitHub repository.` };
   const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
   if (same(from.owner, base.owner)) {
     if (same(from.repo, base.repo)) return { ok: true, head: branch };
     return { ok: false, reason: `${branch} is on ${from.owner}/${from.repo}, another repository of ${base.owner}; open this pull request on GitHub.` };
   }
-  return { ok: true, head: `${from.owner}:${branch}` };
+  return { ok: true, head: `${from.owner}:${branch}`, headRepo: from.repo, fork: from };
+}
+
+/**
+ * Where a push to a remote goes, from git's configuration: `configured` are the remote's push URLs as written
+ * (remote.<name>.pushurl, else remote.<name>.url), `effective` the URLs git pushes to after insteadOf / pushInsteadOf.
+ * Exactly one destination is required (several push URLs are refused: which one is the pull request's head?); its
+ * GitHub repository is the configured URL's, unless the rewritten URL names another GitHub repository (refused).
+ */
+export function pushDestination(remote: string, configured: string[], effective: string[]): { ok: true; url: string; github?: { owner: string; repo: string } } | { ok: false; reason: string } {
+  if (configured.length !== 1 || effective.length !== 1) {
+    return { ok: false, reason: configured.length || effective.length ? `${remote} pushes to ${Math.max(configured.length, effective.length)} URLs; push from a terminal.` : `${remote} has no URL to push to.` };
+  }
+  const github = gitHubRepoOf(configured[0]!);
+  const rewritten = gitHubRepoOf(effective[0]!);
+  if (github && rewritten && `${rewritten.owner}/${rewritten.repo}`.toLowerCase() !== `${github.owner}/${github.repo}`.toLowerCase()) {
+    return { ok: false, reason: `${remote} is configured as ${github.owner}/${github.repo} but git pushes to ${rewritten.owner}/${rewritten.repo} (url insteadOf); push from a terminal.` };
+  }
+  // A shorthand that only becomes a GitHub URL after insteadOf (gh:acme/app) names the rewritten repository.
+  const repo = github ?? rewritten;
+  return { ok: true, url: effective[0]!, ...(repo ? { github: repo } : {}) };
 }
 
 export type SearchMode = 'message' | 'code' | 'author';

@@ -21,6 +21,7 @@ import {
   parsePatch,
   parseStatus,
   pullHead,
+  pushDestination,
   type PushPlan,
   pushPlan,
   type SearchMode,
@@ -707,14 +708,36 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  /** Runs a planned push; for push.default "matching" only when the remote already has that branch (git never creates it). */
+  /**
+   * Runs a planned push; for push.default "matching" only when the push destination (its push URL, not the fetch URL)
+   * already has that branch: git never creates it.
+   */
   private async pushTo(repo: string, name: string, plan: Extract<PushPlan, { ok: true }>): Promise<boolean> {
     if (plan.existingOnly) {
-      const r = await runGit(['ls-remote', '--exit-code', '--heads', plan.remote, plan.target], repo);
-      if (r.code === 2) return this.refusePush(name, `push.default is "matching" and ${plan.remote} has no branch ${plan.target.replace(/^refs\/heads\//, '')}; git pushes only to branches that exist there. Publish it from a terminal.`);
+      const dest = await this.pushDestinationOf(repo, plan.remote);
+      if (!dest.ok) return this.refusePush(name, dest.reason);
+      const r = await runGit(['ls-remote', '--exit-code', '--heads', dest.url, plan.target], repo);
+      if (r.code === 2) return this.refusePush(name, `push.default is "matching" and ${plan.remote} has no branch ${plan.target.replace(/^refs\/heads\//, '')} where it pushes; git pushes only to branches that exist there. Publish it from a terminal.`);
       if (r.code !== 0) return this.refusePush(name, `${plan.remote} cannot be read: ${(r.stderr || r.stdout).trim().split('\n').slice(-1)[0] ?? `git exited with ${r.code}`}`);
     }
     return this.network(plan.label, plan.args);
+  }
+
+  /** Where a push to `remote` goes: its push URL as configured and as git rewrites it (see pushDestination). */
+  private async pushDestinationOf(repo: string, remote: string): Promise<ReturnType<typeof pushDestination>> {
+    const all = async (args: string[]) => {
+      const r = await runGit(args, repo);
+      return r.code === 0 ? r.stdout.split('\n').map((s) => s.trim()).filter(Boolean) : [];
+    };
+    const pushUrls = await all(['config', '--get-all', `remote.${remote}.pushurl`]);
+    const configured = pushUrls.length ? pushUrls : await all(['config', '--get-all', `remote.${remote}.url`]);
+    return pushDestination(remote, configured, await all(['remote', 'get-url', '--push', '--all', remote]));
+  }
+
+  /** The GitHub repository a remote fetches from (its first URL, as configured or rewritten by insteadOf). */
+  private async fetchRepositoryOf(repo: string, remote: string): Promise<{ owner: string; repo: string } | undefined> {
+    const configured = (await runGit(['config', '--get-all', `remote.${remote}.url`], repo)).stdout.split('\n')[0] ?? '';
+    return gitHubRepoOf(configured) ?? gitHubRepoOf((await runGit(['remote', 'get-url', remote], repo)).stdout);
   }
 
   private refusePush(name: string, reason: string): false {
@@ -856,12 +879,17 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
       void vscode.window.showInformationMessage("Refyntra: the repository's origin is not on GitHub.");
       return undefined;
     }
-    if (this.hooks.github) return this.hooks.github(gh.owner, gh.repo);
+    return this.clientFor(gh.owner, gh.repo);
+  }
+
+  /** A GitHub client for any repository (the origin's, or a fork a pull request comes from). */
+  private async clientFor(owner: string, repo: string): Promise<GitHubClient> {
+    if (this.hooks.github) return this.hooks.github(owner, repo);
     // Tests: a fake GitHub (its fetch) without signing in.
-    if (this.hooks.fetch) return new GitHubClient(gh.owner, gh.repo, 'test-token', this.hooks.fetch);
+    if (this.hooks.fetch) return new GitHubClient(owner, repo, 'test-token', this.hooks.fetch);
     const session = await vscode.authentication.getSession('github', ['repo'], { createIfNone: true });
     const f: FetchLike = this.hooks.fetch ?? ((url, init) => fetch(url, init));
-    return new GitHubClient(gh.owner, gh.repo, session.accessToken, f);
+    return new GitHubClient(owner, repo, session.accessToken, f);
   }
 
   async loadPulls(): Promise<PullRequest[]> {
@@ -885,13 +913,20 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
     const head = this.current.head;
     const github = this.current.github;
     if (!head || head === 'HEAD') return undefined;
-    // The pull request's head is where the branch is on GitHub: where the push sends it, or its upstream when nothing is
-    // to push (a differently named remote branch, another remote). Resolved and checked before anything is pushed.
+    // The pull request's head is where the branch is on GitHub: the push destination (its push URL, not the fetch URL)
+    // when the branch is pushed first, else its upstream (a differently named remote branch, another remote). Resolved
+    // and checked, a fork through GitHub, before anything is pushed.
+    const refuse = (reason: string): undefined => {
+      this.lastError = reason;
+      void vscode.window.showErrorMessage(`Refyntra: the pull request was not created: ${reason}`);
+      return undefined;
+    };
     const b = this.current.branches.find((x) => x.name === head);
     const needsPush = !b?.upstream || b.ahead > 0;
     let plan: Extract<PushPlan, { ok: true }> | undefined;
     let remote: string;
     let ref: string;
+    let from: { owner: string; repo: string } | undefined;
     if (needsPush) {
       const p = await this.pushTarget(repo, head);
       if (!p.ok) {
@@ -900,24 +935,35 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
       }
       plan = p;
       ({ remote, target: ref } = p);
+      const dest = await this.pushDestinationOf(repo, remote);
+      if (!dest.ok) return refuse(dest.reason);
+      from = dest.github;
     } else {
       const get = async (key: string) => (await runGit(['config', '--get', key], repo)).stdout.trim();
       [remote, ref] = await Promise.all([get(`branch.${head}.remote`), get(`branch.${head}.merge`)]);
+      from = remote ? await this.fetchRepositoryOf(repo, remote) : undefined;
     }
-    let prHead: string | undefined;
-    if (github) {
-      const from = remote ? gitHubRepoOf((await runGit(['remote', 'get-url', remote], repo)).stdout) : undefined;
-      const where = pullHead(github, from, ref.replace(/^refs\/heads\//, '') || head, remote || 'no remote');
-      if (!where.ok) {
-        this.lastError = where.reason;
-        void vscode.window.showErrorMessage(`Refyntra: the pull request was not created: ${where.reason}`);
-        return undefined;
-      }
-      prHead = where.head;
+    if (!github) {
+      await this.client(); // explains that the origin is not on GitHub; nothing is pushed
+      return undefined;
     }
-    // Without a GitHub origin the client explains that and nothing is pushed.
+    const where = pullHead(github, from, ref.replace(/^refs\/heads\//, '') || head, remote || 'no remote');
+    if (!where.ok) return refuse(where.reason);
     const c = await this.client();
-    if (!c || !prHead) return undefined;
+    if (!c) return undefined;
+    if (where.fork) {
+      // owner:branch names that owner's repository in the target's fork network: an unrelated repository of the same
+      // owner would make GitHub use another repository's branch, or none.
+      try {
+        const [target, source] = await Promise.all([c.repository(), (await this.clientFor(where.fork.owner, where.fork.repo)).repository()]);
+        if (target.network.toLowerCase() !== source.network.toLowerCase()) {
+          return refuse(`${source.fullName} is not a fork of ${target.fullName} (or of its network); GitHub cannot open a pull request from it.`);
+        }
+      } catch (e) {
+        return refuse(`${where.fork.owner}/${where.fork.repo} cannot be checked on GitHub: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    const prHead = where.head;
     if (plan && !(await this.pushTo(repo, head, plan))) return undefined;
     let base: string;
     try {
@@ -932,7 +978,7 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
     if (!title) return undefined;
     const body = (await this.input({ title: 'Refyntra: Create Pull Request', prompt: 'Description (optional)', value: '' })) ?? '';
     try {
-      const pr = await c.createPull(prHead, baseAnswer, title, body);
+      const pr = await c.createPull(prHead, baseAnswer, title, body, false, where.headRepo);
       void vscode.window.showInformationMessage(`Refyntra: pull request #${pr.number} created.`, 'Open').then((a) => {
         if (a) void vscode.env.openExternal(vscode.Uri.parse(pr.url));
       });
