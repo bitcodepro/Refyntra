@@ -101,20 +101,20 @@ export interface GitViewModel {
 }
 
 /** The repositories of the workspace folders: each folder's own and those up to three levels below. */
-export function findRepos(folders: readonly string[]): string[] {
+async function findRepos(folders: readonly string[]): Promise<string[]> {
   const out = new Set<string>();
-  const walk = (dir: string, depth: number) => {
+  const walk = async (dir: string, depth: number): Promise<void> => {
     let entries: fs.Dirent[];
     try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
+      entries = await fs.promises.readdir(dir, { withFileTypes: true });
     } catch {
       return;
     }
     if (entries.some((e) => e.name === '.git')) out.add(path.normalize(dir));
     if (depth === 0) return;
-    for (const e of entries) if (e.isDirectory() && !/^(node_modules|bin|obj|\.git|\.vs|\.vscode-test|dist|out)$/.test(e.name)) walk(path.join(dir, e.name), depth - 1);
+    for (const e of entries) if (e.isDirectory() && !/^(node_modules|bin|obj|\.git|\.vs|\.vscode-test|dist|out)$/.test(e.name)) await walk(path.join(dir, e.name), depth - 1);
   };
-  for (const f of folders) walk(f, 3);
+  for (const f of folders) await walk(f, 3);
   return [...out].sort();
 }
 
@@ -168,11 +168,15 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
     return this.repo;
   }
 
+  isVisible(): boolean {
+    return this.sideView?.visible === true || this.editorPanel?.visible === true;
+  }
+
   resolveWebviewView(view: vscode.WebviewView): void {
     this.sideView = view;
     this.attach(view.webview, false);
     view.onDidChangeVisibility(() => {
-      if (view.visible) void this.refresh();
+      if (view.visible) void (this.refreshing ?? this.refresh());
     });
     const webview = view.webview;
     view.onDidDispose(() => {
@@ -200,9 +204,13 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
     webview.options = { enableScripts: true };
     webview.html = sidebarHtml(webview, wide);
     this.watchdogs.set(webview, watchWebview(webview, 'Git'));
-    webview.onDidReceiveMessage((m: { type: string; [k: string]: unknown }) => void this.onMessage(m));
     this.webviews.add(webview);
-    void this.refresh();
+    const initial = this.refreshing ?? this.refresh();
+    webview.onDidReceiveMessage((m: { type: string; [k: string]: unknown }) => {
+      // The page can become ready after the first model was posted.
+      if (m.type === 'ready') void initial.then(() => this.post());
+      else void this.onMessage(m);
+    });
   }
 
   /** The client in a tab of the editor area (the whole width: two columns). */
@@ -217,6 +225,9 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
     // remembered and the next Open in Editor reveal a disposed panel).
     const webview = panel.webview;
     this.attach(webview, true);
+    panel.onDidChangeViewState(({ webviewPanel }) => {
+      if (webviewPanel.visible) void (this.refreshing ?? this.refresh());
+    });
     panel.onDidDispose(() => {
       this.detach(webview);
       if (this.editorPanel === panel) this.editorPanel = undefined;
@@ -280,7 +291,7 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
   private async read(): Promise<GitViewModel> {
     const empty = { changes: [], branches: [], remoteBranches: [], rows: [] };
     if (!this.isTrusted()) return { repos: [], ...empty, error: 'Trust the workspace to use Git here (a repository configuration can run programs).' };
-    const repos = findRepos((vscode.workspace.workspaceFolders ?? []).filter((f) => f.uri.scheme === 'file').map((f) => f.uri.fsPath));
+    const repos = await findRepos((vscode.workspace.workspaceFolders ?? []).filter((f) => f.uri.scheme === 'file').map((f) => f.uri.fsPath));
     if (repos.length === 0) return { repos, ...empty, error: 'No git repository in this workspace.' };
     const saved = this.state.get<string>('refyntra.git.repo');
     const repo = [this.repo, saved].find((r) => r && repos.includes(r)) ?? repos[0]!;
@@ -789,14 +800,18 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
     return results;
   }
 
-  readonly log = vscode.window.createOutputChannel('Refyntra Git');
+  private output: vscode.OutputChannel | undefined;
+
+  get log(): vscode.OutputChannel {
+    return (this.output ??= vscode.window.createOutputChannel('Refyntra Git'));
+  }
 
   private autoTimer: NodeJS.Timeout | undefined;
 
   /** Fetches every repository in the background every refyntra.git.autoFetch minutes (0: off); never pulls by itself. */
   startAutoFetch(): void {
     if (this.autoTimer) clearInterval(this.autoTimer);
-    const minutes = vscode.workspace.getConfiguration('refyntra').get<number>('git.autoFetch', 5);
+    const minutes = vscode.workspace.getConfiguration('refyntra').get<number>('git.autoFetch', 0);
     if (!minutes || minutes <= 0) return;
     this.autoTimer = setInterval(() => {
       if (!this.isTrusted() || this.busy || !vscode.window.state.focused) return;
@@ -806,7 +821,7 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
 
   dispose(): void {
     if (this.autoTimer) clearInterval(this.autoTimer);
-    this.log.dispose();
+    this.output?.dispose();
   }
 
   // ---- search
@@ -1060,7 +1075,6 @@ export class GitViewProvider implements vscode.WebviewViewProvider {
     const str = (k: string) => (typeof m[k] === 'string' ? (m[k] as string) : undefined);
     const paths = Array.isArray(m.paths) ? (m.paths as unknown[]).filter((p): p is string => typeof p === 'string') : [];
     switch (m.type) {
-      case 'ready':
       case 'refresh':
         await this.refresh();
         break;
@@ -1717,8 +1731,11 @@ export function registerGitView(context: vscode.ExtensionContext, isTrusted: () 
   const provider = new GitViewProvider(isTrusted, context.workspaceState);
   let timer: NodeJS.Timeout | undefined;
   const later = () => {
+    if (!provider.isVisible()) return;
     if (timer) clearTimeout(timer);
-    timer = setTimeout(() => void provider.refresh(), 400);
+    timer = setTimeout(() => {
+      if (provider.isVisible()) void provider.refresh();
+    }, 400);
   };
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(GIT_VIEW, provider, { webviewOptions: { retainContextWhenHidden: true } }),
@@ -1726,6 +1743,7 @@ export function registerGitView(context: vscode.ExtensionContext, isTrusted: () 
     vscode.workspace.onDidCreateFiles(later),
     vscode.workspace.onDidDeleteFiles(later),
     vscode.workspace.onDidRenameFiles(later),
+    vscode.workspace.onDidChangeWorkspaceFolders(later),
     vscode.window.onDidChangeWindowState((s) => {
       if (s.focused) later();
     }),
@@ -1742,6 +1760,7 @@ export function registerGitView(context: vscode.ExtensionContext, isTrusted: () 
       if (e.affectsConfiguration('refyntra.git.autoFetch')) provider.startAutoFetch();
     }),
     provider,
+    { dispose: () => clearTimeout(timer) },
     vscode.commands.registerCommand('refyntra.git.fetch', () => provider.fetch()),
     vscode.commands.registerCommand('refyntra.git.pull', () => provider.pull()),
     vscode.commands.registerCommand('refyntra.git.push', () => provider.push()),

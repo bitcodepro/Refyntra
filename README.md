@@ -56,6 +56,9 @@ Full documentation: **[docs/guide.md](docs/guide.md)**.
 
 **Refyntra: Get Started** shows the same as a walkthrough.
 
+To turn off Refyntra Git, set `refyntra.git.enabled` to `false` and reload the VS Code window. Background Git fetches
+are off by default. Set `refyntra.git.autoFetch` to an interval in minutes to enable them.
+
 ## Development
 
 `pnpm test:unit`, `pnpm test:architecture`, `pnpm test:host`; extension tests in Docker with

@@ -16,6 +16,7 @@ const EXCLUDE = '**/{node_modules,bin,obj,.git,.vs,.vscode-test}/**';
  */
 export class SolutionService implements WorkspaceTargetProvider {
   private readonly changed = new vscode.EventEmitter<void>();
+  private candidateSearch: Promise<vscode.Uri[]> | undefined;
   readonly onDidChange = this.changed.event;
 
   constructor(
@@ -44,7 +45,13 @@ export class SolutionService implements WorkspaceTargetProvider {
     return file;
   }
 
-  async candidates(): Promise<vscode.Uri[]> {
+  candidates(): Promise<vscode.Uri[]> {
+    // Activation and the C# host can ask for candidates at the same time.
+    this.candidateSearch ??= this.findCandidates().finally(() => (this.candidateSearch = undefined));
+    return this.candidateSearch;
+  }
+
+  private async findCandidates(): Promise<vscode.Uri[]> {
     if (!vscode.workspace.workspaceFolders?.length) return [];
     const solutions = await vscode.workspace.findFiles('**/*.{sln,slnx}', EXCLUDE, 200);
     const found = solutions.length > 0 ? solutions : await vscode.workspace.findFiles('**/*.csproj', EXCLUDE, 200);
