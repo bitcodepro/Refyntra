@@ -1824,8 +1824,20 @@ scenarios['git-client'] = [
         git(root, 'remote', 'add', 'origin', remote);
         git(root, 'add', '-A');
         git(root, 'commit', '-q', '-m', 'Initial import');
+        const notesPath = nodePath.join(root, 'git-client-notes.txt');
+        const notes = await vscode.workspace.openTextDocument(vscode.Uri.file(notesPath).with({ scheme: 'untitled' }));
+        await vscode.window.showTextDocument(notes);
+        const edit = new vscode.WorkspaceEdit();
+        edit.insert(notes.uri, new vscode.Position(0, 0), 'Notes\n');
+        assert.ok(await vscode.workspace.applyEdit(edit));
+        assert.ok(await notes.save());
+        // The old save handler scheduled a full refresh after 400 ms, even if Git was never opened.
+        await new Promise((resolve) => setTimeout(resolve, 700));
+        assert.deepEqual(g.model().repos, []);
+        await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+        fs.unlinkSync(notesPath);
         await vscode.commands.executeCommand('refyntra.git.open');
-        let m = await g.refresh();
+        let m = await waitFor(() => g.model().head && g.model(), 'Git to refresh when opened');
         assert.equal(m.head, 'main');
         assert.equal(m.branches[0].upstream, undefined, 'not published yet');
         // Publish: push -u origin main.
@@ -2130,9 +2142,28 @@ scenarios['visual-ef-light'] = visualOnly(require('./visualEf.cjs').cases({ api,
 scenarios['visual-solution-dark'] = visualOnly(require('./visualSolution.cjs').cases({ api, csharp, waitFor }));
 scenarios['visual-solution-light'] = visualOnly(require('./visualSolution.cjs').cases({ api, csharp, waitFor }));
 
+scenarios['startup-git-disabled'] = [
+  [
+    'Idle until a supported editor opens, with Git disabled even when auto-fetch is set',
+    async () => {
+      const ext = vscode.extensions.getExtension('refyntra.refyntra');
+      assert.ok(ext);
+      await vscode.window.showTextDocument(await vscode.workspace.openTextDocument({ language: 'plaintext', content: 'Notes' }));
+      assert.equal(ext.isActive, false, 'opening a plain text document does not activate Refyntra');
+      await vscode.window.showTextDocument(await vscode.workspace.openTextDocument({ language: 'typescript', content: 'export const number = 1;' }));
+      const a = await waitFor(() => ext.isActive && ext.exports, 'activation from a TypeScript editor');
+      assert.equal(a.git, undefined);
+      assert.equal(a.gitView, undefined);
+      assert.equal(a.hostSpawnCount(), 0);
+      await assert.rejects(() => vscode.commands.executeCommand('refyntra.git.open'), /not found/);
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    },
+  ],
+];
+
 exports.run =async function run() {
   const name = process.env.REFYNTRA_TEST_SCENARIO;
-  const cases = [...common, ...(scenarios[name] || [])];
+  const cases = [...(name === 'startup-git-disabled' ? [] : common), ...(scenarios[name] || [])];
   if (!scenarios[name]) throw new Error(`Unknown scenario ${name}`);
   const failures = [];
   for (const [title, fn] of cases) {

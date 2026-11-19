@@ -455,7 +455,7 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
     const solutions: { name: string; projects: string[] }[] = [];
     for (const u of await vscode.workspace.findFiles('**/*.{sln,slnx}', EXCLUDE, 50)) {
       try {
-        solutions.push({ name: path.basename(u.fsPath), projects: solutionProjectPaths(u.fsPath, fs.readFileSync(u.fsPath, 'utf8')) });
+        solutions.push({ name: path.basename(u.fsPath), projects: solutionProjectPaths(u.fsPath, await fs.promises.readFile(u.fsPath, 'utf8')) });
       } catch {
         // An unreadable solution file groups nothing.
       }
@@ -488,8 +488,12 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
       // Node: package.json scripts.
       for (const uri of await vscode.workspace.findFiles('**/package.json', EXCLUDE, 50)) {
         try {
-          const pkg = JSON.parse(fs.readFileSync(uri.fsPath, 'utf8')) as { name?: string; scripts?: Record<string, unknown>; packageManager?: string };
-          out.push(...nodeTargets(uri.fsPath, pkg, fs.readdirSync(path.dirname(uri.fsPath))));
+          const [text, entries] = await Promise.all([
+            fs.promises.readFile(uri.fsPath, 'utf8'),
+            fs.promises.readdir(path.dirname(uri.fsPath)),
+          ]);
+          const pkg = JSON.parse(text) as { name?: string; scripts?: Record<string, unknown>; packageManager?: string };
+          out.push(...nodeTargets(uri.fsPath, pkg, entries));
         } catch {
           // Unreadable package.json: no targets from it.
         }
@@ -497,7 +501,7 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
       // Python: entry files (if __name__ == "__main__") named like entry points.
       for (const uri of await vscode.workspace.findFiles('**/{main.py,app.py,__main__.py,manage.py,run.py}', EXCLUDE, 30)) {
         try {
-          const text = fs.readFileSync(uri.fsPath, 'utf8');
+          const text = await fs.promises.readFile(uri.fsPath, 'utf8');
           if (isPythonEntry(text) || /manage\.py$/.test(uri.fsPath)) out.push(pythonTarget(uri.fsPath, vscode.workspace.getWorkspaceFolder(uri)?.uri.fsPath ?? path.dirname(uri.fsPath)));
         } catch {
           // Ignore.
@@ -506,7 +510,8 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
       // Rust: Cargo binaries.
       for (const uri of await vscode.workspace.findFiles('**/Cargo.toml', EXCLUDE, 30)) {
         try {
-          out.push(...rustTargets(uri.fsPath, fs.readFileSync(uri.fsPath, 'utf8'), exists(path.join(path.dirname(uri.fsPath), 'src', 'main.rs'))));
+          const text = await fs.promises.readFile(uri.fsPath, 'utf8');
+          out.push(...rustTargets(uri.fsPath, text, exists(path.join(path.dirname(uri.fsPath), 'src', 'main.rs'))));
         } catch {
           // Ignore.
         }
@@ -624,7 +629,6 @@ export class RunService implements vscode.TreeDataProvider<TreeNode>, vscode.Cod
     const any = this.targetsCache.some((t) => t.runnable);
     void vscode.commands.executeCommand('setContext', 'refyntra.run.available', any);
     void vscode.commands.executeCommand('setContext', 'refyntra.run.running', this.sessions.size > 0);
-    void vscode.commands.executeCommand('setContext', 'refyntra.run.viewVisible', vscode.workspace.getConfiguration('refyntra').get<boolean>('run.view', true));
     this.status.text = statusText(target, choice);
     this.status.accessibilityInformation = { label: target ? `Refyntra run target: ${target.label}, ${target.kindLabel}${choice.profile ? `, profile ${choice.profile}` : ''}. Choose another` : 'Refyntra: choose what to run' };
     if (any && vscode.workspace.getConfiguration('refyntra').get<boolean>('run.statusBar', true)) this.status.show();

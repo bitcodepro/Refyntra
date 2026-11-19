@@ -59,7 +59,19 @@
   ],
   "main": "./dist/extension.js",
   "activationEvents": [
-    "onStartupFinished",
+    "onLanguage:csharp",
+    "onLanguage:aspnetcorerazor",
+    "onLanguage:razor",
+    "onLanguage:typescript",
+    "onLanguage:typescriptreact",
+    "onLanguage:javascript",
+    "onLanguage:javascriptreact",
+    "onLanguage:python",
+    "onLanguage:rust",
+    "onLanguage:css",
+    "onLanguage:scss",
+    "onLanguage:less",
+    "onLanguage:html",
     "workspaceContains:**/*.{sln,slnx,csproj}",
     "onDebugResolve:refyntra-dotnet",
     "onDebugResolve:refyntra-python",
@@ -1184,6 +1196,54 @@
     "menus": {
       "commandPalette": [
         {
+          "command": "refyntra.git.open",
+          "when": "config.refyntra.git.enabled"
+        },
+        {
+          "command": "refyntra.git.refresh",
+          "when": "config.refyntra.git.enabled"
+        },
+        {
+          "command": "refyntra.git.fetch",
+          "when": "config.refyntra.git.enabled"
+        },
+        {
+          "command": "refyntra.git.pull",
+          "when": "config.refyntra.git.enabled"
+        },
+        {
+          "command": "refyntra.git.push",
+          "when": "config.refyntra.git.enabled"
+        },
+        {
+          "command": "refyntra.git.checkout",
+          "when": "config.refyntra.git.enabled"
+        },
+        {
+          "command": "refyntra.git.newBranch",
+          "when": "config.refyntra.git.enabled"
+        },
+        {
+          "command": "refyntra.git.createPullRequest",
+          "when": "config.refyntra.git.enabled"
+        },
+        {
+          "command": "refyntra.git.openInEditor",
+          "when": "config.refyntra.git.enabled"
+        },
+        {
+          "command": "refyntra.git.fetchAll",
+          "when": "config.refyntra.git.enabled"
+        },
+        {
+          "command": "refyntra.git.pullAll",
+          "when": "config.refyntra.git.enabled"
+        },
+        {
+          "command": "refyntra.git.history",
+          "when": "config.refyntra.git.enabled"
+        },
+        {
           "command": "refyntra.git.rangeHistory",
           "when": "false"
         },
@@ -2163,7 +2223,7 @@
         },
         {
           "command": "refyntra.git.history",
-          "when": "!explorerResourceIsFolder && resourceScheme == file",
+          "when": "config.refyntra.git.enabled && !explorerResourceIsFolder && resourceScheme == file",
           "group": "7_refyntra@1"
         },
         {
@@ -2185,7 +2245,7 @@
       "editor/context": [
         {
           "command": "refyntra.git.history",
-          "when": "editorHasSelection && resourceScheme == file && isWorkspaceTrusted",
+          "when": "config.refyntra.git.enabled && editorHasSelection && resourceScheme == file && isWorkspaceTrusted",
           "group": "1_modification@9"
         },
         {
@@ -2216,7 +2276,7 @@
         },
         {
           "command": "refyntra.git.history",
-          "when": "resourceScheme == file",
+          "when": "config.refyntra.git.enabled && resourceScheme == file",
           "group": "1_navigate@8"
         },
         {
@@ -2341,7 +2401,8 @@
           "type": "webview",
           "id": "refyntra.gitView",
           "name": "Refyntra Git",
-          "contextualTitle": "Refyntra"
+          "contextualTitle": "Refyntra",
+          "when": "config.refyntra.git.enabled"
         }
       ],
       "refyntraRun": [
@@ -2349,7 +2410,7 @@
           "id": "refyntra.runView",
           "name": "Refyntra Run",
           "contextualTitle": "Refyntra",
-          "when": "refyntra.run.viewVisible"
+          "when": "config.refyntra.run.view"
         }
       ],
       "refyntra": [
@@ -2873,9 +2934,15 @@
           "default": "launchSettings",
           "markdownDescription": "Open the browser when a web project (ASP.NET Core, Blazor) starts from Run or Debug: at its `launchUrl` once the app prints *Now listening on*, or once its port answers (apps with their own logging)."
         },
+        "refyntra.git.enabled": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "markdownDescription": "Enable the Refyntra Git client, Git history and Git authorship CodeLens. Reload the VS Code window after changing this setting."
+        },
         "refyntra.git.autoFetch": {
           "type": "number",
-          "default": 5,
+          "default": 0,
           "minimum": 0,
           "markdownDescription": "Minutes between background fetches of every repository of the workspace (the Git tab then shows incoming commits, ↓N, and a badge). `0` turns it off. Never pulls by itself."
         },

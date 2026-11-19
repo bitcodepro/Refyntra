@@ -491,6 +491,7 @@ const scenarios = visual
       { name: 'restricted', workspace: path.join(here, 'workspaces', 'tiny'), trusted: false, env: { REFYNTRA_TEST_FORCE_RESTRICTED: '1' } },
       // Trusted, but the folder has no solution/project → NotStarted with a reason.
       { name: 'no-solution', workspace: path.join(here, 'workspaces', 'empty'), trusted: true, env: { REFYNTRA_HOST_PATH: '' } },
+      { name: 'startup-git-disabled', workspace: path.join(here, 'workspaces', 'empty'), trusted: true, settings: { 'refyntra.git.enabled': false, 'refyntra.git.autoFetch': 1 } },
       // Trusted, solution present, injected host path does not exist → Failed/HostNotFound, no spawn.
       { name: 'no-host', workspace: path.join(here, 'workspaces', 'tiny'), trusted: true, env: { REFYNTRA_HOST_PATH: path.join(cachePath, 'missing', 'Refyntra.Host.dll') } },
       // TS/JS provider absent for a document: a .ts file (routed to the TS/JS route by its extension) whose language

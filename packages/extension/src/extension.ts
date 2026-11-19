@@ -57,8 +57,8 @@ import { type ImmediateViewProvider, registerImmediate } from './immediate';
 import { type DebugExtras, registerDebugExtras } from './debugExtras';
 import { type CSharpEvaluatableExpressionProvider, type CSharpInlineValuesProvider, registerInlineValues } from './inlineValues';
 import { type RefyntraCodeLensProvider, registerCodeLens } from './codeLens';
-import { type GitApi, registerGit } from './git';
-import { type GitViewProvider, registerGitView } from './gitView';
+import type { GitApi } from './git';
+import type { GitViewProvider } from './gitView';
 import { registerHierarchy } from './hierarchy';
 import { registerMediatRHover } from './hover';
 import { ChangeSignatureDialog } from './changeSignaturePanel';
@@ -147,8 +147,8 @@ export interface RefyntraTestApi {
   webFrameworks: { status(): ReturnType<import('@refyntra/web-frameworks').WebFrameworkService['status']>; launches(): { command: string; args: string[] }[] };
   /** CodeLens provider (e2e resolves lenses and reads scan times). */
   codeLens: RefyntraCodeLensProvider;
-  git: GitApi;
-  gitView: GitViewProvider;
+  git?: GitApi;
+  gitView?: GitViewProvider;
   /** The open Change Signature dialog (e2e drives it through the same message path as the page). */
   changeSignatureDialog(): ChangeSignatureDialog | undefined;
   /** Status bar state: loading / ready / problem / idle. */
@@ -205,6 +205,7 @@ async function offerKeyboardPreset(context: vscode.ExtensionContext): Promise<vo
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<RefyntraTestApi> {
+  const gitEnabled = vscode.workspace.getConfiguration('refyntra').get<boolean>('git.enabled', true);
   const output = vscode.window.createOutputChannel('Refyntra');
   context.subscriptions.push(output);
   void offerKeyboardPreset(context);
@@ -401,8 +402,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
   // Task context: named lists of symbols, files and pinned relations, stored locally in workspaceState (taskContext.ts).
   const taskContext = registerTaskContext(engine, context.workspaceState, related);
   const codeLens = registerCodeLens(engine);
-  const git = registerGit(context, isTrusted);
-  const gitView = registerGitView(context, isTrusted);
   context.subscriptions.push(codeLens.disposable);
   // Find Usages grouped (protocol 1.12) and Navigate To (Alt+`).
   const usages = registerUsages(engine, context.workspaceState);
@@ -508,7 +507,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
       if (await solutions.pick()) await engine.inputsChanged('solution selected');
     }),
     vscode.commands.registerCommand('refyntra.showMenu', async () => {
-      const pick = await vscode.window.showQuickPick(MAIN_MENU.map((m) => ({ ...m })), { title: 'Refyntra', placeHolder: 'Choose a Refyntra command' });
+      const items = MAIN_MENU.filter((m) => gitEnabled || !m.command.startsWith('refyntra.git.'));
+      const pick = await vscode.window.showQuickPick(items.map((m) => ({ ...m })), { title: 'Refyntra', placeHolder: 'Choose a Refyntra command' });
       if (pick) await vscode.commands.executeCommand(pick.command);
     }),
     vscode.commands.registerCommand('refyntra.getStarted', () => vscode.commands.executeCommand('workbench.action.openWalkthrough', WALKTHROUGH_ID, false)),
@@ -522,9 +522,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
   );
 
   // Status bar only where Refyntra has something to say (a C# workspace).
-  void solutions.candidates().then((c) => statusBar.setVisible(c.length > 0 || vscode.workspace.textDocuments.some((d) => d.languageId === 'csharp')));
+  if (vscode.workspace.textDocuments.some((d) => d.languageId === 'csharp')) statusBar.setVisible(true);
+  else void solutions.candidates().then((c) => statusBar.setVisible(c.length > 0 || vscode.workspace.textDocuments.some((d) => d.languageId === 'csharp')));
   // Start in the background: never block activation on the host.
   void engine.start();
+
+  let git: GitApi | undefined;
+  let gitView: GitViewProvider | undefined;
+  if (gitEnabled) {
+    const [{ registerGit }, { registerGitView }] = await Promise.all([import('./git.js'), import('./gitView.js')]);
+    git = registerGit(context, isTrusted);
+    gitView = registerGitView(context, isTrusted);
+  }
 
   return {
     engine,
@@ -555,8 +564,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Refynt
     impact: impact.view,
     webFrameworks: { status: () => web.service.status(), launches: () => web.launches.map((l) => ({ command: l.command, args: [...l.args] })) },
     codeLens: codeLens.provider,
-    git,
-    gitView,
+    ...(git && gitView ? { git, gitView } : {}),
     changeSignatureDialog: () => ChangeSignatureDialog.current,
     statusKind: () => statusBar.kind(),
     run: run.service,
